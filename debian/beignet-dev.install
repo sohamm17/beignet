@@ -1,0 +1,3 @@
+libcl.so		/usr/lib
+backend/libgbe.so	/usr/lib
+include/CL/cl_intel.h	/usr/include/CL

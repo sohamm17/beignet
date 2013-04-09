@@ -1,0 +1,30 @@
+Source: beignet
+Priority: extra
+Maintainer: Simon Richter <sjr@debian.org>
+Build-Depends: debhelper (>= 9.0.0), pkg-config, ocl-icd-dev, opencl-headers, libdrm-dev, libxfixes-dev, libxext-dev, llvm-dev (>= 1:3.0)
+Standards-Version: 3.9.3
+Section: libs
+Homepage: http://cgit.freedesktop.org/beignet/
+
+Package: beignet-dev
+Section: libdevel
+Architecture: linux-any
+Depends: beignet0.0.1 (= ${binary:Version}), ${misc:Depends}
+Description: Intel OpenCL library
+ OpenCL (Open Computing Language) is a multivendor open standard for
+ general-purpose parallel programming of heterogeneous systems that include
+ CPUs, GPUs and other processors.
+ .
+ This package contains the development files for directly linking against
+ the Intel implementation.
+
+Package: beignet0.0.1
+Section: libs
+Architecture: linux-any
+Depends: ${shlibs:Depends}, ${misc:Depends}, clang
+Description: Intel OpenCL library
+ OpenCL (Open Computing Language) is a multivendor open standard for
+ general-purpose parallel programming of heterogeneous systems that include
+ CPUs, GPUs and other processors.
+ .
+ This package contains the shared library for the Intel implementation.

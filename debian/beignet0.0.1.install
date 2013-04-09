@@ -1,0 +1,2 @@
+libcl.so.*		/usr/lib
+backend/libgbe.so.*	/usr/lib

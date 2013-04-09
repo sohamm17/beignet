@@ -1,0 +1,30 @@
+Description: Fix SONAMEs
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-01
+
+Index: beignet-0.0.0+git2013.04.01+d1b234c/Makefile.lib
+===================================================================
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/Makefile.lib	2013-03-31 04:38:20.000000000 +0200
++++ beignet-0.0.0+git2013.04.01+d1b234c/Makefile.lib	2013-03-31 04:39:45.666886644 +0200
+@@ -7,7 +7,7 @@
+ all: $(LIB) $(LIBMAJOR) $(LIBBASE)
+ 
+ $(LIB): $(OBJ) $(LIB_BACKEND)
+-	$(CXX) $(CXXFLAGS) -shared -o $@ $(OBJ) $(LIBS)
++	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
+ 
+ $(LIBMAJOR): $(LIB)
+ 	rm -f $@
+Index: beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.lib
+===================================================================
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile.lib	2013-03-31 04:42:47.946878517 +0200
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.lib	2013-03-31 04:42:58.946878027 +0200
+@@ -9,7 +9,7 @@
+ all: $(LIB) $(LIBMAJOR) $(LIBBASE)
+ 
+ $(LIB): $(OBJ)
+-	$(CXX) $(CXXFLAGS) -shared -o $@ $(OBJ) $(LIBS)
++	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
+ 
+ $(LIBMAJOR): $(LIB)
+ 	rm -f $@

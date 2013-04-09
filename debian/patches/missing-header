@@ -1,0 +1,14 @@
+Description: Fix missing include
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-03
+
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/src/sys/alloc.hpp
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/src/sys/alloc.hpp
+@@ -27,6 +27,7 @@
+ #include "sys/platform.hpp"
+ #include "sys/assert.hpp"
+ #include <algorithm>
++#include <limits>
+ 
+ namespace gbe
+ {

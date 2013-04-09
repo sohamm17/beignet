@@ -1,0 +1,18 @@
+Description: Use clang from PATH
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-02
+
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/src/backend/program.cpp
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/src/backend/program.cpp
+@@ -116,9 +116,9 @@ namespace gbe {
+ 
+     // Now compile the code to llvm using clang
+ #if LLVM_VERSION_MINOR <= 1
+-    std::string compileCmd = LLVM_PREFIX "/bin/clang -x cl -fno-color-diagnostics -emit-llvm -O3 -ccc-host-triple ptx32 -c ";
++    std::string compileCmd = "clang -x cl -fno-color-diagnostics -emit-llvm -O3 -ccc-host-triple ptx32 -c ";
+ #else
+-    std::string compileCmd = LLVM_PREFIX "/bin/clang -ffp-contract=off -target nvptx -x cl -fno-color-diagnostics -emit-llvm -O3 -c ";
++    std::string compileCmd = "clang -ffp-contract=off -target nvptx -x cl -fno-color-diagnostics -emit-llvm -O3 -c ";
+ #endif /* LLVM_VERSION_MINOR <= 1 */
+     compileCmd += clName;
+     compileCmd += " -o ";

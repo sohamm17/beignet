@@ -1,0 +1,21 @@
+commit 08dadaf3f345f3feceefaacebf5045c72821b449
+Author: Simon Richter <Simon.Richter@hogyros.de>
+Date:   Tue Apr 2 15:11:01 2013 +0200
+
+    "Implement" clGetExtensionFunctionAddress()
+    
+    This function can legally return NULL in the current implementation.
+
+diff --git a/src/cl_api.c b/src/cl_api.c
+index 6856d6a..253c29c 100644
+--- a/src/cl_api.c
++++ b/src/cl_api.c
+@@ -1109,7 +1109,7 @@ clEnqueueBarrier(cl_command_queue  command_queue)
+ void*
+ clGetExtensionFunctionAddress(const char *func_name)
+ {
+-  NOT_IMPLEMENTED;
++  /* No extensions supported at present */
+   return NULL;
+ }
+ 

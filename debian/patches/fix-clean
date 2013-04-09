@@ -1,0 +1,23 @@
+Description: Fix cleaning
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-01
+
+Index: beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile
+===================================================================
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile	2013-04-01 04:00:50.847138659 +0200
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile	2013-04-01 04:00:55.667138444 +0200
+@@ -1,4 +1,4 @@
+ TOP=.
+-SUBDIRS=src/backend src/backend/gen src/backend/sim src/ir src/llvm src/sys 
++SUBDIRS=src src/backend src/backend/gen src/backend/sim src/ir src/llvm src/sys 
+ 
+ include $(TOP)/Makefile.shared
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/utests/Makefile
++++ beignet-0.0.0+git2013.04.01+d1b234c/utests/Makefile
+@@ -74,5 +74,6 @@ runtime_flat_address_space: $(OBJ) runti
+ 
+ clean:
+ 	rm -f $(OBJ)
++	rm -f *.bmp
+ 	rm -f utest_run utest_run.o
+ 	rm -f runtime_flat_address_space runtime_flat_address_space.o

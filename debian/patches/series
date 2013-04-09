@@ -1,0 +1,9 @@
+fix-clean
+path
+soname
+khronos
+verbose
+clang-from-path
+implement-gefa
+missing-header
+respect-flags

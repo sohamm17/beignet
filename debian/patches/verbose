@@ -1,0 +1,16 @@
+Description: More verbose errors
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-01
+
+Index: beignet-0.0.0+git2013.04.01+d1b234c/src/cl_utils.h
+===================================================================
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/src/cl_utils.h	2013-04-01 04:31:35.000000000 +0200
++++ beignet-0.0.0+git2013.04.01+d1b234c/src/cl_utils.h	2013-04-01 04:35:18.299046483 +0200
+@@ -80,6 +80,7 @@
+ 
+ #define FATAL(...)                                          \
+ do {                                                        \
++  fprintf(stderr, "in function %s:\n", __FUNCTION__);       \
+   fprintf(stderr, "error: ");                               \
+   fprintf(stderr, __VA_ARGS__);                             \
+   fprintf(stderr, "\n");                                    \

@@ -1,0 +1,54 @@
+Description: Respect external CFLAGS/CXXFLAGS/LDFLAGS
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-04-04
+
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/Makefile.lib
++++ beignet-0.0.0+git2013.04.01+d1b234c/Makefile.lib
+@@ -7,7 +7,7 @@ LIBS=-Wl,--no-undefined $(LIB_BACKEND) $
+ all: $(LIB) $(LIBMAJOR) $(LIBBASE)
+ 
+ $(LIB): $(OBJ) $(LIB_BACKEND)
+-	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
++	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
+ 
+ $(LIBMAJOR): $(LIB)
+ 	rm -f $@
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/Makefile.defs
++++ beignet-0.0.0+git2013.04.01+d1b234c/Makefile.defs
+@@ -24,9 +24,9 @@ LOCAL_LIBS=$(DRM_LIBS) $(XEXT_LIBS)
+ 
+ LOCAL_CXXFLAGS=$(LOCAL_CFLAGS) -std=c++0x -fno-rtti -Wno-invalid-offsetof
+ 
+-CXXFLAGS=$(LOCAL_CXXFLAGS) $(LLVM_CXXFLAGS) $(DIR_CXXFLAGS)
++CXXFLAGS+=$(LOCAL_CXXFLAGS) $(LLVM_CXXFLAGS) $(DIR_CXXFLAGS)
+ 
+-CFLAGS=$(LLVM_CFLAGS) $(LOCAL_CFLAGS) $(DIR_CFLAGS) -std=c99
++CFLAGS+=$(LLVM_CFLAGS) $(LOCAL_CFLAGS) $(DIR_CFLAGS) -std=c99
+ 
+ INC=$(shell for i in $(SUBDIRS); do ls $$i/*.h* 2>/dev/null; done)
+ 
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile.lib
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.lib
+@@ -9,7 +9,7 @@ VERSION=0.0.1
+ all: $(LIB) $(LIBMAJOR) $(LIBBASE)
+ 
+ $(LIB): $(OBJ)
+-	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
++	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
+ 
+ $(LIBMAJOR): $(LIB)
+ 	rm -f $@
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile.defs
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.defs
+@@ -4,9 +4,9 @@ LOCAL_CFLAGS=-funroll-loops -Wstrict-ali
+ 
+ LOCAL_CXXFLAGS=$(LOCAL_CFLAGS) -std=c++0x -fno-rtti -Wno-invalid-offsetof
+ 
+-CXXFLAGS=$(LOCAL_CXXFLAGS) $(shell llvm-config --cxxflags | sed 's/\-pedantic//g')
++CXXFLAGS+=$(LOCAL_CXXFLAGS) $(shell llvm-config --cxxflags | sed 's/\-pedantic//g')
+ 
+-CFLAGS=$(LOCAL_CFLAGS) $(shell llvm-config --cflags) -std=gnu9x
++CFLAGS+=$(LOCAL_CFLAGS) $(shell llvm-config --cflags) -std=gnu9x
+ 
+ INC=$(shell for i in $(SUBDIRS); do ls $$i/*.h* 2>/dev/null; done)
+ 
