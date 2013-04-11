@@ -7,3 +7,4 @@ clang-from-path
 implement-gefa
 missing-header
 respect-flags
+device-info-query
