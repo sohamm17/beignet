@@ -1,0 +1,19 @@
+commit 3be62a8aacd8cd18484b381ab9536160c7de7119
+Author: Simon Richter <Simon.Richter@hogyros.de>
+Date:   Fri Apr 12 11:21:19 2013 +0200
+
+    Accept glibc's implementation of memalign()
+
+Index: beignet-0.0.0+git2013.04.01+d1b234c/backend/src/sys/alloc.cpp
+===================================================================
+--- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/src/sys/alloc.cpp	2013-03-29 11:40:11.000000000 +0100
++++ beignet-0.0.0+git2013.04.01+d1b234c/backend/src/sys/alloc.cpp	2013-04-12 11:22:24.421303851 +0200
+@@ -271,7 +271,7 @@
+ /// Linux Platform
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#if defined(__LINUX__)
++#if defined(__LINUX__) || defined(__GLIBC__)
+ 
+ #include <unistd.h>
+ #include <sys/mman.h>
