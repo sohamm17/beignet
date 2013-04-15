@@ -8,11 +8,11 @@ Date:   Thu Apr 11 13:59:30 2013 +0200
     buffer length and address of zero to find out the number of elements
     available.
 
-Index: beignet-0.0.0+git2013.04.01+d1b234c/src/cl_device_id.c
+Index: beignet-0.0.0+git2013.04.11+e6b503e/src/cl_device_id.c
 ===================================================================
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/src/cl_device_id.c	2013-04-11 14:38:02.730759888 +0200
-+++ beignet-0.0.0+git2013.04.01+d1b234c/src/cl_device_id.c	2013-04-11 14:38:25.486758873 +0200
-@@ -128,21 +128,25 @@
+--- beignet-0.0.0+git2013.04.11+e6b503e.orig/src/cl_device_id.c	2013-04-12 08:13:48.000000000 +0200
++++ beignet-0.0.0+git2013.04.11+e6b503e/src/cl_device_id.c	2013-04-15 18:34:02.220354446 +0200
+@@ -131,21 +131,25 @@
  
  #define DECL_FIELD(CASE,FIELD)                                      \
    case JOIN(CL_DEVICE_,CASE):                                       \
@@ -43,12 +43,12 @@ Index: beignet-0.0.0+git2013.04.01+d1b234c/src/cl_device_id.c
      memcpy(param_value, device->FIELD, device->JOIN(FIELD,_sz));    \
      return CL_SUCCESS;
  
-@@ -157,8 +161,6 @@
-                device != &intel_ivb_gt2_device &&
-                device != &intel_hsw_device))
+@@ -282,8 +286,6 @@
+   if (UNLIKELY(device != &intel_ivb_gt1_device &&
+                device != &intel_ivb_gt2_device))
      return CL_INVALID_DEVICE;
 -  if (UNLIKELY(param_value == NULL))
 -    return CL_INVALID_VALUE;
  
-   /* Find the correct parameter */
    switch (param_name) {
+     DECL_FIELD(WORK_GROUP_SIZE, wg_sz)

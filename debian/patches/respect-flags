@@ -1,54 +1,51 @@
-Description: Respect external CFLAGS/CXXFLAGS/LDFLAGS
+Description: Respect CFLAGS/CXXFLAGS from Debian
 Author: Simon Richter <sjr@debian.org>
-Last-Update: 2013-04-04
+Last-Update: 2013-04-16
 
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/Makefile.lib
-+++ beignet-0.0.0+git2013.04.01+d1b234c/Makefile.lib
-@@ -7,7 +7,7 @@ LIBS=-Wl,--no-undefined $(LIB_BACKEND) $
- all: $(LIB) $(LIBMAJOR) $(LIBBASE)
+Index: beignet-0.0.0+git2013.04.11+e6b503e/CMakeLists.txt
+===================================================================
+--- beignet-0.0.0+git2013.04.11+e6b503e.orig/CMakeLists.txt	2013-04-16 14:49:50.450369637 +0200
++++ beignet-0.0.0+git2013.04.11+e6b503e/CMakeLists.txt	2013-04-16 14:50:20.298368306 +0200
+@@ -18,7 +18,6 @@
  
- $(LIB): $(OBJ) $(LIB_BACKEND)
--	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
-+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
+ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
  
- $(LIBMAJOR): $(LIB)
- 	rm -f $@
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/Makefile.defs
-+++ beignet-0.0.0+git2013.04.01+d1b234c/Makefile.defs
-@@ -24,9 +24,9 @@ LOCAL_LIBS=$(DRM_LIBS) $(XEXT_LIBS)
+-SET(CMAKE_VERBOSE_MAKEFILE "false")
+ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
+ SET(EMULATE_IVB false CACHE BOOL "To emulate IVB")
+ SET(EMULATE_SNB false CACHE BOOL "To emulate SNB")
+@@ -55,8 +54,8 @@
+   ADD_DEFINITIONS(-DUSE_FULSIM=0)
+ ENDIF (USE_FULSIM)
  
- LOCAL_CXXFLAGS=$(LOCAL_CFLAGS) -std=c++0x -fno-rtti -Wno-invalid-offsetof
+-SET(CMAKE_CXX_FLAGS "-Wall -Wno-invalid-offsetof -mfpmath=sse --no-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
+-SET(CMAKE_C_FLAGS "-Wall -mfpmath=sse -msse2 -Wcast-align -msse2 -msse3 -mssse3 -msse4.1")
++SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-invalid-offsetof -mfpmath=sse --no-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
++SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -mfpmath=sse -msse2 -Wcast-align -msse2 -msse3 -mssse3 -msse4.1")
  
--CXXFLAGS=$(LOCAL_CXXFLAGS) $(LLVM_CXXFLAGS) $(DIR_CXXFLAGS)
-+CXXFLAGS+=$(LOCAL_CXXFLAGS) $(LLVM_CXXFLAGS) $(DIR_CXXFLAGS)
- 
--CFLAGS=$(LLVM_CFLAGS) $(LOCAL_CFLAGS) $(DIR_CFLAGS) -std=c99
-+CFLAGS+=$(LLVM_CFLAGS) $(LOCAL_CFLAGS) $(DIR_CFLAGS) -std=c99
- 
- INC=$(shell for i in $(SUBDIRS); do ls $$i/*.h* 2>/dev/null; done)
- 
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile.lib
-+++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.lib
-@@ -9,7 +9,7 @@ VERSION=0.0.1
- all: $(LIB) $(LIBMAJOR) $(LIBBASE)
- 
- $(LIB): $(OBJ)
--	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
-+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBMAJOR) -o $@ $(OBJ) $(LIBS)
- 
- $(LIBMAJOR): $(LIB)
- 	rm -f $@
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/Makefile.defs
-+++ beignet-0.0.0+git2013.04.01+d1b234c/backend/Makefile.defs
-@@ -4,9 +4,9 @@ LOCAL_CFLAGS=-funroll-loops -Wstrict-ali
- 
- LOCAL_CXXFLAGS=$(LOCAL_CFLAGS) -std=c++0x -fno-rtti -Wno-invalid-offsetof
- 
--CXXFLAGS=$(LOCAL_CXXFLAGS) $(shell llvm-config --cxxflags | sed 's/\-pedantic//g')
-+CXXFLAGS+=$(LOCAL_CXXFLAGS) $(shell llvm-config --cxxflags | sed 's/\-pedantic//g')
- 
--CFLAGS=$(LOCAL_CFLAGS) $(shell llvm-config --cflags) -std=gnu9x
-+CFLAGS+=$(LOCAL_CFLAGS) $(shell llvm-config --cflags) -std=gnu9x
- 
- INC=$(shell for i in $(SUBDIRS); do ls $$i/*.h* 2>/dev/null; done)
- 
+ # Front end stuff we need
+ #INCLUDE(CMake/FindLLVM.cmake)
+Index: beignet-0.0.0+git2013.04.11+e6b503e/backend/CMakeLists.txt
+===================================================================
+--- beignet-0.0.0+git2013.04.11+e6b503e.orig/backend/CMakeLists.txt	2013-04-16 14:49:48.290369733 +0200
++++ beignet-0.0.0+git2013.04.11+e6b503e/backend/CMakeLists.txt	2013-04-16 14:50:20.298368306 +0200
+@@ -45,16 +45,16 @@
+ if (COMPILER STREQUAL "GCC")
+   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -ffast-math -fPIC -Wall")
+   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  ${LLVM_CFLAGS}")
+-  set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -Wno-invalid-offsetof -fno-rtti -std=c++0x")
++  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS}  -Wno-invalid-offsetof -fno-rtti -std=c++0x")
+   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GBE_DEBUG_MEMORY_FLAG}")
+   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GBE_COMPILE_UTESTS_FLAG}")
+   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,-E")
+-  set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${LLVM_LFLAGS}")
++  set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined ${LLVM_LFLAGS}")
+   set (CMAKE_CXX_FLAGS_DEBUG          "-g -DGBE_DEBUG=1")
+   set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
+   set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
+   set (CMAKE_CXX_FLAGS_RELEASE        "-O2 -DNDEBUG -DGBE_DEBUG=0")
+-  set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
++  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS}")
+   set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${GBE_DEBUG_MEMORY_FLAG}")
+   set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${GBE_COMPILE_UTESTS_FLAG}")
+   set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-E")

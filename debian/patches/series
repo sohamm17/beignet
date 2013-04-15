@@ -1,11 +1,11 @@
-fix-clean
-path
-soname
 khronos
 verbose
 clang-from-path
 implement-gefa
 missing-header
-respect-flags
-device-info-query
 glibc-memalign
+llvm-3.2
+autogen
+ignore-missing-egl
+soname
+respect-flags

@@ -6,11 +6,11 @@ Date:   Tue Apr 2 15:11:01 2013 +0200
     
     This function can legally return NULL in the current implementation.
 
-diff --git a/src/cl_api.c b/src/cl_api.c
-index 6856d6a..253c29c 100644
---- a/src/cl_api.c
-+++ b/src/cl_api.c
-@@ -1109,7 +1109,7 @@ clEnqueueBarrier(cl_command_queue  command_queue)
+Index: beignet-0.0.0+git2013.04.11+e6b503e/src/cl_api.c
+===================================================================
+--- beignet-0.0.0+git2013.04.11+e6b503e.orig/src/cl_api.c	2013-04-12 08:13:48.000000000 +0200
++++ beignet-0.0.0+git2013.04.11+e6b503e/src/cl_api.c	2013-04-15 18:33:32.788352738 +0200
+@@ -1169,7 +1169,7 @@
  void*
  clGetExtensionFunctionAddress(const char *func_name)
  {

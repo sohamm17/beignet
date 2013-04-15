@@ -1,3 +1,9 @@
+beignet (0.0.0+git2013.04.11+e6b503e-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Simon Richter <sjr@debian.org>  Mon, 15 Apr 2013 18:22:45 +0200
+
 beignet (0.0.0+git2013.04.01+d1b234c-4) unstable; urgency=low
 
   * Build fix for kfreebsd-*

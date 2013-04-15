@@ -2,17 +2,19 @@ Description: Use clang from PATH
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-04-02
 
---- beignet-0.0.0+git2013.04.01+d1b234c.orig/backend/src/backend/program.cpp
-+++ beignet-0.0.0+git2013.04.01+d1b234c/backend/src/backend/program.cpp
-@@ -116,9 +116,9 @@ namespace gbe {
+Index: beignet-0.0.0+git2013.04.11+e6b503e/backend/src/backend/program.cpp
+===================================================================
+--- beignet-0.0.0+git2013.04.11+e6b503e.orig/backend/src/backend/program.cpp	2013-04-12 08:13:48.000000000 +0200
++++ beignet-0.0.0+git2013.04.11+e6b503e/backend/src/backend/program.cpp	2013-04-15 18:33:25.392352309 +0200
+@@ -119,9 +119,9 @@
  
      // Now compile the code to llvm using clang
  #if LLVM_VERSION_MINOR <= 1
 -    std::string compileCmd = LLVM_PREFIX "/bin/clang -x cl -fno-color-diagnostics -emit-llvm -O3 -ccc-host-triple ptx32 -c ";
 +    std::string compileCmd = "clang -x cl -fno-color-diagnostics -emit-llvm -O3 -ccc-host-triple ptx32 -c ";
  #else
--    std::string compileCmd = LLVM_PREFIX "/bin/clang -ffp-contract=off -target nvptx -x cl -fno-color-diagnostics -emit-llvm -O3 -c ";
-+    std::string compileCmd = "clang -ffp-contract=off -target nvptx -x cl -fno-color-diagnostics -emit-llvm -O3 -c ";
+-    std::string compileCmd = LLVM_PREFIX "/bin/clang -ffp-contract=off -emit-llvm -O3 -target nvptx -x cl -c ";
++    std::string compileCmd = "clang -ffp-contract=off -emit-llvm -O3 -target nvptx -x cl -c ";
  #endif /* LLVM_VERSION_MINOR <= 1 */
      compileCmd += clName;
-     compileCmd += " -o ";
+     compileCmd += " ";
