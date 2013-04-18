@@ -6,13 +6,13 @@ Date:   Tue Apr 2 15:11:01 2013 +0200
     
     This function can legally return NULL in the current implementation.
 
-Index: beignet-0.0.0+git2013.04.11+e6b503e/src/cl_api.c
+Index: beignet-0.1+git20130418+0546d2e/src/cl_api.c
 ===================================================================
---- beignet-0.0.0+git2013.04.11+e6b503e.orig/src/cl_api.c	2013-04-12 08:13:48.000000000 +0200
-+++ beignet-0.0.0+git2013.04.11+e6b503e/src/cl_api.c	2013-04-15 18:33:32.788352738 +0200
-@@ -1169,7 +1169,7 @@
- void*
- clGetExtensionFunctionAddress(const char *func_name)
+--- beignet-0.1+git20130418+0546d2e.orig/src/cl_api.c	2013-04-18 05:21:35.000000000 +0200
++++ beignet-0.1+git20130418+0546d2e/src/cl_api.c	2013-04-18 11:52:29.225428977 +0200
+@@ -1006,7 +1006,7 @@
+                   cl_event *         event,
+                   cl_int *           errcode_ret)
  {
 -  NOT_IMPLEMENTED;
 +  /* No extensions supported at present */

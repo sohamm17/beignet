@@ -2,10 +2,10 @@ Description: Respect CFLAGS/CXXFLAGS from Debian
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-04-16
 
-Index: beignet-0.0.0+git2013.04.11+e6b503e/CMakeLists.txt
+Index: beignet-0.1+git20130418+0546d2e/CMakeLists.txt
 ===================================================================
---- beignet-0.0.0+git2013.04.11+e6b503e.orig/CMakeLists.txt	2013-04-16 14:49:50.450369637 +0200
-+++ beignet-0.0.0+git2013.04.11+e6b503e/CMakeLists.txt	2013-04-16 14:50:20.298368306 +0200
+--- beignet-0.1+git20130418+0546d2e.orig/CMakeLists.txt	2013-04-18 05:21:35.000000000 +0200
++++ beignet-0.1+git20130418+0546d2e/CMakeLists.txt	2013-04-18 11:54:52.065437266 +0200
 @@ -18,7 +18,6 @@
  
  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
@@ -18,20 +18,20 @@ Index: beignet-0.0.0+git2013.04.11+e6b503e/CMakeLists.txt
    ADD_DEFINITIONS(-DUSE_FULSIM=0)
  ENDIF (USE_FULSIM)
  
--SET(CMAKE_CXX_FLAGS "-Wall -Wno-invalid-offsetof -mfpmath=sse --no-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
+-SET(CMAKE_CXX_FLAGS "-Wall -Wno-invalid-offsetof -mfpmath=sse -fno-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
 -SET(CMAKE_C_FLAGS "-Wall -mfpmath=sse -msse2 -Wcast-align -msse2 -msse3 -mssse3 -msse4.1")
-+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-invalid-offsetof -mfpmath=sse --no-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
++SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-invalid-offsetof -mfpmath=sse -fno-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ")
 +SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -mfpmath=sse -msse2 -Wcast-align -msse2 -msse3 -mssse3 -msse4.1")
  
  # Front end stuff we need
  #INCLUDE(CMake/FindLLVM.cmake)
-Index: beignet-0.0.0+git2013.04.11+e6b503e/backend/CMakeLists.txt
+Index: beignet-0.1+git20130418+0546d2e/backend/CMakeLists.txt
 ===================================================================
---- beignet-0.0.0+git2013.04.11+e6b503e.orig/backend/CMakeLists.txt	2013-04-16 14:49:48.290369733 +0200
-+++ beignet-0.0.0+git2013.04.11+e6b503e/backend/CMakeLists.txt	2013-04-16 14:50:20.298368306 +0200
+--- beignet-0.1+git20130418+0546d2e.orig/backend/CMakeLists.txt	2013-04-18 05:21:35.000000000 +0200
++++ beignet-0.1+git20130418+0546d2e/backend/CMakeLists.txt	2013-04-18 11:54:19.629435384 +0200
 @@ -45,16 +45,16 @@
  if (COMPILER STREQUAL "GCC")
-   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -ffast-math -fPIC -Wall")
+   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  ${LLVM_CFLAGS}")
 -  set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -Wno-invalid-offsetof -fno-rtti -std=c++0x")
 +  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS}  -Wno-invalid-offsetof -fno-rtti -std=c++0x")
