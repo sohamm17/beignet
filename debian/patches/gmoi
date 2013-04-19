@@ -1,0 +1,117 @@
+commit c60c0bfa3347aa4f89877743cbeeb1ae998ebb12
+Author: Simon Richter <Simon.Richter@hogyros.de>
+Date:   Thu Apr 18 20:01:35 2013 +0200
+
+    Implement clGetMemObjectInfo
+    
+    Currently, only the properties
+    
+     - CL_MEM_TYPE
+     - CL_MEM_FLAGS
+     - CL_MEM_SIZE
+    
+    are implemented.
+
+Index: beignet-0.1+git20130418+0546d2e/src/cl_api.c
+===================================================================
+--- beignet-0.1+git20130418+0546d2e.orig/src/cl_api.c	2013-04-19 10:04:52.127082193 +0200
++++ beignet-0.1+git20130418+0546d2e/src/cl_api.c	2013-04-19 10:04:56.359082005 +0200
+@@ -386,8 +386,11 @@
+                    void *      param_value,
+                    size_t *    param_value_size_ret)
+ {
+-  NOT_IMPLEMENTED;
+-  return 0;
++  return cl_get_mem_object_info(memobj,
++                                param_name,
++                                param_value_size,
++                                param_value,
++                                param_value_size_ret);
+ }
+ 
+ cl_int
+Index: beignet-0.1+git20130418+0546d2e/src/cl_mem.c
+===================================================================
+--- beignet-0.1+git20130418+0546d2e.orig/src/cl_mem.c	2013-04-19 10:04:52.127082193 +0200
++++ beignet-0.1+git20130418+0546d2e/src/cl_mem.c	2013-04-19 10:04:56.359082005 +0200
+@@ -31,6 +31,66 @@
+ #include <assert.h>
+ #include <stdio.h>
+ 
++#define FIELD_SIZE(CASE,TYPE)               \
++  case JOIN(CL_,CASE):                      \
++    if(param_value_size_ret)                \
++      *param_value_size_ret = sizeof(TYPE); \
++    if(!param_value)                        \
++      return CL_SUCCESS;                    \
++    if(param_value_size < sizeof(TYPE))     \
++      return CL_INVALID_VALUE;              \
++    break;
++
++LOCAL cl_int
++cl_get_mem_object_info(cl_mem mem,
++                cl_mem_info param_name,
++                size_t param_value_size,
++                void *param_value,
++                size_t *param_value_size_ret)
++{
++  switch(param_name)
++  {
++    FIELD_SIZE(MEM_TYPE, cl_mem_object_type);
++    FIELD_SIZE(MEM_FLAGS, cl_mem_flags);
++    FIELD_SIZE(MEM_SIZE, size_t);
++    FIELD_SIZE(MEM_HOST_PTR, void *);
++    FIELD_SIZE(MEM_MAP_COUNT, cl_uint);
++    FIELD_SIZE(MEM_REFERENCE_COUNT, cl_uint);
++    FIELD_SIZE(MEM_CONTEXT, cl_context);
++  default:
++    return CL_INVALID_VALUE;
++  }
++
++  switch(param_name)
++  {
++  case CL_MEM_TYPE:
++    *((cl_mem_object_type *)param_value) = mem->type;
++    break;
++  case CL_MEM_FLAGS:
++    *((cl_mem_flags *)param_value) = mem->flags;
++    break;
++  case CL_MEM_SIZE:
++    *((size_t *)param_value) = cl_buffer_get_size(mem->bo);
++    break;
++  case CL_MEM_HOST_PTR:
++    NOT_IMPLEMENTED;
++    break;
++  case CL_MEM_MAP_COUNT:
++    NOT_IMPLEMENTED;
++    break;
++  case CL_MEM_REFERENCE_COUNT:
++    NOT_IMPLEMENTED;
++    break;
++  case CL_MEM_CONTEXT:
++    NOT_IMPLEMENTED;
++    break;
++  }
++
++  return CL_SUCCESS;
++}
++
++#undef FIELD_SIZE
++
+ static cl_mem
+ cl_mem_allocate(cl_context ctx,
+                 cl_mem_flags flags,
+Index: beignet-0.1+git20130418+0546d2e/src/cl_mem.h
+===================================================================
+--- beignet-0.1+git20130418+0546d2e.orig/src/cl_mem.h	2013-04-19 10:04:52.127082193 +0200
++++ beignet-0.1+git20130418+0546d2e/src/cl_mem.h	2013-04-19 10:04:56.359082005 +0200
+@@ -48,6 +48,9 @@
+   cl_image_tiling_t tiling; /* only IVB+ supports TILE_[X,Y] (image only) */
+ };
+ 
++/* Query information about a memory object */
++extern cl_int cl_get_mem_object_info(cl_mem, cl_mem_info, size_t, void *, size_t *);
++
+ /* Create a new memory object and initialize it with possible user data */
+ extern cl_mem cl_mem_new(cl_context, cl_mem_flags, size_t, void*, cl_int*);
+ 

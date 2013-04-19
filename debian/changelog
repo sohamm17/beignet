@@ -1,3 +1,10 @@
+beignet (0.1+git20130418+0546d2e-2) experimental; urgency=low
+
+  * Add functionality patches
+  * Use clang 3.0 command line syntax
+
+ -- Simon Richter <sjr@debian.org>  Fri, 19 Apr 2013 09:53:23 +0200
+
 beignet (0.1+git20130418+0546d2e-1) experimental; urgency=low
 
   * New upstream release
