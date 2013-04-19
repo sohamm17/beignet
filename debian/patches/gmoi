@@ -12,13 +12,13 @@ Date:   Thu Apr 18 20:01:35 2013 +0200
     
     are implemented.
 
-Index: beignet-0.1+git20130418+0546d2e/src/cl_api.c
+Index: beignet-0.1+git20130419+9c11c18/src/cl_api.c
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/src/cl_api.c	2013-04-19 10:04:52.127082193 +0200
-+++ beignet-0.1+git20130418+0546d2e/src/cl_api.c	2013-04-19 10:04:56.359082005 +0200
-@@ -386,8 +386,11 @@
-                    void *      param_value,
-                    size_t *    param_value_size_ret)
+--- beignet-0.1+git20130419+9c11c18.orig/src/cl_api.c	2013-04-19 14:15:05.000000000 +0200
++++ beignet-0.1+git20130419+9c11c18/src/cl_api.c	2013-04-19 14:17:57.190405178 +0200
+@@ -400,8 +400,11 @@
+                void *         param_value,
+                size_t *       param_value_size_ret)
  {
 -  NOT_IMPLEMENTED;
 -  return 0;
@@ -30,13 +30,13 @@ Index: beignet-0.1+git20130418+0546d2e/src/cl_api.c
  }
  
  cl_int
-Index: beignet-0.1+git20130418+0546d2e/src/cl_mem.c
+Index: beignet-0.1+git20130419+9c11c18/src/cl_mem.c
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/src/cl_mem.c	2013-04-19 10:04:52.127082193 +0200
-+++ beignet-0.1+git20130418+0546d2e/src/cl_mem.c	2013-04-19 10:04:56.359082005 +0200
-@@ -31,6 +31,66 @@
- #include <assert.h>
- #include <stdio.h>
+--- beignet-0.1+git20130419+9c11c18.orig/src/cl_mem.c	2013-04-19 10:28:49.000000000 +0200
++++ beignet-0.1+git20130419+9c11c18/src/cl_mem.c	2013-04-19 14:17:57.190405178 +0200
+@@ -91,6 +91,66 @@
+ 
+ #undef FIELD_SIZE
  
 +#define FIELD_SIZE(CASE,TYPE)               \
 +  case JOIN(CL_,CASE):                      \
@@ -101,13 +101,13 @@ Index: beignet-0.1+git20130418+0546d2e/src/cl_mem.c
  static cl_mem
  cl_mem_allocate(cl_context ctx,
                  cl_mem_flags flags,
-Index: beignet-0.1+git20130418+0546d2e/src/cl_mem.h
+Index: beignet-0.1+git20130419+9c11c18/src/cl_mem.h
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/src/cl_mem.h	2013-04-19 10:04:52.127082193 +0200
-+++ beignet-0.1+git20130418+0546d2e/src/cl_mem.h	2013-04-19 10:04:56.359082005 +0200
-@@ -48,6 +48,9 @@
-   cl_image_tiling_t tiling; /* only IVB+ supports TILE_[X,Y] (image only) */
- };
+--- beignet-0.1+git20130419+9c11c18.orig/src/cl_mem.h	2013-04-19 10:28:49.000000000 +0200
++++ beignet-0.1+git20130419+9c11c18/src/cl_mem.h	2013-04-19 14:17:57.190405178 +0200
+@@ -51,6 +51,9 @@
+ /* Query information about a memory object */
+ extern cl_int cl_get_mem_object_info(cl_mem, cl_mem_info, size_t, void *, size_t *);
  
 +/* Query information about a memory object */
 +extern cl_int cl_get_mem_object_info(cl_mem, cl_mem_info, size_t, void *, size_t *);

@@ -1,0 +1,86 @@
+commit 7f79b7428cb40bc6c915ce0b7d746c9d6658f6b9
+Author: Simon Richter <Simon.Richter@hogyros.de>
+Date:   Fri Apr 19 12:48:00 2013 +0200
+
+    Implement clGetDeviceInfo(..., CL_DRIVER_VERSION, ...)
+
+diff --git a/src/cl_device_id.c b/src/cl_device_id.c
+index 114a0ce..6300b41 100644
+--- a/src/cl_device_id.c
++++ b/src/cl_device_id.c
+@@ -230,6 +230,18 @@ cl_get_device_info(cl_device_id     device,
+     DECL_STRING_FIELD(PROFILE, profile)
+     DECL_STRING_FIELD(OPENCL_C_VERSION, opencl_c_version)
+     DECL_STRING_FIELD(EXTENSIONS, extensions);
++
++    case CL_DRIVER_VERSION:
++      if (param_value_size_ret) {
++        *param_value_size_ret = device->driver_version_sz;
++        if (!param_value)
++          return CL_SUCCESS;
++      }
++      if (param_value_size < device->driver_version_sz)
++        return CL_INVALID_VALUE;
++      memcpy(param_value, device->driver_version, device->driver_version_sz);
++      return CL_SUCCESS;
++
+     default: return CL_INVALID_VALUE;
+   };
+ }
+diff --git a/src/cl_device_id.h b/src/cl_device_id.h
+index 610eaf6..d199ecb 100644
+--- a/src/cl_device_id.h
++++ b/src/cl_device_id.h
+@@ -83,12 +83,14 @@ struct _cl_device_id {
+   const char *profile;
+   const char *opencl_c_version;
+   const char *extensions;
++  const char *driver_version;
+   size_t name_sz;
+   size_t vendor_sz;
+   size_t version_sz;
+   size_t profile_sz;
+   size_t opencl_c_version_sz;
+   size_t extensions_sz;
++  size_t driver_version_sz;
+   /* Kernel specific info that we're assigning statically */
+   size_t wg_sz;
+   size_t compile_wg_sz[3];
+diff --git a/src/cl_gt_device.h b/src/cl_gt_device.h
+index 993017b..f26cd8a 100644
+--- a/src/cl_gt_device.h
++++ b/src/cl_gt_device.h
+@@ -72,6 +72,7 @@ DECL_INFO_STRING(version, OCL_VERSION_STRING)
+ DECL_INFO_STRING(profile, "FULL_PROFILE")
+ DECL_INFO_STRING(opencl_c_version, "OpenCL 1.10")
+ DECL_INFO_STRING(extensions, "")
++DECL_INFO_STRING(driver_version, LIBCL_VERSION_STRING)
+ #undef DECL_INFO_STRING
+ 
+ 
+diff --git a/src/cl_platform_id.h b/src/cl_platform_id.h
+index edd3aae..3a74028 100644
+--- a/src/cl_platform_id.h
++++ b/src/cl_platform_id.h
+@@ -25,6 +25,8 @@
+ #include "cl_khr_icd.h"
+ #include "CL/cl.h"
+ 
++#include "src/OCLConfig.h"
++
+ struct _cl_platform_id {
+   DEFINE_ICD(dispatch)
+   const char *profile;
+@@ -61,9 +63,10 @@ extern cl_int cl_get_platform_info(cl_platform_id    platform,
+ #define OCL_VERSION_MINOR 0
+ 
+ #define _STR(x) #x
+-#define _JOINT(x, y) "OpenCL " _STR(x) "." _STR(y)
++#define _JOINT(x, y) _STR(x) "." _STR(y)
+ 
+-#define OCL_VERSION_STRING _JOINT(OCL_VERSION_MAJOR, OCL_VERSION_MINOR)
++#define OCL_VERSION_STRING "OpenCL " _JOINT(OCL_VERSION_MAJOR, OCL_VERSION_MINOR)
++#define LIBCL_VERSION_STRING _JOINT(LIBCL_VERSION_MAJOR, LIBCL_VERSION_MINOR)
+ 
+ #endif /* __CL_PLATFORM_ID_H__ */
+ 

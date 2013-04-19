@@ -4,6 +4,6 @@ implement-gefa
 missing-header
 soname
 respect-flags
-pitch2d
-gmoi
 clang-3.0
+gdi
+driver_version
