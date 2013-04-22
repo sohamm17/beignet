@@ -1,0 +1,24 @@
+Index: beignet-0.1+git20130419+9c11c18/backend/src/ir/instruction.cpp
+===================================================================
+--- beignet-0.1+git20130419+9c11c18.orig/backend/src/ir/instruction.cpp	2013-04-19 10:28:49.000000000 +0200
++++ beignet-0.1+git20130419+9c11c18/backend/src/ir/instruction.cpp	2013-04-19 19:17:43.329603279 +0200
+@@ -591,17 +591,17 @@
+     static const Type madType[] = {TYPE_FLOAT};
+     static const uint32_t madTypeNum = ARRAY_ELEM_NUM(madType);
+ 
+-    // TODO add support for 64 bits values
+     static const Type allButBool[] = {TYPE_S8,  TYPE_U8,
+                                       TYPE_S16, TYPE_U16,
+                                       TYPE_S32, TYPE_U32,
++                                      TYPE_S64, TYPE_U64,
+                                       TYPE_FLOAT, TYPE_DOUBLE};
+     static const uint32_t allButBoolNum = ARRAY_ELEM_NUM(allButBool);
+ 
+-    // TODO add support for 64 bits values
+     static const Type logicalType[] = {TYPE_S8,  TYPE_U8,
+                                        TYPE_S16, TYPE_U16,
+                                        TYPE_S32, TYPE_U32,
++                                       TYPE_S64, TYPE_U64,
+                                        TYPE_BOOL};
+     static const uint32_t logicalTypeNum = ARRAY_ELEM_NUM(logicalType);
+ 
