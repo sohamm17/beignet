@@ -8,3 +8,5 @@ clang-3.0
 gdi
 driver_version
 const64
+select
+fminmax

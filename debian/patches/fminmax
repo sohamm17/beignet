@@ -1,0 +1,19 @@
+commit 09d513910bd7a4d523424a0666494c691aa4c824
+Author: Simon Richter <Simon.Richter@hogyros.de>
+Date:   Mon Apr 22 18:59:33 2013 +0200
+
+    Add vector fmin/fmax
+
+diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
+index ce0c5f9..79616b8 100644
+--- a/backend/src/ocl_stdlib.h
++++ b/backend/src/ocl_stdlib.h
+@@ -684,6 +684,8 @@ DECL_VECTOR_1OP(__gen_ocl_internal_log10, float);
+   }
+ DECL_VECTOR_2OP(min, float);
+ DECL_VECTOR_2OP(max, float);
++DECL_VECTOR_2OP(__gen_ocl_internal_fmin, float);
++DECL_VECTOR_2OP(__gen_ocl_internal_fmax, float);
+ DECL_VECTOR_2OP(fmod, float);
+ DECL_VECTOR_2OP(powr, float);
+ #undef DECL_VECTOR_2OP
