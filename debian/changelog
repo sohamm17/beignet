@@ -1,3 +1,9 @@
+beignet (0.1+git20130426+0c8f6fe-1) experimental; urgency=low
+
+  * New upstream release
+
+ -- Simon Richter <sjr@debian.org>  Fri, 26 Apr 2013 14:42:21 +0200
+
 beignet (0.1+git20130422+003fac5-2) experimental; urgency=low
 
   * Add patch for select()
