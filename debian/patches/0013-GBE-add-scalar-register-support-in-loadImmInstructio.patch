@@ -1,0 +1,41 @@
+From 08ee5ccdb12d2ffe6afe23532f557e758c2dd8ec Mon Sep 17 00:00:00 2001
+From: Zhigang Gong <zhigang.gong@linux.intel.com>
+Date: Mon, 13 May 2013 11:32:22 +0800
+Subject: [PATCH 13/15] GBE: add scalar register support in
+ loadImmInstruction.
+To: beignet@lists.freedesktop.org
+
+There is a slight possibility that the destination register
+is a scalar register. We need to check it here.
+
+Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
+---
+ backend/src/backend/gen_insn_selection.cpp |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_insn_selection.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/gen_insn_selection.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_insn_selection.cpp	2013-05-14 20:09:25.126021592 +0200
+@@ -1546,6 +1546,13 @@
+       const Immediate imm = insn.getImmediate();
+       const GenRegister dst = sel.selReg(insn.getDst(0), type);
+ 
++      sel.push();
++      if (sel.isScalarOrBool(insn.getDst(0)) == true) {
++        sel.curr.execWidth = 1;
++        sel.curr.predicate = GEN_PREDICATE_NONE;
++        sel.curr.noMask = 1;
++      }
++
+       switch (type) {
+         case TYPE_U32:
+         case TYPE_S32:
+@@ -1559,6 +1566,7 @@
+         case TYPE_S8:  sel.MOV(dst, GenRegister::immw(imm.data.s8)); break;
+         default: NOT_SUPPORTED;
+       }
++      sel.pop();
+       return true;
+     }
+ 

@@ -2,10 +2,10 @@ Description: Use proper SONAME
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-04-15
 
-Index: beignet-0.1+git20130418+0546d2e/backend/src/CMakeLists.txt
+Index: beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/backend/src/CMakeLists.txt	2013-04-18 05:21:35.000000000 +0200
-+++ beignet-0.1+git20130418+0546d2e/backend/src/CMakeLists.txt	2013-04-18 11:53:59.985434244 +0200
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/CMakeLists.txt	2013-05-14 20:04:47.974033949 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt	2013-05-14 20:05:52.618031067 +0200
 @@ -114,7 +114,10 @@
                        ${LLVM_MODULE_LIBS}
                        ${CMAKE_THREAD_LIBS_INIT}
@@ -18,10 +18,10 @@ Index: beignet-0.1+git20130418+0546d2e/backend/src/CMakeLists.txt
  install (TARGETS gbe LIBRARY DESTINATION lib)
  install (FILES backend/program.h DESTINATION include/gen)
  
-Index: beignet-0.1+git20130418+0546d2e/src/CMakeLists.txt
+Index: beignet-0.1+git20130514+19e9c58/src/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/src/CMakeLists.txt	2013-04-18 05:21:35.000000000 +0200
-+++ beignet-0.1+git20130418+0546d2e/src/CMakeLists.txt	2013-04-18 11:53:59.985434244 +0200
+--- beignet-0.1+git20130514+19e9c58.orig/src/CMakeLists.txt	2013-05-14 20:04:47.974033949 +0200
++++ beignet-0.1+git20130514+19e9c58/src/CMakeLists.txt	2013-05-14 20:05:52.618031067 +0200
 @@ -58,4 +58,8 @@
                        ${OPENGL_LIBRARIES}
                        ${OPTIONAL_EGL_LIBRARY}

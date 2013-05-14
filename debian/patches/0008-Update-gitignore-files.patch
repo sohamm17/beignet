@@ -1,0 +1,65 @@
+From 9555f0c6417c0af7f4a72084f28c40d63b1a93dc Mon Sep 17 00:00:00 2001
+From: Simon Richter <Simon.Richter@hogyros.de>
+Date: Mon, 13 May 2013 20:01:08 +0200
+Subject: [PATCH 08/15] Update gitignore files
+To: beignet@lists.freedesktop.org
+
+ - Ignore CMake built files
+ - Ignore .so files only in the subdirectory
+ - Ignore generated .bmp files
+ - Ignore generated config headers
+ - Ignore generated source for OCL
+---
+ .gitignore             |    5 ++++-
+ backend/src/.gitignore |    3 +++
+ src/.gitignore         |    2 ++
+ utests/.gitignore      |   13 +++++++++++++
+ 4 files changed, 22 insertions(+), 1 deletion(-)
+ create mode 100644 src/.gitignore
+ create mode 100644 utests/.gitignore
+
+Index: beignet-0.1+git20130514+19e9c58/.gitignore
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/.gitignore	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/.gitignore	2013-05-14 20:09:13.630022105 +0200
+@@ -1,2 +1,5 @@
+ *.o
+-*.so*
++CMakeCache.txt
++CMakeFiles/
++Makefile
++cmake_install.cmake
+Index: beignet-0.1+git20130514+19e9c58/backend/src/.gitignore
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/.gitignore	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/.gitignore	2013-05-14 20:09:13.630022105 +0200
+@@ -1 +1,4 @@
++GBEConfig.h
++libgbe.so
++ocl_common_defines_str.cpp
+ ocl_stdlib_str.cpp
+Index: beignet-0.1+git20130514+19e9c58/src/.gitignore
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/src/.gitignore	2013-05-14 20:09:13.630022105 +0200
+@@ -0,0 +1,2 @@
++OCLConfig.h
++libcl.so
+Index: beignet-0.1+git20130514+19e9c58/utests/.gitignore
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/utests/.gitignore	2013-05-14 20:09:13.630022105 +0200
+@@ -0,0 +1,13 @@
++compiler_box_blur.bmp
++compiler_box_blur_float.bmp
++compiler_clod.bmp
++compiler_julia.bmp
++compiler_julia_no_break.bmp
++compiler_mandelbrot.bmp
++compiler_mandelbrot_alternate.bmp
++compiler_menger_sponge_no_shadow.bmp
++compiler_nautilus.bmp
++compiler_ribbon.bmp
++flat_address_space
++libutests.so
++utest_run

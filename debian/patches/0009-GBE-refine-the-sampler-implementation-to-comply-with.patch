@@ -1,0 +1,418 @@
+From 951d7db26d4ae1919d52219677fcf36242b8330a Mon Sep 17 00:00:00 2001
+From: Zhigang Gong <zhigang.gong@linux.intel.com>
+Date: Mon, 13 May 2013 11:32:18 +0800
+Subject: [PATCH 09/15] GBE: refine the sampler implementation to comply with
+ spec.
+To: beignet@lists.freedesktop.org
+
+The previous implementation is to use a new address space pointer to
+represent a sampler. The reason is that there is no specified data
+type for sampler_t in LLVM front end thus we can't determine the
+sampler argument type if we use a normal interger to represnet the
+sampler. But that breaks the OCL spec, the spec allows the kernel
+to define and initialize sampler variables in kernel side.
+
+Now I use a little tricky way to fix this problem. First, I decide
+to use normal unsigned interger to represent sampler_t in kernel side.
+Then at compile time, I check read_imagexxx function's sampler
+arguments. If the argument is a constant value, then it should be a
+kernel side defined sampler, then I insert the sampler type into a
+global sampler set for the current kernel function. If the argument
+is not a constant value, then I will check whether it's a kernel
+argument, if it is, then I fix up the corresponding kernel arg type
+to SAMPLER there.
+
+To unify the kernel side defined sampler and kernel argument sampler,
+I add two new gbe API. To export all the kernel side defined sampler
+data and size to the runtime library. Then latter, the runtime library
+can use this information to append new sampler to the unified sampler
+buffer and bind all the sampler at one time.
+
+Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
+---
+ backend/src/CMakeLists.txt            |    2 +
+ backend/src/backend/program.cpp       |   20 +++++++++-
+ backend/src/backend/program.h         |    8 ++++
+ backend/src/backend/program.hpp       |   11 ++++++
+ backend/src/ir/function.cpp           |    1 +
+ backend/src/ir/function.hpp           |   11 ++++++
+ backend/src/ir/sampler.cpp            |   46 ++++++++++++++++++++++
+ backend/src/ir/sampler.hpp            |   67 +++++++++++++++++++++++++++++++++
+ backend/src/llvm/llvm_gen_backend.cpp |   22 ++++++++++-
+ backend/src/ocl_stdlib.h              |    6 +--
+ 10 files changed, 189 insertions(+), 5 deletions(-)
+ create mode 100644 backend/src/ir/sampler.cpp
+ create mode 100644 backend/src/ir/sampler.hpp
+
+Index: beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/CMakeLists.txt	2013-05-14 20:05:52.618031067 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt	2013-05-14 20:09:16.362021983 +0200
+@@ -61,6 +61,8 @@
+     ir/unit.hpp
+     ir/constant.cpp
+     ir/constant.hpp
++    ir/sampler.cpp
++    ir/sampler.hpp
+     ir/instruction.cpp
+     ir/instruction.hpp
+     ir/liveness.cpp
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.cpp	2013-05-14 20:07:18.782027225 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.cpp	2013-05-14 20:09:16.366021983 +0200
+@@ -49,10 +49,11 @@
+ namespace gbe {
+ 
+   Kernel::Kernel(const std::string &name) :
+-    name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false), ctx(NULL)
++    name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false), ctx(NULL), samplerSet(NULL)
+   {}
+   Kernel::~Kernel(void) {
+     if(ctx) GBE_DELETE(ctx);
++    if(samplerSet) GBE_DELETE(samplerSet);
+     GBE_SAFE_DELETE_ARRAY(args);
+   }
+   int32_t Kernel::getCurbeOffset(gbe_curbe_type type, uint32_t subType) const {
+@@ -90,6 +91,7 @@
+     for (const auto &pair : set) {
+       const std::string &name = pair.first;
+       Kernel *kernel = this->compileKernel(unit, name);
++      kernel->setSamplerSet(pair.second->getSamplerSet());
+       kernels.insert(std::make_pair(name, kernel));
+     }
+     return true;
+@@ -250,6 +252,18 @@
+     return kernel->setConstBufSize(argID, sz);
+   }
+ 
++  static size_t kernelGetSamplerSize(gbe_kernel gbeKernel) {
++    if (gbeKernel == NULL) return 0;
++    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
++    return kernel->getSamplerSize();
++  }
++
++  static void kernelGetSamplerData(gbe_kernel gbeKernel, uint32_t *samplers) {
++    if (gbeKernel == NULL) return;
++    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
++    kernel->getSamplerData(samplers);
++  }
++
+   static uint32_t kernelGetRequiredWorkGroupSize(gbe_kernel kernel, uint32_t dim) {
+     return 0u;
+   }
+@@ -277,6 +291,8 @@
+ GBE_EXPORT_SYMBOL gbe_kernel_set_const_buffer_size_cb *gbe_kernel_set_const_buffer_size = NULL;
+ GBE_EXPORT_SYMBOL gbe_kernel_get_required_work_group_size_cb *gbe_kernel_get_required_work_group_size = NULL;
+ GBE_EXPORT_SYMBOL gbe_kernel_use_slm_cb *gbe_kernel_use_slm = NULL;
++GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_size_cb *gbe_kernel_get_sampler_size = NULL;
++GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_data_cb *gbe_kernel_get_sampler_data = NULL;
+ 
+ namespace gbe
+ {
+@@ -304,6 +320,8 @@
+       gbe_kernel_set_const_buffer_size = gbe::kernelSetConstBufSize;
+       gbe_kernel_get_required_work_group_size = gbe::kernelGetRequiredWorkGroupSize;
+       gbe_kernel_use_slm = gbe::kernelUseSLM;
++      gbe_kernel_get_sampler_size = gbe::kernelGetSamplerSize;
++      gbe_kernel_get_sampler_data = gbe::kernelGetSamplerData;
+       genSetupCallBacks();
+     }
+   };
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.h	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.h	2013-05-14 20:09:16.366021983 +0200
+@@ -114,6 +114,14 @@
+ typedef void (gbe_program_get_global_constant_data_cb)(gbe_program gbeProgram, char *mem);
+ extern gbe_program_get_global_constant_data_cb *gbe_program_get_global_constant_data;
+ 
++/*! Get the size of defined samplers */
++typedef size_t (gbe_kernel_get_sampler_size_cb)(gbe_kernel gbeKernel);
++extern gbe_kernel_get_sampler_size_cb *gbe_kernel_get_sampler_size;
++
++/*! Get the content of defined samplers */
++typedef void (gbe_kernel_get_sampler_data_cb)(gbe_kernel gbeKernel, uint32_t *samplers);
++extern gbe_kernel_get_sampler_data_cb *gbe_kernel_get_sampler_data;
++
+ /*! Destroy and deallocate the given program */
+ typedef void (gbe_program_delete_cb)(gbe_program);
+ extern gbe_program_delete_cb *gbe_program_delete;
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.hpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.hpp	2013-05-14 20:09:16.366021983 +0200
+@@ -29,6 +29,8 @@
+ #include "backend/context.hpp"
+ #include "ir/constant.hpp"
+ #include "ir/unit.hpp"
++#include "ir/function.hpp"
++#include "ir/sampler.hpp"
+ #include "sys/hash_map.hpp"
+ #include "sys/vector.hpp"
+ #include <string>
+@@ -108,6 +110,14 @@
+       }
+       return -1;
+     }
++    /*! Set sampler set. */
++    void setSamplerSet(ir::SamplerSet *from) {
++      samplerSet = from;
++    }
++    /*! Get defined sampler size */
++    size_t getSamplerSize(void) const { return samplerSet->getDataSize(); }
++    /*! Get defined sampler value array */
++    void getSamplerData(uint32_t *samplers) const { samplerSet->getData(samplers); }
+   protected:
+     friend class Context;      //!< Owns the kernels
+     const std::string name;    //!< Kernel name
+@@ -119,6 +129,7 @@
+     uint32_t stackSize;        //!< Stack size (may be 0 if unused)
+     bool useSLM;               //!< SLM requires a special HW config
+     Context *ctx;              //!< Save context after compiler to alloc constant buffer curbe
++    ir::SamplerSet *samplerSet;//!< Copy from the corresponding function.
+     GBE_CLASS(Kernel);         //!< Use custom allocators
+   };
+ 
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/function.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/function.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/function.cpp	2013-05-14 20:09:16.366021983 +0200
+@@ -46,6 +46,7 @@
+     name(name), unit(unit), profile(profile), simdWidth(0), useSLM(false)
+   {
+     initProfile(*this);
++    samplerSet = GBE_NEW(SamplerSet);
+   }
+ 
+   Function::~Function(void) {
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/function.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/function.hpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/function.hpp	2013-05-14 20:09:16.366021983 +0200
+@@ -28,6 +28,7 @@
+ #include "ir/register.hpp"
+ #include "ir/instruction.hpp"
+ #include "ir/profile.hpp"
++#include "ir/sampler.hpp"
+ #include "sys/vector.hpp"
+ #include "sys/set.hpp"
+ #include "sys/map.hpp"
+@@ -217,6 +218,12 @@
+       for (auto arg : args) if (arg->reg == reg) return arg;
+       return NULL;
+     }
++
++    INLINE FunctionArgument *getArg(const Register &reg) {
++      for (auto arg : args) if (arg->reg == reg) return arg;
++      return NULL;
++    }
++
+     /*! Get output register */
+     INLINE Register getOutput(uint32_t ID) const { return outputs[ID]; }
+     /*! Get the argument location for the pushed register */
+@@ -281,6 +288,9 @@
+     INLINE bool getUseSLM(void) const { return this->useSLM; }
+     /*! Change the SLM config for the function */
+     INLINE bool setUseSLM(bool useSLM) { return this->useSLM = useSLM; }
++    /*! Get sampler set in this function */
++    SamplerSet* getSamplerSet(void) {return samplerSet; }
++    //const SamplerSet& getSamplerSet(void) const {return samplerSet; }
+   private:
+     friend class Context;           //!< Can freely modify a function
+     std::string name;               //!< Function name
+@@ -296,6 +306,7 @@
+     LocationMap locationMap;        //!< Pushed function arguments (loc->reg)
+     uint32_t simdWidth;             //!< 8 or 16 if forced, 0 otherwise
+     bool useSLM;                    //!< Is SLM required?
++    SamplerSet *samplerSet;
+     GBE_CLASS(Function);            //!< Use custom allocator
+   };
+ 
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.cpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.cpp	2013-05-14 20:09:16.366021983 +0200
+@@ -0,0 +1,46 @@
++/*
++ * Copyright © 2012 Intel Corporation
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++/**
++ * \file sampler.cpp
++ *
++ */
++#include "sampler.hpp"
++#include "context.hpp"
++
++namespace gbe {
++namespace ir {
++
++  Register SamplerSet::append(uint32_t samplerValue, Context *ctx)
++  {
++    int i = 0;
++
++    for(auto it = regMap.begin();
++        it != regMap.end(); ++it, ++i)
++    {
++      if (it->first == samplerValue)
++        return it->second;
++    }
++    Register reg = ctx->reg(FAMILY_DWORD);
++    ctx->LOADI(ir::TYPE_S32, reg, ctx->newIntegerImmediate(i, ir::TYPE_S32));
++    regMap.insert(std::make_pair(samplerValue, reg));
++    return reg;
++  }
++
++} /* namespace ir */
++} /* namespace gbe */
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.hpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.hpp	2013-05-14 20:09:16.366021983 +0200
+@@ -0,0 +1,67 @@
++/*
++ * Copyright © 2012 Intel Corporation
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++/**
++ * \file sampler.hpp
++ *
++ * \author Benjamin Segovia <benjamin.segovia@intel.com>
++ */
++#ifndef __GBE_IR_SAMPLER_HPP__
++#define __GBE_IR_SAMPLER_HPP__
++
++#include "ir/register.hpp"
++#include "sys/map.hpp"
++
++
++namespace gbe {
++namespace ir {
++
++  /*! A sampler set is a set of global samplers which are defined as constant global
++   * sampler or defined in the outermost kernel scope variables. According to the spec
++   * all the variable should have a initialized integer value and can't be modified.
++   */
++  class Context;
++
++  class SamplerSet
++  {
++  public:
++    /*! Append the specified sampler and return the allocated offset.
++     *  If the speficied sampler is exist, only return the previous offset and
++     *  don't append it again. Return -1, if failed.*/
++    Register append(uint32_t clkSamplerValue, Context *ctx);
++    size_t getDataSize(void) { return regMap.size(); }
++    size_t getDataSize(void) const { return regMap.size(); }
++    void getData(uint32_t *samplers) const {
++      for ( auto &it : regMap)
++        *samplers++ = it.first;
++    }
++
++    void operator = (const SamplerSet& other) {
++      regMap.insert(other.regMap.begin(), other.regMap.end());
++    }
++
++    SamplerSet(const SamplerSet& other) : regMap(other.regMap.begin(), other.regMap.end()) { }
++    SamplerSet() {}
++  private:
++    map<uint32_t, Register> regMap;
++    GBE_CLASS(SamplerSet);
++  };
++} /* namespace ir */
++} /* namespace gbe */
++
++#endif /* __GBE_IR_SAMPLER_HPP__ */
+Index: beignet-0.1+git20130514+19e9c58/backend/src/llvm/llvm_gen_backend.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/llvm/llvm_gen_backend.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/llvm/llvm_gen_backend.cpp	2013-05-14 20:09:16.370021983 +0200
+@@ -1990,7 +1990,27 @@
+           case GEN_OCL_READ_IMAGE15:
+           {
+             GBE_ASSERT(AI != AE); const ir::Register surface_id = this->getRegister(*AI); ++AI;
+-            GBE_ASSERT(AI != AE); const ir::Register sampler = this->getRegister(*AI); ++AI;
++            GBE_ASSERT(AI != AE);
++            Constant *CPV = dyn_cast<Constant>(*AI);
++            ir::Register sampler;
++            if (CPV != NULL)
++            {
++              // This is not a kernel argument sampler, we need to append it to sampler set,
++              // and allocate a sampler slot for it.
++               auto x = processConstant<ir::Immediate>(CPV, InsertExtractFunctor(ctx));
++               GBE_ASSERTM(x.type == ir::TYPE_U32 || x.type == ir::TYPE_S32, "Invalid sampler type");
++               sampler = ctx.getFunction().getSamplerSet()->append(x.data.u32, &ctx);
++            } else {
++              // XXX As LLVM 3.2/3.1 doesn't have a new data type for the sampler_t, we have to fix up the argument
++              // type here. Once we switch to the LLVM and use the new data type sampler_t, we can remove this
++              // work around.
++              sampler = this->getRegister(*AI);
++              ir::FunctionArgument *arg =  ctx.getFunction().getArg(sampler);
++              GBE_ASSERT(arg != NULL);
++              arg->type = ir::FunctionArgument::SAMPLER;
++            }
++            ++AI;
++
+             GBE_ASSERT(AI != AE); const ir::Register ucoord = this->getRegister(*AI); ++AI;
+             GBE_ASSERT(AI != AE); const ir::Register vcoord = this->getRegister(*AI); ++AI;
+             ir::Register wcoord;
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ocl_stdlib.h	2013-05-14 20:09:02.546022599 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h	2013-05-14 20:09:16.370021983 +0200
+@@ -46,7 +46,6 @@
+ #define __constant __attribute__((address_space(2)))
+ #define __local __attribute__((address_space(3)))
+ #define __texture __attribute__((address_space(4)))
+-#define __sampler __attribute__((address_space(5)))
+ #define global __global
+ //#define local __local
+ #define constant __constant
+@@ -77,7 +76,8 @@
+ typedef __texture struct _image2d_t* image2d_t;
+ struct _image3d_t;
+ typedef __texture struct _image3d_t* image3d_t;
+-typedef __sampler uint* sampler_t;
++//typedef __sampler const uint* sampler_t;
++typedef uint sampler_t;
+ typedef size_t event_t;
+ 
+ /////////////////////////////////////////////////////////////////////////////
+@@ -3966,7 +3966,7 @@
+   INLINE_OVERLOADABLE type read_image ##suffix(image2d_t cl_image, sampler_t sampler, coord_type coord) \
+   {\
+     GET_IMAGE(cl_image, surface_id);\
+-    return __gen_ocl_read_image ##suffix(surface_id, (uint)sampler, coord.s0, coord.s1);\
++    return __gen_ocl_read_image ##suffix(surface_id, sampler, coord.s0, coord.s1);\
+   }
+ 
+ #define DECL_WRITE_IMAGE(type, suffix, coord_type) \

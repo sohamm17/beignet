@@ -1,0 +1,1027 @@
+From 4a767da3faa8ed91a3edb61a8c42a1c8c0e8b7b8 Mon Sep 17 00:00:00 2001
+From: Zhigang Gong <zhigang.gong@linux.intel.com>
+Date: Mon, 13 May 2013 11:32:24 +0800
+Subject: [PATCH 15/15] GBE/Runtime: Optimize Sample/TypedWrite instruction.
+To: beignet@lists.freedesktop.org
+
+This commit does two major things as below:
+1. Allocate image surface at compile time, and add new gbe interfaces to let runtime know
+how many image surfaces we have, and the image allocation informations. Thus the runtime
+library know how to bind those image surfaces.
+
+2. As now for both image and sampler, at compile time, we know the eaxct binding table
+index. We no longer need to get those index from the input argument(curbe) and prepare
+the desc to the architecture register. We can use imm as the desc thus we can save
+4 out of 4 instructions for SampleInstruction and save 2 out of 12 instructions for
+the TypedWriteInstruction.
+
+This patch is also a major prepartion for the get_image_width/height/... functions.
+
+Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
+---
+ backend/src/CMakeLists.txt                 |    2 +
+ backend/src/backend/gen_context.cpp        |   43 ++++++-----------
+ backend/src/backend/gen_encoder.cpp        |   66 ++++++++++++++++++++++----
+ backend/src/backend/gen_encoder.hpp        |   10 ++--
+ backend/src/backend/gen_insn_selection.cpp |   44 +++++++++++-------
+ backend/src/backend/program.cpp            |   33 ++++++++++++-
+ backend/src/backend/program.h              |   25 ++++++++++
+ backend/src/backend/program.hpp            |    9 ++++
+ backend/src/ir/function.cpp                |    1 +
+ backend/src/ir/function.hpp                |    4 ++
+ backend/src/ir/image.cpp                   |   69 ++++++++++++++++++++++++++++
+ backend/src/ir/image.hpp                   |   65 ++++++++++++++++++++++++++
+ backend/src/ir/instruction.hpp             |    7 +++
+ backend/src/ir/sampler.cpp                 |    3 +-
+ backend/src/llvm/llvm_gen_backend.cpp      |    1 +
+ src/cl_command_queue.c                     |   29 +++++++-----
+ src/cl_command_queue.h                     |    3 ++
+ src/cl_command_queue_gen7.c                |    2 +
+ src/cl_driver.h                            |   17 +++----
+ src/cl_kernel.c                            |   20 ++++++++
+ src/cl_kernel.h                            |    2 +
+ src/intel/intel_driver.c                   |    7 ++-
+ src/intel/intel_gpgpu.c                    |   27 ++---------
+ 23 files changed, 383 insertions(+), 106 deletions(-)
+ create mode 100644 backend/src/ir/image.cpp
+ create mode 100644 backend/src/ir/image.hpp
+
+Index: beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/CMakeLists.txt	2013-05-14 20:09:16.362021983 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/CMakeLists.txt	2013-05-14 20:09:28.634021436 +0200
+@@ -63,6 +63,8 @@
+     ir/constant.hpp
+     ir/sampler.cpp
+     ir/sampler.hpp
++    ir/image.cpp
++    ir/image.hpp
+     ir/instruction.cpp
+     ir/instruction.hpp
+     ir/liveness.cpp
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_context.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/gen_context.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_context.cpp	2013-05-14 20:09:28.634021436 +0200
+@@ -287,47 +287,36 @@
+   void GenContext::emitSampleInstruction(const SelectionInstruction &insn) {
+     const GenRegister dst = ra->genReg(insn.dst(0));
+     const GenRegister msgPayload = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_F);
+-    const GenRegister bti = ra->genReg(insn.src(4));
+-    const GenRegister sampler = ra->genReg(insn.src(5));
+-    const GenRegister ucoord = ra->genReg(insn.src(6));
+-    const GenRegister vcoord = ra->genReg(insn.src(7));
+-    const GenRegister wcoord = ra->genReg(insn.src(8));
+-    const GenRegister temp = GenRegister::ud1grf(msgPayload.nr, msgPayload.subnr/sizeof(float) + 4);
+-    const GenRegister a0_0 = GenRegister::ud1arf(GEN_ARF_ADDRESS, 0);
++    const unsigned char bti = insn.extra.function;
++    const unsigned char sampler = insn.extra.elem;
++    const GenRegister ucoord = ra->genReg(insn.src(4));
++    const GenRegister vcoord = ra->genReg(insn.src(5));
++    const GenRegister wcoord = ra->genReg(insn.src(6));
+     uint32_t simdWidth = p->curr.execWidth;
+     p->push();
+     const uint32_t nr = msgPayload.nr;
+     // prepare mesg desc and move to a0.0.
+     // desc = bti | (sampler << 8) | (0 << 12) | (2 << 16) | (0 << 18) | (0 << 19) | (4 << 20) | (1 << 25) | (0 < 29) | (0 << 31)
+-    p->curr.execWidth = 1;
+-    p->MOV(a0_0, GenRegister::immud((GEN_SAMPLER_MESSAGE_SIMD16_SAMPLE << 12) | (2 << 17)
+-                                    | ((4 * (simdWidth/8)) << 20)
+-                                    | ((2 * (simdWidth/8)) << 25)));
+-    p->SHL(temp, GenRegister::ud1grf(sampler.nr, sampler.subnr/sizeof(float)), GenRegister::immud(8));
+-    p->OR(a0_0, a0_0, temp);
+-    p->OR(a0_0, a0_0, GenRegister::ud1grf(bti.nr, bti.subnr/sizeof(float)));
+-    p->curr.execWidth = simdWidth;
+     /* Prepare message payload. */
+     p->MOV(GenRegister::f8grf(nr , 0), ucoord);
+     p->MOV(GenRegister::f8grf(nr + (simdWidth/8), 0), vcoord);
+     if (insn.src(8).reg() != 0)
+       p->MOV(GenRegister::f8grf(nr + (simdWidth/4), 0), wcoord);
+-    p->SAMPLE(dst, msgPayload, a0_0, -1, 0);
++    p->SAMPLE(dst, msgPayload, false, bti, sampler, simdWidth, -1, 0);
+ 
+     p->pop();
+   }
+ 
+   void GenContext::emitTypedWriteInstruction(const SelectionInstruction &insn) {
+     const GenRegister header = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+-    const GenRegister bti = ra->genReg(insn.src(0 + insn.extra.elem));
+-    const GenRegister ucoord = ra->genReg(insn.src(1 + insn.extra.elem));
+-    const GenRegister vcoord = ra->genReg(insn.src(2 + insn.extra.elem));
+-    const GenRegister wcoord = ra->genReg(insn.src(3 + insn.extra.elem));
+-    const GenRegister R = ra->genReg(insn.src(4 + insn.extra.elem));
+-    const GenRegister G = ra->genReg(insn.src(5 + insn.extra.elem));
+-    const GenRegister B = ra->genReg(insn.src(6 + insn.extra.elem));
+-    const GenRegister A = ra->genReg(insn.src(7 + insn.extra.elem));
+-    const GenRegister a0_0 = GenRegister::ud1arf(GEN_ARF_ADDRESS, 0);
++    const GenRegister ucoord = ra->genReg(insn.src(insn.extra.elem));
++    const GenRegister vcoord = ra->genReg(insn.src(1 + insn.extra.elem));
++    const GenRegister wcoord = ra->genReg(insn.src(2 + insn.extra.elem));
++    const GenRegister R = ra->genReg(insn.src(3 + insn.extra.elem));
++    const GenRegister G = ra->genReg(insn.src(4 + insn.extra.elem));
++    const GenRegister B = ra->genReg(insn.src(5 + insn.extra.elem));
++    const GenRegister A = ra->genReg(insn.src(6 + insn.extra.elem));
++    const unsigned char bti = insn.extra.function;
+ 
+     p->push();
+     uint32_t simdWidth = p->curr.execWidth;
+@@ -339,8 +328,6 @@
+ 
+     // prepare mesg desc and move to a0.0.
+     // desc = bti | (msg_type << 14) | (header_present << 19))
+-    p->MOV(a0_0, GenRegister::immud((GEN_TYPED_WRITE << 14) | (1 << 19) | (9 << 25)));
+-    p->OR(a0_0, a0_0, GenRegister::ud1grf(bti.nr, bti.subnr/sizeof(float)));
+     // prepare header, we need to enable all the 8 planes.
+     p->MOV(GenRegister::ud8grf(nr, 7), GenRegister::immud(0xff));
+     // Typed write only support SIMD8.
+@@ -368,7 +355,7 @@
+       QUARTER_MOV1(nr + 7, B);
+       QUARTER_MOV1(nr + 8, A);
+ #undef QUARTER_MOV
+-      p->TYPED_WRITE(header, a0_0);
++      p->TYPED_WRITE(header, true, bti);
+     }
+ 
+     p->pop();
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_encoder.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/gen_encoder.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_encoder.cpp	2013-05-14 20:09:28.634021436 +0200
+@@ -166,6 +166,39 @@
+   }
+ #endif
+ 
++  static void setSamplerMessage(GenEncoder *p,
++                                GenInstruction *insn,
++                                unsigned char bti,
++                                unsigned char sampler,
++                                uint32_t msg_type,
++                                uint32_t response_length,
++                                uint32_t msg_length,
++                                bool header_present,
++                                uint32_t simd_mode,
++                                uint32_t return_format)
++  {
++     const GenMessageTarget sfid = GEN_SFID_SAMPLER;
++     setMessageDescriptor(p, insn, sfid, msg_length, response_length);
++     insn->bits3.sampler_gen7.bti = bti;
++     insn->bits3.sampler_gen7.sampler = sampler;
++     insn->bits3.sampler_gen7.msg_type = msg_type;
++     insn->bits3.sampler_gen7.simd_mode = simd_mode;
++  }
++
++
++  static void setTypedWriteMessage(GenEncoder *p,
++                                   GenInstruction *insn,
++                                   unsigned char bti,
++                                   unsigned char msg_type,
++                                   uint32_t msg_length,
++                                   bool header_present)
++  {
++     const GenMessageTarget sfid = GEN6_SFID_DATAPORT_RENDER_CACHE;
++     setMessageDescriptor(p, insn, sfid, msg_length, 0, header_present);
++     insn->bits3.gen7_typed_rw.bti = bti;
++     insn->bits3.gen7_typed_rw.msg_type = msg_type;
++  }
++
+   //////////////////////////////////////////////////////////////////////////
+   // Gen Emitter encoding class
+   //////////////////////////////////////////////////////////////////////////
+@@ -800,31 +833,44 @@
+   }
+ 
+   void GenEncoder::SAMPLE(GenRegister dest,
+-                          GenRegister src0,
+-                          GenRegister src1,
++                          GenRegister msg,
++                          bool header_present,
++                          unsigned char bti,
++                          unsigned char sampler,
++                          uint32_t simdWidth,
+                           uint32_t writemask,
+                           uint32_t return_format)
+   {
+      if (writemask == 0) return;
+-
++     uint32_t msg_type = (simdWidth == 16) ?
++                            GEN_SAMPLER_MESSAGE_SIMD16_SAMPLE : GEN_SAMPLER_MESSAGE_SIMD8_SAMPLE;
++     uint32_t response_length = (4 * (simdWidth / 8));
++     uint32_t msg_length = (2 * (simdWidth / 8));
++     if (header_present)
++       msg_length++;
++     uint32_t simd_mode = (simdWidth == 16) ?
++                            GEN_SAMPLER_SIMD_MODE_SIMD16 : GEN_SAMPLER_SIMD_MODE_SIMD8;
+      GenInstruction *insn = this->next(GEN_OPCODE_SEND);
+      insn->header.predicate_control = 0; /* XXX */
+      this->setHeader(insn);
+      this->setDst(insn, dest);
+-     this->setSrc0(insn, src0);
+-     this->setSrc1(insn, src1);
+-     insn->header.destreg_or_condmod = GEN_SFID_SAMPLER;
++     this->setSrc0(insn, msg);
++     setSamplerMessage(this, insn, bti, sampler, msg_type,
++                       response_length, msg_length,
++                       header_present,
++                       simd_mode, return_format);
+   }
+ 
+-  void GenEncoder::TYPED_WRITE(GenRegister header, GenRegister desc)
++  void GenEncoder::TYPED_WRITE(GenRegister msg, bool header_present, unsigned char bti)
+   {
+      GenInstruction *insn = this->next(GEN_OPCODE_SEND);
++     uint32_t msg_type = GEN_TYPED_WRITE;
++     uint32_t msg_length = header_present ? 9 : 8;
+      insn->header.predicate_control = 0; /* XXX */
+      this->setHeader(insn);
+      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+-     this->setSrc0(insn, header);
+-     this->setSrc1(insn, desc);
+-     insn->header.destreg_or_condmod = GEN6_SFID_DATAPORT_RENDER_CACHE;
++     this->setSrc0(insn, msg);
++     setTypedWriteMessage(this, insn, bti, msg_type, msg_length, header_present);
+   }
+ 
+   void GenEncoder::EOT(uint32_t msg) {
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_encoder.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/gen_encoder.hpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_encoder.hpp	2013-05-14 20:09:28.634021436 +0200
+@@ -140,14 +140,18 @@
+     void BYTE_SCATTER(GenRegister src, uint32_t bti, uint32_t elemSize);
+     /*! Send instruction for the sampler */
+     void SAMPLE(GenRegister dest,
+-                GenRegister src0,
+-                GenRegister src1,
++                GenRegister msg,
++                bool header_present,
++                unsigned char bti,
++                unsigned char sampler,
++                unsigned int simdWidth,
+                 uint32_t writemask,
+                 uint32_t return_format);
+ 
+     /*! TypedWrite instruction for texture */
+     void TYPED_WRITE(GenRegister header,
+-                     GenRegister desc);
++                     bool header_present,
++                     unsigned char bti);
+     /*! Extended math function (2 sources) */
+     void MATH(GenRegister dst, uint32_t function, GenRegister src0, GenRegister src1);
+     /*! Extended math function (1 source) */
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_insn_selection.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/gen_insn_selection.cpp	2013-05-14 20:09:25.126021592 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/gen_insn_selection.cpp	2013-05-14 20:09:28.638021436 +0200
+@@ -466,9 +466,9 @@
+     /*! Encode ternary instructions */
+     void ALU3(SelectionOpcode opcode, Reg dst, Reg src0, Reg src1, Reg src2);
+     /*! Encode sample instructions */
+-    void SAMPLE(GenRegister *dst, uint32_t dstNum, GenRegister *src, uint32_t srcNum, GenRegister *msgPayloads, uint32_t msgNum);
++    void SAMPLE(GenRegister *dst, uint32_t dstNum, GenRegister *src, uint32_t srcNum, GenRegister *msgPayloads, uint32_t msgNum, uint32_t bti, uint32_t sampler);
+     /*! Encode typed write instructions */
+-    void TYPED_WRITE(GenRegister *src, uint32_t srcNum, GenRegister *msgs, uint32_t msgNum);
++    void TYPED_WRITE(GenRegister *src, uint32_t srcNum, GenRegister *msgs, uint32_t msgNum, uint32_t bti);
+     /*! Use custom allocators */
+     GBE_CLASS(Opaque);
+     friend class SelectionBlock;
+@@ -964,8 +964,11 @@
+       this->matchBasicBlock(insnNum);
+     });
+    }
+- /* XXX always 4 return values? */
+-  void Selection::Opaque::SAMPLE(GenRegister *dst, uint32_t dstNum, GenRegister *src, uint32_t srcNum, GenRegister *msgPayloads, uint32_t msgNum) {
++
++  void Selection::Opaque::SAMPLE(GenRegister *dst, uint32_t dstNum,
++                                 GenRegister *src, uint32_t srcNum,
++                                 GenRegister *msgPayloads, uint32_t msgNum,
++                                 uint32_t bti, uint32_t sampler) {
+     SelectionInstruction *insn = this->appendInsn(SEL_OP_SAMPLE, dstNum, msgNum + srcNum);
+     SelectionVector *dstVector = this->appendVector();
+     SelectionVector *msgVector = this->appendVector();
+@@ -987,6 +990,9 @@
+     msgVector->regNum = msgNum;
+     msgVector->isSrc = 1;
+     msgVector->reg = &insn->src(0);
++
++    insn->extra.function = bti;
++    insn->extra.elem = sampler;
+   }
+ 
+   ///////////////////////////////////////////////////////////////////////////
+@@ -999,7 +1005,8 @@
+   }
+ 
+   void Selection::Opaque::TYPED_WRITE(GenRegister *src, uint32_t srcNum,
+-                              GenRegister *msgs, uint32_t msgNum) {
++                                      GenRegister *msgs, uint32_t msgNum,
++                                      uint32_t bti) {
+     uint32_t elemID = 0;
+     uint32_t i;
+     SelectionInstruction *insn = this->appendInsn(SEL_OP_TYPED_WRITE, 0, msgNum + srcNum);
+@@ -1010,6 +1017,7 @@
+     for (i = 0; i < srcNum; ++i, ++elemID)
+       insn->src(elemID) = src[i];
+ 
++    insn->extra.function = bti;
+     insn->extra.elem = msgNum;
+     // Sends require contiguous allocation
+     msgVector->regNum = msgNum;
+@@ -1965,7 +1973,7 @@
+     {
+       using namespace ir;
+       GenRegister msgPayloads[4];
+-      GenRegister dst[insn.getDstNum()], src[insn.getSrcNum()];
++      GenRegister dst[insn.getDstNum()], src[insn.getSrcNum() - 2];
+ 
+       for( int i = 0; i < 4; ++i)
+         msgPayloads[i] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+@@ -1973,10 +1981,15 @@
+       for (uint32_t valueID = 0; valueID < insn.getDstNum(); ++valueID)
+         dst[valueID] = sel.selReg(insn.getDst(valueID), insn.getDstType());
+ 
+-      for (uint32_t valueID = 0; valueID < insn.getSrcNum(); ++valueID)
+-        src[valueID] = sel.selReg(insn.getSrc(valueID), insn.getSrcType());
++      for (uint32_t valueID = 0; valueID < insn.getSrcNum() - 2; ++valueID)
++        src[valueID] = sel.selReg(insn.getSrc(valueID + 2), insn.getSrcType());
++
++      uint32_t bti = sel.ctx.getFunction().getImageSet()->getIdx
++                       (insn.getSrc(SampleInstruction::SURFACE_BTI));
++      uint32_t sampler = sel.ctx.getFunction().getSamplerSet()->getIdx
++                           (insn.getSrc(SampleInstruction::SAMPLER_BTI));
+ 
+-      sel.SAMPLE(dst, insn.getDstNum(), src, insn.getSrcNum(), msgPayloads, 4);
++      sel.SAMPLE(dst, insn.getDstNum(), src, insn.getSrcNum() - 2, msgPayloads, 4, bti, sampler);
+       return true;
+     }
+     DECL_CTOR(SampleInstruction, 1, 1);
+@@ -1998,17 +2011,16 @@
+       for(uint32_t i = 0; i < msgNum; i++)
+         msgs[i] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+ 
+-      // bti always uses TYPE_U32.
+-      src[valueID] = sel.selReg(insn.getSrc(valueID), TYPE_U32);
+-      valueID++;
+       // u, v, w coords should use coord type.
+       for (; valueID < 1 + coordNum; ++valueID)
+-        src[valueID] = sel.selReg(insn.getSrc(valueID), insn.getCoordType());
++        src[valueID] = sel.selReg(insn.getSrc(valueID + 1), insn.getCoordType());
+ 
+-      for (; valueID < insn.getSrcNum(); ++valueID)
+-        src[valueID] = sel.selReg(insn.getSrc(valueID), insn.getSrcType());
++      for (; (valueID + 1) < insn.getSrcNum(); ++valueID)
++        src[valueID] = sel.selReg(insn.getSrc(valueID + 1), insn.getSrcType());
+ 
+-      sel.TYPED_WRITE(src, insn.getSrcNum(), msgs, msgNum);
++      uint32_t bti = sel.ctx.getFunction().getImageSet()->getIdx
++                       (insn.getSrc(TypedWriteInstruction::SURFACE_BTI));
++      sel.TYPED_WRITE(src, insn.getSrcNum() - 1, msgs, msgNum, bti);
+       return true;
+     }
+     DECL_CTOR(TypedWriteInstruction, 1, 1);
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.cpp	2013-05-14 20:09:16.366021983 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.cpp	2013-05-14 20:09:28.638021436 +0200
+@@ -49,11 +49,12 @@
+ namespace gbe {
+ 
+   Kernel::Kernel(const std::string &name) :
+-    name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false), ctx(NULL), samplerSet(NULL)
++    name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false), ctx(NULL), samplerSet(NULL), imageSet(NULL)
+   {}
+   Kernel::~Kernel(void) {
+     if(ctx) GBE_DELETE(ctx);
+     if(samplerSet) GBE_DELETE(samplerSet);
++    if(imageSet) GBE_DELETE(imageSet);
+     GBE_SAFE_DELETE_ARRAY(args);
+   }
+   int32_t Kernel::getCurbeOffset(gbe_curbe_type type, uint32_t subType) const {
+@@ -92,6 +93,7 @@
+       const std::string &name = pair.first;
+       Kernel *kernel = this->compileKernel(unit, name);
+       kernel->setSamplerSet(pair.second->getSamplerSet());
++      kernel->setImageSet(pair.second->getImageSet());
+       kernels.insert(std::make_pair(name, kernel));
+     }
+     return true;
+@@ -264,6 +266,27 @@
+     kernel->getSamplerData(samplers);
+   }
+ 
++  static size_t kernelGetImageSize(gbe_kernel gbeKernel) {
++    if (gbeKernel == NULL) return 0;
++    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
++    return kernel->getImageSize();
++  }
++
++  static void kernelGetImageData(gbe_kernel gbeKernel, ImageInfo *images) {
++    if (gbeKernel == NULL) return;
++    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
++    kernel->getImageData(images);
++  }
++
++  static uint32_t gbeImageBaseIndex = 0;
++  static void setImageBaseIndex(uint32_t baseIdx) {
++     gbeImageBaseIndex = baseIdx;
++  }
++
++  static uint32_t getImageBaseIndex() {
++    return gbeImageBaseIndex;
++  }
++
+   static uint32_t kernelGetRequiredWorkGroupSize(gbe_kernel kernel, uint32_t dim) {
+     return 0u;
+   }
+@@ -293,6 +316,10 @@
+ GBE_EXPORT_SYMBOL gbe_kernel_use_slm_cb *gbe_kernel_use_slm = NULL;
+ GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_size_cb *gbe_kernel_get_sampler_size = NULL;
+ GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_data_cb *gbe_kernel_get_sampler_data = NULL;
++GBE_EXPORT_SYMBOL gbe_kernel_get_image_size_cb *gbe_kernel_get_image_size = NULL;
++GBE_EXPORT_SYMBOL gbe_kernel_get_image_data_cb *gbe_kernel_get_image_data = NULL;
++GBE_EXPORT_SYMBOL gbe_set_image_base_index_cb *gbe_set_image_base_index = NULL;
++GBE_EXPORT_SYMBOL gbe_get_image_base_index_cb *gbe_get_image_base_index = NULL;
+ 
+ namespace gbe
+ {
+@@ -322,6 +349,10 @@
+       gbe_kernel_use_slm = gbe::kernelUseSLM;
+       gbe_kernel_get_sampler_size = gbe::kernelGetSamplerSize;
+       gbe_kernel_get_sampler_data = gbe::kernelGetSamplerData;
++      gbe_kernel_get_image_size = gbe::kernelGetImageSize;
++      gbe_kernel_get_image_data = gbe::kernelGetImageData;
++      gbe_get_image_base_index = gbe::getImageBaseIndex;
++      gbe_set_image_base_index = gbe::setImageBaseIndex;
+       genSetupCallBacks();
+     }
+   };
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.h	2013-05-14 20:09:16.366021983 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.h	2013-05-14 20:09:28.638021436 +0200
+@@ -87,6 +87,31 @@
+   GBE_CONSTANT_BUFFER = 1 /* constant buffer argument location in curbe */
+ };
+ 
++typedef struct ImageInfo {
++    int32_t arg_idx;
++    int32_t idx;
++    int32_t wSlot;
++    int32_t hSlot;
++    int32_t depthSlot;
++    int32_t dataTypeSlot;
++    int32_t channelOrderSlot;
++    int32_t dimOrderSlot;
++} ImageInfo;
++
++typedef void (gbe_set_image_base_index_cb)(uint32_t base_idx);
++extern gbe_set_image_base_index_cb *gbe_set_image_base_index;
++
++typedef uint32_t (gbe_get_image_base_index_cb)();
++extern gbe_get_image_base_index_cb *gbe_get_image_base_index;
++
++/*! Get the size of defined images */
++typedef size_t (gbe_kernel_get_image_size_cb)(gbe_kernel gbeKernel);
++extern gbe_kernel_get_image_size_cb *gbe_kernel_get_image_size;
++
++/*! Get the content of defined images */
++typedef void (gbe_kernel_get_image_data_cb)(gbe_kernel gbeKernel, ImageInfo *images);
++extern gbe_kernel_get_image_data_cb *gbe_kernel_get_image_data;
++
+ /*! Create a new program from the given source code (zero terminated string) */
+ typedef gbe_program (gbe_program_new_from_source_cb)(const char *source,
+                                                      size_t stringSize,
+Index: beignet-0.1+git20130514+19e9c58/backend/src/backend/program.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/backend/program.hpp	2013-05-14 20:09:16.366021983 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/backend/program.hpp	2013-05-14 20:09:28.638021436 +0200
+@@ -118,6 +118,14 @@
+     size_t getSamplerSize(void) const { return samplerSet->getDataSize(); }
+     /*! Get defined sampler value array */
+     void getSamplerData(uint32_t *samplers) const { samplerSet->getData(samplers); }
++    /*! Set image set. */
++    void setImageSet(ir::ImageSet * from) {
++      imageSet = from;
++    }
++    /*! Get defined image size */
++    size_t getImageSize(void) const { return imageSet->getDataSize(); }
++    /*! Get defined image value array */
++    void getImageData(ImageInfo *images) const { imageSet->getData(images); }
+   protected:
+     friend class Context;      //!< Owns the kernels
+     const std::string name;    //!< Kernel name
+@@ -130,6 +138,7 @@
+     bool useSLM;               //!< SLM requires a special HW config
+     Context *ctx;              //!< Save context after compiler to alloc constant buffer curbe
+     ir::SamplerSet *samplerSet;//!< Copy from the corresponding function.
++    ir::ImageSet *imageSet;    //!< Copy from the corresponding function.
+     GBE_CLASS(Kernel);         //!< Use custom allocators
+   };
+ 
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/function.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/function.cpp	2013-05-14 20:09:16.366021983 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/function.cpp	2013-05-14 20:09:28.638021436 +0200
+@@ -47,6 +47,7 @@
+   {
+     initProfile(*this);
+     samplerSet = GBE_NEW(SamplerSet);
++    imageSet = GBE_NEW(ImageSet);
+   }
+ 
+   Function::~Function(void) {
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/function.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/function.hpp	2013-05-14 20:09:26.818021517 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/function.hpp	2013-05-14 20:09:28.638021436 +0200
+@@ -29,6 +29,7 @@
+ #include "ir/instruction.hpp"
+ #include "ir/profile.hpp"
+ #include "ir/sampler.hpp"
++#include "ir/image.hpp"
+ #include "sys/vector.hpp"
+ #include "sys/set.hpp"
+ #include "sys/map.hpp"
+@@ -302,6 +303,8 @@
+     INLINE bool setUseSLM(bool useSLM) { return this->useSLM = useSLM; }
+     /*! Get sampler set in this function */
+     SamplerSet* getSamplerSet(void) const {return samplerSet; }
++    /*! Get image set in this function */
++    ImageSet* getImageSet(void) const {return imageSet; }
+   private:
+     friend class Context;           //!< Can freely modify a function
+     std::string name;               //!< Function name
+@@ -318,6 +321,7 @@
+     uint32_t simdWidth;             //!< 8 or 16 if forced, 0 otherwise
+     bool useSLM;                    //!< Is SLM required?
+     SamplerSet *samplerSet;          //!< samplers used in this function.
++    ImageSet* imageSet;              //!< Image set in this function's arguments..
+     GBE_CLASS(Function);            //!< Use custom allocator
+   };
+ 
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/image.cpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/image.cpp	2013-05-14 20:09:28.638021436 +0200
+@@ -0,0 +1,69 @@
++/*
++ * Copyright © 2012 Intel Corporation
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++/**
++ * \file image.cpp
++ *
++ */
++#include "image.hpp"
++#include "context.hpp"
++#include "ocl_common_defines.h"
++#include "backend/program.h"
++
++namespace gbe {
++namespace ir {
++
++  void ImageSet::append(Register imageReg, Context *ctx)
++  {
++    ir::FunctionArgument *arg =  ctx->getFunction().getArg(imageReg);
++    GBE_ASSERTM(arg && arg->type == ir::FunctionArgument::IMAGE, "Append an invalid reg to image set.");
++    GBE_ASSERTM(regMap.find(imageReg) == regMap.end(), "Append the same image reg twice.");
++
++    int32_t id = ctx->getFunction().getArgID(arg);
++    struct ImageInfo *imageInfo = GBE_NEW(struct ImageInfo);
++    imageInfo->arg_idx = id;
++    imageInfo->idx = regMap.size() + gbe_get_image_base_index();
++    imageInfo->wSlot = -1;
++    imageInfo->hSlot = -1;
++    imageInfo->depthSlot = -1;
++    imageInfo->dataTypeSlot = -1;
++    imageInfo->channelOrderSlot = -1;
++    imageInfo->dimOrderSlot = -1;
++
++    regMap.insert(std::make_pair(imageReg, imageInfo));
++  }
++
++  const uint32_t ImageSet::getIdx(const Register imageReg) const
++  {
++    auto it = regMap.find(imageReg);
++    GBE_ASSERT(it != regMap.end());
++    return it->second->idx;
++  }
++
++  void ImageSet::getData(struct ImageInfo *imageInfos) const {
++      for(auto &it : regMap)
++        imageInfos[it.second->idx - gbe_get_image_base_index()] = *it.second;
++  }
++
++  ImageSet::~ImageSet() {
++    for(auto &it : regMap)
++      GBE_DELETE(it.second);
++  }
++
++} /* namespace ir */
++} /* namespace gbe */
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/image.hpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/image.hpp	2013-05-14 20:09:28.638021436 +0200
+@@ -0,0 +1,65 @@
++/*
++ * Copyright © 2012 Intel Corporation
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++/**
++ * \file image.hpp
++ *
++ */
++#ifndef __GBE_IR_IMAGE_HPP__
++#define __GBE_IR_IMAGE_HPP__
++
++#include "ir/register.hpp"
++#include "sys/map.hpp"
++
++extern "C" {
++  struct ImageInfo;
++}
++
++namespace gbe {
++namespace ir {
++
++  class Context;
++  /*! An image set is a set of images which are defined in kernel args.
++   *  We use this set to gather the images here and allocate a unique index
++   *  for each individual image. And that individual image could be used
++   *  at backend to identify this image's location.
++   */
++  class ImageSet
++  {
++  public:
++    /*! Append an image argument. */
++    void append(Register imageReg, Context *ctx);
++    /*! Get the image's index(actual location). */
++    const uint32_t getIdx(const Register imageReg) const;
++    size_t getDataSize(void) { return regMap.size(); }
++    size_t getDataSize(void) const { return regMap.size(); }
++    void getData(struct ImageInfo *imageInfos) const;
++    void operator = (const ImageSet& other) {
++      regMap.insert(other.regMap.begin(), other.regMap.end());
++    }
++    ImageSet(const ImageSet& other) : regMap(other.regMap.begin(), other.regMap.end()) { }
++    ImageSet() {}
++    ~ImageSet();
++  private:
++    map<Register, struct ImageInfo *> regMap;
++    GBE_CLASS(ImageSet);
++  };
++} /* namespace ir */
++} /* namespace gbe */
++
++#endif /* __GBE_IR_IMAGE_HPP__ */
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/instruction.hpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/instruction.hpp	2013-05-14 20:09:23.482021666 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/instruction.hpp	2013-05-14 20:09:28.642021436 +0200
+@@ -297,6 +297,9 @@
+   /*! Store data in an texture */
+   class TypedWriteInstruction : public Instruction {
+   public:
++    enum {
++     SURFACE_BTI = 0
++    };
+     /*! Return true if the given instruction is an instance of this class */
+     static bool isClassOf(const Instruction &insn);
+     Type getSrcType(void) const;
+@@ -306,6 +309,10 @@
+   /*! Load texels from a texture */
+   class SampleInstruction : public Instruction {
+   public:
++    enum {
++     SURFACE_BTI = 0,
++     SAMPLER_BTI = 1
++    };
+     /*! Return true if the given instruction is an instance of this class */
+     static bool isClassOf(const Instruction &insn);
+     Type getSrcType(void) const;
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/sampler.cpp	2013-05-14 20:09:26.818021517 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/sampler.cpp	2013-05-14 20:09:28.642021436 +0200
+@@ -36,12 +36,10 @@
+ 
+   void SamplerSet::appendReg(const Register reg, uint32_t key, Context *ctx) {
+     struct SamplerRegSlot samplerSlot;
+-    // This register is just used as a key.
+     samplerSlot.reg = reg;
+     samplerSlot.slot = samplerMap.size();
+     samplerMap.insert(std::make_pair(key, samplerSlot));
+     regMap.insert(std::make_pair(samplerSlot.reg, samplerSlot));
+-    ctx->LOADI(ir::TYPE_S32, samplerSlot.reg, ctx->newIntegerImmediate(samplerSlot.slot, ir::TYPE_S32));
+   }
+ 
+   Register SamplerSet::append(uint32_t samplerValue, Context *ctx)
+@@ -49,6 +47,7 @@
+     auto it = samplerMap.find(samplerValue);
+     if (it != samplerMap.end())
+         return it->second.reg;
++    // This register is just used as a key.
+     Register reg = ctx->reg(FAMILY_DWORD);
+     appendReg(reg, samplerValue, ctx);
+     return reg;
+Index: beignet-0.1+git20130514+19e9c58/backend/src/llvm/llvm_gen_backend.cpp
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/llvm/llvm_gen_backend.cpp	2013-05-14 20:09:26.818021517 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/llvm/llvm_gen_backend.cpp	2013-05-14 20:09:28.642021436 +0200
+@@ -914,6 +914,7 @@
+               break;
+               case ir::IMAGE:
+                 ctx.input(argName, ir::FunctionArgument::IMAGE, reg, ptrSize);
++                ctx.getFunction().getImageSet()->append(reg, &ctx);
+               break;
+               break;
+               default: GBE_ASSERT(addrSpace != ir::MEM_PRIVATE);
+Index: beignet-0.1+git20130514+19e9c58/src/cl_command_queue.c
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_command_queue.c	2013-05-14 20:09:26.818021517 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_command_queue.c	2013-05-14 20:09:28.642021436 +0200
+@@ -99,6 +99,21 @@
+ }
+ 
+ LOCAL cl_int
++cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
++{
++  uint32_t i;
++  for (i = 0; i < k->image_sz; i++) {
++    int id = k->images[i].arg_idx;
++    assert(gbe_kernel_get_arg_type(k->opaque, id) == GBE_ARG_IMAGE);
++    cl_gpgpu_bind_image(queue->gpgpu, k->images[i].idx, k->args[id].mem->bo,
++                        k->args[id].mem->intel_fmt, k->args[id].mem->type,
++                        k->args[id].mem->w, k->args[id].mem->h,
++                        k->args[id].mem->pitch, k->args[id].mem->tiling);
++  }
++  return CL_SUCCESS;
++}
++
++LOCAL cl_int
+ cl_command_queue_bind_surface(cl_command_queue queue, cl_kernel k)
+ {
+   /* Bind all user buffers (given by clSetKernelArg) */
+@@ -107,20 +122,10 @@
+   for (i = 0; i < k->arg_n; ++i) {
+     uint32_t offset; // location of the address in the curbe
+     arg_type = gbe_kernel_get_arg_type(k->opaque, i);
+-    if (arg_type != GBE_ARG_GLOBAL_PTR &&
+-        arg_type != GBE_ARG_IMAGE &&
+-        arg_type != GBE_ARG_SAMPLER)
++    if (arg_type != GBE_ARG_GLOBAL_PTR)
+       continue;
+     offset = gbe_kernel_get_curbe_offset(k->opaque, GBE_CURBE_KERNEL_ARGUMENT, i);
+-    if (arg_type == GBE_ARG_IMAGE) {
+-      uint32_t *curbe_index = (uint32_t*)(k->curbe + offset);
+-      cl_gpgpu_bind_image(queue->gpgpu, curbe_index, k->args[i].mem->bo,
+-                          k->args[i].mem->intel_fmt, k->args[i].mem->type,
+-                          k->args[i].mem->w, k->args[i].mem->h,
+-                          k->args[i].mem->pitch, k->args[i].mem->tiling);
+-    } else if (arg_type == GBE_ARG_SAMPLER) {
+-    } else
+-      cl_gpgpu_bind_buf(queue->gpgpu, k->args[i].mem->bo, offset, cc_llc_l3);
++    cl_gpgpu_bind_buf(queue->gpgpu, k->args[i].mem->bo, offset, cc_llc_l3);
+   }
+ 
+   return CL_SUCCESS;
+Index: beignet-0.1+git20130514+19e9c58/src/cl_command_queue.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_command_queue.h	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_command_queue.h	2013-05-14 20:09:28.642021436 +0200
+@@ -70,6 +70,9 @@
+ /* Bind all the surfaces in the GPGPU state */
+ extern cl_int cl_command_queue_bind_surface(cl_command_queue, cl_kernel);
+ 
++/* Bind all the image surfaces in the GPGPU state */
++extern cl_int cl_command_queue_bind_image(cl_command_queue, cl_kernel);
++
+ /*update constant buffer to final curbe */
+ extern cl_int cl_command_queue_upload_constant_buffer(cl_kernel k, char * dst);
+ #endif /* __CL_COMMAND_QUEUE_H__ */
+Index: beignet-0.1+git20130514+19e9c58/src/cl_command_queue_gen7.c
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_command_queue_gen7.c	2013-05-14 20:09:26.822021517 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_command_queue_gen7.c	2013-05-14 20:09:28.642021436 +0200
+@@ -224,6 +224,8 @@
+ 
+   /* Bind user buffers */
+   cl_command_queue_bind_surface(queue, ker);
++  /* Bind user images */
++  cl_command_queue_bind_image(queue, ker);
+   /* Bind all samplers */
+   cl_gpgpu_bind_sampler(queue->gpgpu, ker->samplers, ker->sampler_sz);
+ 
+Index: beignet-0.1+git20130514+19e9c58/src/cl_driver.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_driver.h	2013-05-14 20:09:19.978021822 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_driver.h	2013-05-14 20:09:28.646021435 +0200
+@@ -116,14 +116,15 @@
+ 
+ /* Set a 2d texture */
+ typedef void (cl_gpgpu_bind_image_cb)(cl_gpgpu state,
+-                                        uint32_t *curbe_index,
+-                                        cl_buffer obj_bo,
+-                                        uint32_t format,
+-                                        uint32_t type,
+-                                        int32_t w,
+-                                        int32_t h,
+-                                        int pitch,
+-                                        cl_gpgpu_tiling tiling);
++                                      uint32_t id,
++                                      cl_buffer obj_bo,
++                                      uint32_t format,
++                                      uint32_t type,
++                                      int32_t w,
++                                      int32_t h,
++                                      int pitch,
++                                      cl_gpgpu_tiling tiling);
++
+ extern cl_gpgpu_bind_image_cb *cl_gpgpu_bind_image;
+ 
+ /* Setup a stack */
+Index: beignet-0.1+git20130514+19e9c58/src/cl_kernel.c
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_kernel.c	2013-05-14 20:09:26.822021517 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_kernel.c	2013-05-14 20:09:28.646021435 +0200
+@@ -56,6 +56,8 @@
+         cl_mem_delete(k->args[i].mem);
+     cl_free(k->args);
+   }
++  if (k->image_sz)
++    cl_free(k->images);
+   k->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+   cl_free(k);
+ }
+@@ -208,6 +210,18 @@
+   assert(k->sampler_sz <= GEN_MAX_SAMPLERS);
+   if (k->sampler_sz > 0)
+     gbe_kernel_get_sampler_data(k->opaque, k->samplers);
++  /* Get image data & size */
++  k->image_sz = gbe_kernel_get_image_size(k->opaque);
++  assert(k->sampler_sz <= GEN_MAX_SURFACES);
++  if (k->image_sz > 0) {
++    TRY_ALLOC_NO_ERR(k->images, cl_calloc(k->image_sz, sizeof(k->images[0])));
++    gbe_kernel_get_image_data(k->opaque, k->images);
++  } else
++    k->images = NULL;
++  return;
++error:
++  cl_buffer_unreference(k->bo);
++  k->bo = NULL;
+ }
+ 
+ LOCAL cl_kernel
+@@ -227,8 +241,14 @@
+   to->arg_n = from->arg_n;
+   to->curbe_sz = from->curbe_sz;
+   to->sampler_sz = from->sampler_sz;
++  to->image_sz = from->image_sz;
+   if (to->sampler_sz)
+     memcpy(to->samplers, from->samplers, to->sampler_sz * sizeof(uint32_t));
++  if (to->image_sz) {
++    TRY_ALLOC_NO_ERR(to->images, cl_calloc(to->image_sz, sizeof(to->images[0])));
++    memcpy(to->images, from->images, to->image_sz * sizeof(to->images[0]));
++  } else
++    to->images = NULL;
+   TRY_ALLOC_NO_ERR(to->args, cl_calloc(to->arg_n, sizeof(cl_argument)));
+   if (to->curbe_sz) TRY_ALLOC_NO_ERR(to->curbe, cl_calloc(1, to->curbe_sz));
+ 
+Index: beignet-0.1+git20130514+19e9c58/src/cl_kernel.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_kernel.h	2013-05-14 20:09:26.822021517 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_kernel.h	2013-05-14 20:09:28.646021435 +0200
+@@ -54,6 +54,8 @@
+   size_t curbe_sz;            /* Size of it */
+   uint32_t samplers[GEN_MAX_SAMPLERS]; /* samplers defined in kernel & kernel args */
+   size_t sampler_sz;          /* sampler size defined in kernel & kernel args. */
++  struct ImageInfo *images;   /* images defined in kernel args */
++  size_t image_sz;            /* image count in kernel args */
+   cl_argument *args;          /* To track argument setting */
+   uint32_t arg_n:31;          /* Number of arguments */
+   uint32_t ref_its_program:1; /* True only for the user kernel (created by clCreateKernel) */
+Index: beignet-0.1+git20130514+19e9c58/src/intel/intel_driver.c
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/intel/intel_driver.c	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/src/intel/intel_driver.c	2013-05-14 20:09:28.646021435 +0200
+@@ -369,14 +369,17 @@
+   intel_driver_terminate(driver);
+   intel_driver_delete(driver);
+ }
+-
++#include "program.h"
+ static intel_driver_t*
+ cl_intel_driver_new(cl_context_prop props)
+ {
+   intel_driver_t *driver = NULL;
+   TRY_ALLOC_NO_ERR (driver, intel_driver_new());
+   intel_driver_open(driver, props);
+-
++  /* We use the first 2 slots(0,1) for all the bufs.
++   * Notify the gbe this base index, thus gbe can avoid conflicts
++   * when it allocates slots for images*/
++  gbe_set_image_base_index(2);
+ exit:
+   return driver;
+ error:
+Index: beignet-0.1+git20130514+19e9c58/src/intel/intel_gpgpu.c
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/intel/intel_gpgpu.c	2013-05-14 20:09:26.822021517 +0200
++++ beignet-0.1+git20130514+19e9c58/src/intel/intel_gpgpu.c	2013-05-14 20:09:28.646021435 +0200
+@@ -451,25 +451,6 @@
+   heap->binding_table[1] = sizeof(gen7_surface_state_t) + offsetof(surface_heap_t, surface);
+ }
+ 
+-static inline unsigned long
+-__fls(unsigned long x)
+-{
+-        asm("bsf %1,%0"
+-            : "=r" (x)
+-            : "rm" (x));
+-        return x;
+-}
+-
+-static int
+-intel_gpgpu_get_free_img_index(intel_gpgpu_t *gpgpu)
+-{
+-  int slot;
+-  assert(~gpgpu->img_bitmap != 0);
+-  slot = __fls(~gpgpu->img_bitmap);
+-  gpgpu->img_bitmap |= (1 << slot);
+-  return slot + gpgpu->img_index_base;
+-}
+-
+ static int
+ intel_get_surface_type(cl_mem_object_type type)
+ {
+@@ -490,7 +471,7 @@
+ 
+ static void
+ intel_gpgpu_bind_image_gen7(intel_gpgpu_t *gpgpu,
+-                              uint32_t *curbe_index,
++                              uint32_t index,
+                               dri_bo* obj_bo,
+                               uint32_t format,
+                               cl_mem_object_type type,
+@@ -499,7 +480,6 @@
+                               int32_t pitch,
+                               int32_t tiling)
+ {
+-  int32_t index = intel_gpgpu_get_free_img_index(gpgpu);
+   surface_heap_t *heap = gpgpu->surface_heap_b.bo->virtual;
+   gen7_surface_state_t *ss = (gen7_surface_state_t *) heap->surface[index];
+ 
+@@ -521,7 +501,6 @@
+   }
+   ss->ss0.render_cache_rw_mode = 1; /* XXX do we need to set it? */
+   intel_gpgpu_set_buf_reloc_gen7(gpgpu, index, obj_bo);
+-  *curbe_index = index;
+   gpgpu->binded_img[index - gpgpu->img_index_base] = obj_bo;
+ }
+ 
+@@ -544,7 +523,7 @@
+ 
+ static void
+ intel_gpgpu_bind_image(intel_gpgpu_t *gpgpu,
+-                       uint32_t *index,
++                       uint32_t index,
+                        cl_buffer *obj_bo,
+                        uint32_t format,
+                        cl_mem_object_type type,
+@@ -554,7 +533,7 @@
+                        cl_gpgpu_tiling tiling)
+ {
+   intel_gpgpu_bind_image_gen7(gpgpu, index, (drm_intel_bo*) obj_bo, format, type, w, h, pitch, tiling);
+-  assert(*index < GEN_MAX_SURFACES);
++  assert(index < GEN_MAX_SURFACES);
+ }
+ 
+ static void

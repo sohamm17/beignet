@@ -2,10 +2,10 @@ Description: Fix missing include
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-04-03
 
-Index: beignet-0.1+git20130418+0546d2e/backend/src/sys/alloc.hpp
+Index: beignet-0.1+git20130514+19e9c58/backend/src/sys/alloc.hpp
 ===================================================================
---- beignet-0.1+git20130418+0546d2e.orig/backend/src/sys/alloc.hpp	2013-04-18 05:21:35.000000000 +0200
-+++ beignet-0.1+git20130418+0546d2e/backend/src/sys/alloc.hpp	2013-04-18 11:53:00.793430809 +0200
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/sys/alloc.hpp	2013-05-14 20:04:48.810033912 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/sys/alloc.hpp	2013-05-14 20:05:43.974031452 +0200
 @@ -27,6 +27,7 @@
  #include "sys/platform.hpp"
  #include "sys/assert.hpp"

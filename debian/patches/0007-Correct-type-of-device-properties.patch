@@ -1,0 +1,34 @@
+From 5f6ccf7410d17c9e775ce30e8deb5036d6b79ab4 Mon Sep 17 00:00:00 2001
+From: Simon Richter <Simon.Richter@hogyros.de>
+Date: Mon, 13 May 2013 12:43:57 +0200
+Subject: [PATCH 07/15] Correct type of device properties
+To: beignet@lists.freedesktop.org
+
+ - CL_DEVICE_MAX_PARAMETER_SIZE is of type size_t
+ - CL_DEVICE_MAX_WORK_GROUP_SIZE is of type size_t
+---
+ src/cl_device_id.h |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+Index: beignet-0.1+git20130514+19e9c58/src/cl_device_id.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_device_id.h	2013-05-14 20:09:06.922022404 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_device_id.h	2013-05-14 20:09:10.686022236 +0200
+@@ -29,7 +29,7 @@
+   cl_uint  max_thread_per_unit;
+   cl_uint  max_work_item_dimensions;
+   size_t   max_work_item_sizes[3];
+-  cl_uint  max_work_group_size;
++  size_t   max_work_group_size;
+   cl_uint  preferred_vector_width_char;
+   cl_uint  preferred_vector_width_short;
+   cl_uint  preferred_vector_width_int;
+@@ -56,7 +56,7 @@
+   size_t   image3d_max_height;
+   size_t   image3d_max_depth;
+   cl_uint  max_samplers;
+-  cl_uint  max_parameter_size;
++  size_t   max_parameter_size;
+   cl_uint  mem_base_addr_align;
+   cl_uint  min_data_type_align_size;
+   cl_device_fp_config single_fp_config;

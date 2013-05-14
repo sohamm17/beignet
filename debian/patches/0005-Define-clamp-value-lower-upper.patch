@@ -1,0 +1,131 @@
+From 780dcc213bd8c37c297c5d7a089ad355cb31649d Mon Sep 17 00:00:00 2001
+From: Simon Richter <Simon.Richter@hogyros.de>
+Date: Mon, 13 May 2013 09:09:11 +0200
+Subject: [PATCH 05/15] Define clamp(value, lower, upper)
+To: beignet@lists.freedesktop.org
+
+The clamp(value, lower, upper) function is part of the standard library.
+
+ - Define the function, using min() and max() on the lower level
+ - Remove private definitions from kernels
+---
+ backend/src/ocl_stdlib.h                    |   23 +++++++++++++----------
+ kernels/compiler_julia.cl                   |    2 --
+ kernels/compiler_julia_no_break.cl          |    2 --
+ kernels/compiler_menger_sponge.cl           |    2 --
+ kernels/compiler_menger_sponge_no_shadow.cl |    2 --
+ kernels/compiler_nautilus.cl                |    4 +---
+ 6 files changed, 14 insertions(+), 21 deletions(-)
+
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ocl_stdlib.h	2013-05-14 20:08:23.426024343 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h	2013-05-14 20:09:02.546022599 +0200
+@@ -3643,21 +3643,24 @@
+ /////////////////////////////////////////////////////////////////////////////
+ // Common Functions (see 6.11.4 of OCL 1.1 spec)
+ /////////////////////////////////////////////////////////////////////////////
+-#define DECL_MIN_MAX(TYPE) \
++#define DECL_MIN_MAX_CLAMP(TYPE) \
+ INLINE OVERLOADABLE TYPE max(TYPE a, TYPE b) { \
+   return a > b ? a : b; \
+ } \
+ INLINE OVERLOADABLE TYPE min(TYPE a, TYPE b) { \
+   return a < b ? a : b; \
++} \
++INLINE OVERLOADABLE TYPE clamp(TYPE v, TYPE l, TYPE u) { \
++  return max(min(v, u), l); \
+ }
+-DECL_MIN_MAX(float)
+-DECL_MIN_MAX(int)
+-DECL_MIN_MAX(short)
+-DECL_MIN_MAX(char)
+-DECL_MIN_MAX(uint)
+-DECL_MIN_MAX(unsigned short)
+-DECL_MIN_MAX(unsigned char)
+-#undef DECL_MIN_MAX
++DECL_MIN_MAX_CLAMP(float)
++DECL_MIN_MAX_CLAMP(int)
++DECL_MIN_MAX_CLAMP(short)
++DECL_MIN_MAX_CLAMP(char)
++DECL_MIN_MAX_CLAMP(uint)
++DECL_MIN_MAX_CLAMP(unsigned short)
++DECL_MIN_MAX_CLAMP(unsigned char)
++#undef DECL_MIN_MAX_CLAMP
+ 
+ INLINE OVERLOADABLE float __gen_ocl_internal_fmax(float a, float b) { return max(a,b); }
+ INLINE OVERLOADABLE float __gen_ocl_internal_fmin(float a, float b) { return min(a,b); }
+Index: beignet-0.1+git20130514+19e9c58/kernels/compiler_julia.cl
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/kernels/compiler_julia.cl	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/kernels/compiler_julia.cl	2013-05-14 20:09:02.546022599 +0200
+@@ -14,8 +14,6 @@
+   return I - 2.0f * dot(N, I) * N;
+ }
+ 
+-inline float clamp(x,m,M) { return max(min(x,M),m); }
+-
+ inline uint pack_fp4(float4 u4) {
+   uint u;
+   u = (((uint) u4.x)) |
+Index: beignet-0.1+git20130514+19e9c58/kernels/compiler_julia_no_break.cl
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/kernels/compiler_julia_no_break.cl	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/kernels/compiler_julia_no_break.cl	2013-05-14 20:09:02.546022599 +0200
+@@ -14,8 +14,6 @@
+   return I - 2.0f * dot(N, I) * N;
+ }
+ 
+-inline float clamp(x,m,M) { return max(min(x,M),m); }
+-
+ inline uint pack_fp4(float4 u4) {
+   uint u;
+   u = (((uint) u4.x)) |
+Index: beignet-0.1+git20130514+19e9c58/kernels/compiler_menger_sponge.cl
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/kernels/compiler_menger_sponge.cl	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/kernels/compiler_menger_sponge.cl	2013-05-14 20:09:02.546022599 +0200
+@@ -25,8 +25,6 @@
+   return I - 2.0f * dot(N, I) * N;
+ }
+ 
+-inline float clamp(x,m,M) { return max(min(x,M),m); }
+-
+ inline uint pack_fp4(float4 u4) {
+   uint u;
+   u = (((uint) u4.x)) |
+Index: beignet-0.1+git20130514+19e9c58/kernels/compiler_menger_sponge_no_shadow.cl
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/kernels/compiler_menger_sponge_no_shadow.cl	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/kernels/compiler_menger_sponge_no_shadow.cl	2013-05-14 20:09:02.546022599 +0200
+@@ -25,8 +25,6 @@
+   return I - 2.0f * dot(N, I) * N;
+ }
+ 
+-inline float clamp(x,m,M) { return max(min(x,M),m); }
+-
+ inline uint pack_fp4(float4 u4) {
+   uint u;
+   u = (((uint) u4.x)) |
+Index: beignet-0.1+git20130514+19e9c58/kernels/compiler_nautilus.cl
+===================================================================
+--- beignet-0.1+git20130514+19e9c58.orig/kernels/compiler_nautilus.cl	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/kernels/compiler_nautilus.cl	2013-05-14 20:09:02.546022599 +0200
+@@ -14,8 +14,6 @@
+   return I - 2.0f * dot(N, I) * N;
+ }
+ 
+-inline float clamp(x,m,M) { return max(min(x,M),m); }
+-
+ inline uint pack_fp4(float4 u4) {
+   uint u;
+   u = (((uint) u4.x)) |
+@@ -59,7 +57,7 @@
+   for(int q=0;q<100;q++)
+   {
+      float l = e(o+0.5f*(vec3)(cos(1.1f*(float)(q)),cos(1.6f*(float)(q)),cos(1.4f*(float)(q))))-m;
+-     a+=clamp(4.0f*l,0.0f,1.0f);
++     a+=floor(clamp(4.0f*l,0.0f,1.0f));
+   }
+   v*=a/100.0f;
+   vec4 gl_FragColor=(vec4)(v,1.0f);

@@ -1,8 +1,8 @@
-Index: beignet-0.1+git20130419+9c11c18/backend/src/ir/instruction.cpp
+Index: beignet-0.1+git20130514+19e9c58/backend/src/ir/instruction.cpp
 ===================================================================
---- beignet-0.1+git20130419+9c11c18.orig/backend/src/ir/instruction.cpp	2013-04-19 10:28:49.000000000 +0200
-+++ beignet-0.1+git20130419+9c11c18/backend/src/ir/instruction.cpp	2013-04-19 19:17:43.329603279 +0200
-@@ -591,17 +591,17 @@
+--- beignet-0.1+git20130514+19e9c58.orig/backend/src/ir/instruction.cpp	2013-05-08 11:55:52.000000000 +0200
++++ beignet-0.1+git20130514+19e9c58/backend/src/ir/instruction.cpp	2013-05-14 20:07:24.282026980 +0200
+@@ -593,17 +593,17 @@
      static const Type madType[] = {TYPE_FLOAT};
      static const uint32_t madTypeNum = ARRAY_ELEM_NUM(madType);
  

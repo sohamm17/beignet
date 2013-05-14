@@ -2,10 +2,10 @@ Description: More verbose errors
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-04-01
 
-Index: beignet-0.0.0+git2013.04.11+e6b503e/src/cl_utils.h
+Index: beignet-0.1+git20130514+19e9c58/src/cl_utils.h
 ===================================================================
---- beignet-0.0.0+git2013.04.11+e6b503e.orig/src/cl_utils.h	2013-04-12 08:13:48.000000000 +0200
-+++ beignet-0.0.0+git2013.04.11+e6b503e/src/cl_utils.h	2013-04-15 18:28:17.640334450 +0200
+--- beignet-0.1+git20130514+19e9c58.orig/src/cl_utils.h	2013-05-14 20:04:49.846033866 +0200
++++ beignet-0.1+git20130514+19e9c58/src/cl_utils.h	2013-05-14 20:05:00.822033376 +0200
 @@ -80,6 +80,7 @@
  
  #define FATAL(...)                                          \
