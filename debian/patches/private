@@ -1,0 +1,35 @@
+Description: Install as private library
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2013-05-21
+
+Index: beignet-0.1+git20130521+a7ea35c/backend/src/CMakeLists.txt
+===================================================================
+--- beignet-0.1+git20130521+a7ea35c.orig/backend/src/CMakeLists.txt	2013-05-21 10:38:35.571948408 +0200
++++ beignet-0.1+git20130521+a7ea35c/backend/src/CMakeLists.txt	2013-05-21 10:44:32.000000000 +0200
+@@ -120,6 +120,6 @@
+                       ${CMAKE_THREAD_LIBS_INIT}
+                       ${CMAKE_DL_LIBS})
+ 
+-install (TARGETS gbe LIBRARY DESTINATION lib)
++install (TARGETS gbe LIBRARY DESTINATION lib/beignet)
+ install (FILES backend/program.h DESTINATION include/gen)
+ 
+Index: beignet-0.1+git20130521+a7ea35c/src/CMakeLists.txt
+===================================================================
+--- beignet-0.1+git20130521+a7ea35c.orig/src/CMakeLists.txt	2013-05-21 10:38:35.571948408 +0200
++++ beignet-0.1+git20130521+a7ea35c/src/CMakeLists.txt	2013-05-21 10:45:20.603930350 +0200
+@@ -47,6 +47,8 @@
+ 
+ SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")
+ 
++SET(CMAKE_INSTALL_RPATH /usr/lib/beignet)
++
+ link_directories (${LLVM_LIBRARY_DIR})
+ add_library(cl SHARED ${OPENCL_SRC})
+ target_link_libraries(
+@@ -60,4 +62,4 @@
+                       ${OPENGL_LIBRARIES}
+                       ${OPTIONAL_EGL_LIBRARY}
+                       ${OPTIONAL_GBM_LIBRARY})
+-install (TARGETS cl LIBRARY DESTINATION lib)
++install (TARGETS cl LIBRARY DESTINATION lib/beignet)

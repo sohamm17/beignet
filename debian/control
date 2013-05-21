@@ -1,7 +1,7 @@
 Source: beignet
 Priority: extra
 Maintainer: Simon Richter <sjr@debian.org>
-Build-Depends: debhelper (>= 9), cmake, pkg-config, ocl-icd-dev, ocl-icd-opencl-dev, libdrm-dev, libxfixes-dev, libxext-dev, llvm-3.2-dev | llvm-dev (>= 1:3.2)
+Build-Depends: debhelper (>= 9), cmake, pkg-config, ocl-icd-dev, ocl-icd-opencl-dev, libdrm-dev, libxfixes-dev, libxext-dev, llvm-dev (>= 1:3.2), libclang-dev (>= 1:3.2)
 Build-Conflicts: libegl1-mesa-dev (<< 9), libgbm-dev
 Standards-Version: 3.9.4
 Section: libs
@@ -22,7 +22,7 @@ Description: Intel OpenCL library
 Package: beignet0.0.1
 Section: libs
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: ${shlibs:Depends}, ${misc:Depends}, clang (>= 1:3.1)
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Provides: opencl-icd
 Description: Intel OpenCL library
  OpenCL (Open Computing Language) is a multivendor open standard for

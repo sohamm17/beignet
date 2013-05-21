@@ -1,7 +1,7 @@
-From b3a5ab4df6690230feae128a26d9fa7a4cefdd2b Mon Sep 17 00:00:00 2001
+From dd0b29265577ad8cf2cc4373bf73a6f549a8263d Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
-Date: Tue, 14 May 2013 16:45:46 +0200
-Subject: [PATCH 02/15] Define all convert_* functions.
+Date: Tue, 14 May 2013 17:04:56 +0200
+Subject: [PATCH 2/7] Define all convert_* functions.
 To: beignet@lists.freedesktop.org
 
 These functions convert between vectors of the same length by casting each
@@ -11,11 +11,11 @@ member in turn.
  backend/src/ocl_stdlib.h       |  863 ++++++++++++++++++++++++++++++++++++++--
  2 files changed, 889 insertions(+), 23 deletions(-)
 
-Index: beignet-0.1+git20130514+19e9c58/backend/src/gen_conversions.sh
-===================================================================
---- beignet-0.1+git20130514+19e9c58.orig/backend/src/gen_conversions.sh	2013-05-14 20:08:14.714024732 +0200
-+++ beignet-0.1+git20130514+19e9c58/backend/src/gen_conversions.sh	2013-05-14 20:08:21.594024425 +0200
-@@ -87,3 +87,52 @@
+diff --git a/backend/src/gen_conversions.sh b/backend/src/gen_conversions.sh
+index 50a3668..d0b1b58 100755
+--- a/backend/src/gen_conversions.sh
++++ b/backend/src/gen_conversions.sh
+@@ -87,3 +87,52 @@ for union_size in $union_sizes; do
          done
  
  done
@@ -68,11 +68,11 @@ Index: beignet-0.1+git20130514+19e9c58/backend/src/gen_conversions.sh
 +                done
 +        done
 +done
-Index: beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h
-===================================================================
---- beignet-0.1+git20130514+19e9c58.orig/backend/src/ocl_stdlib.h	2013-05-14 20:08:14.718024731 +0200
-+++ beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h	2013-05-14 20:08:21.598024425 +0200
-@@ -1213,31 +1213,848 @@
+diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
+index a051803..4e0459a 100644
+--- a/backend/src/ocl_stdlib.h
++++ b/backend/src/ocl_stdlib.h
+@@ -1212,31 +1212,848 @@ INLINE OVERLOADABLE uint16 as_uint16(float16 v) {
    return u._uint16;
  }
  
@@ -944,3 +944,6 @@ Index: beignet-0.1+git20130514+19e9c58/backend/src/ocl_stdlib.h
  /////////////////////////////////////////////////////////////////////////////
  // OpenCL preprocessor directives & macros
  /////////////////////////////////////////////////////////////////////////////
+-- 
+1.7.10.4
+

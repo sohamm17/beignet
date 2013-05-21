@@ -1,11 +1,11 @@
-Description: More verbose errors
+Description: Enhance debug output
 Author: Simon Richter <sjr@debian.org>
-Last-Update: 2013-04-01
+Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130514+19e9c58/src/cl_utils.h
+Index: beignet-0.1+git20130521+a7ea35c/src/cl_utils.h
 ===================================================================
---- beignet-0.1+git20130514+19e9c58.orig/src/cl_utils.h	2013-05-14 20:04:49.846033866 +0200
-+++ beignet-0.1+git20130514+19e9c58/src/cl_utils.h	2013-05-14 20:05:00.822033376 +0200
+--- beignet-0.1+git20130521+a7ea35c.orig/src/cl_utils.h	2013-05-21 10:39:13.823946702 +0200
++++ beignet-0.1+git20130521+a7ea35c/src/cl_utils.h	2013-05-21 10:39:20.751946393 +0200
 @@ -80,6 +80,7 @@
  
  #define FATAL(...)                                          \

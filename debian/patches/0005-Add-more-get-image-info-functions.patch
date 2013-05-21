@@ -1,0 +1,203 @@
+From 503bee58b3080f4b863e61be22065c2fd2923827 Mon Sep 17 00:00:00 2001
+From: Zhigang Gong <zhigang.gong@linux.intel.com>
+Date: Mon, 20 May 2013 17:00:37 +0800
+Subject: [PATCH 5/7] Add more get image info functions.
+To: beignet@lists.freedesktop.org
+
+Add get image depth/channel data type/channel order/dim support.
+Now, only those functions for the unsupported image type have not
+been implemented. The unsupported image types are as below:
+image1d_t,image1d_buffer_t,image1d_array_t,image2d_array_t.
+
+Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
+---
+ backend/src/ir/image.cpp                   |   14 ++++++++---
+ backend/src/ir/instruction.hpp             |   10 ++++++--
+ backend/src/llvm/llvm_gen_backend.cpp      |    6 +++++
+ backend/src/llvm/llvm_gen_ocl_function.hxx |    3 +++
+ backend/src/ocl_stdlib.h                   |   37 ++++++++++++++++++----------
+ src/cl_command_queue.c                     |    6 +++++
+ 6 files changed, 57 insertions(+), 19 deletions(-)
+
+diff --git a/backend/src/ir/image.cpp b/backend/src/ir/image.cpp
+index 9398e22..486fde1 100644
+--- a/backend/src/ir/image.cpp
++++ b/backend/src/ir/image.cpp
+@@ -31,8 +31,11 @@ namespace ir {
+   static uint32_t getInfoOffset4Type(struct ImageInfo *imageInfo, int type)
+   {
+     switch (type) {
+-      case GetImageInfoInstruction::WIDTH: return imageInfo->wSlot;
+-      case GetImageInfoInstruction::HEIGHT: return imageInfo->hSlot;
++      case GetImageInfoInstruction::WIDTH:              return imageInfo->wSlot;
++      case GetImageInfoInstruction::HEIGHT:             return imageInfo->hSlot;
++      case GetImageInfoInstruction::DEPTH:              return imageInfo->depthSlot;
++      case GetImageInfoInstruction::CHANNEL_DATA_TYPE:  return imageInfo->dataTypeSlot;
++      case GetImageInfoInstruction::CHANNEL_ORDER:      return imageInfo->channelOrderSlot;
+       default:
+         NOT_IMPLEMENTED;
+     }
+@@ -42,8 +45,11 @@ namespace ir {
+   static uint32_t setInfoOffset4Type(struct ImageInfo *imageInfo, int type, uint32_t offset)
+   {
+     switch (type) {
+-      case GetImageInfoInstruction::WIDTH: imageInfo->wSlot = offset; break;
+-      case GetImageInfoInstruction::HEIGHT: imageInfo->hSlot = offset; break;
++      case GetImageInfoInstruction::WIDTH:              imageInfo->wSlot = offset; break;
++      case GetImageInfoInstruction::HEIGHT:             imageInfo->hSlot = offset; break;
++      case GetImageInfoInstruction::DEPTH:              imageInfo->depthSlot = offset; break;
++      case GetImageInfoInstruction::CHANNEL_DATA_TYPE:  imageInfo->dataTypeSlot = offset; break;
++      case GetImageInfoInstruction::CHANNEL_ORDER:      imageInfo->channelOrderSlot = offset; break;
+       default:
+         NOT_IMPLEMENTED;
+     }
+diff --git a/backend/src/ir/instruction.hpp b/backend/src/ir/instruction.hpp
+index c948d2c..7662b6a 100644
+--- a/backend/src/ir/instruction.hpp
++++ b/backend/src/ir/instruction.hpp
+@@ -335,12 +335,18 @@ namespace ir {
+     enum {
+      WIDTH = 0,
+      HEIGHT = 1,
++     DEPTH = 2,
++     CHANNEL_DATA_TYPE = 3,
++     CHANNEL_ORDER = 4,
+     };
+ 
+     static INLINE uint32_t getDstNum4Type(int infoType) {
+       switch (infoType) {
+-        case GetImageInfoInstruction::WIDTH:
+-        case GetImageInfoInstruction::HEIGHT:
++        case WIDTH:
++        case HEIGHT:
++        case DEPTH:
++        case CHANNEL_DATA_TYPE:
++        case CHANNEL_ORDER:
+           return 1;
+         break;
+         default:
+diff --git a/backend/src/llvm/llvm_gen_backend.cpp b/backend/src/llvm/llvm_gen_backend.cpp
+index deda687..a0946ef 100644
+--- a/backend/src/llvm/llvm_gen_backend.cpp
++++ b/backend/src/llvm/llvm_gen_backend.cpp
+@@ -1662,6 +1662,9 @@ namespace gbe
+       case GEN_OCL_RNDD:
+       case GEN_OCL_GET_IMAGE_WIDTH:
+       case GEN_OCL_GET_IMAGE_HEIGHT:
++      case GEN_OCL_GET_IMAGE_CHANNEL_DATA_TYPE:
++      case GEN_OCL_GET_IMAGE_CHANNEL_ORDER:
++      case GEN_OCL_GET_IMAGE_DEPTH:
+         // No structure can be returned
+         this->newRegister(&I);
+         break;
+@@ -1827,6 +1830,9 @@ namespace gbe
+           case GEN_OCL_LGBARRIER: ctx.SYNC(ir::syncLocalBarrier | ir::syncGlobalBarrier); break;
+           case GEN_OCL_GET_IMAGE_WIDTH:
+           case GEN_OCL_GET_IMAGE_HEIGHT:
++          case GEN_OCL_GET_IMAGE_DEPTH:
++          case GEN_OCL_GET_IMAGE_CHANNEL_DATA_TYPE:
++          case GEN_OCL_GET_IMAGE_CHANNEL_ORDER:
+           {
+             GBE_ASSERT(AI != AE); const ir::Register surface_id = this->getRegister(*AI); ++AI;
+             uint32_t elemNum;
+diff --git a/backend/src/llvm/llvm_gen_ocl_function.hxx b/backend/src/llvm/llvm_gen_ocl_function.hxx
+index 2fb33c0..0524744 100644
+--- a/backend/src/llvm/llvm_gen_ocl_function.hxx
++++ b/backend/src/llvm/llvm_gen_ocl_function.hxx
+@@ -73,6 +73,9 @@ DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE15, _Z22__gen_ocl_write_imagefjfffDv4_f)
+ // To get image info function
+ DECL_LLVM_GEN_FUNCTION(GET_IMAGE_WIDTH, __gen_ocl_get_image_width)
+ DECL_LLVM_GEN_FUNCTION(GET_IMAGE_HEIGHT, __gen_ocl_get_image_height)
++DECL_LLVM_GEN_FUNCTION(GET_IMAGE_DEPTH,  __gen_ocl_get_image_depth)
++DECL_LLVM_GEN_FUNCTION(GET_IMAGE_CHANNEL_DATA_TYPE,  __gen_ocl_get_image_channel_data_type)
++DECL_LLVM_GEN_FUNCTION(GET_IMAGE_CHANNEL_ORDER,  __gen_ocl_get_image_channel_order)
+ 
+ // saturation related functions.
+ DECL_LLVM_GEN_FUNCTION(SADD_SAT_CHAR, _Z12ocl_sadd_satcc)
+diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
+index 0d09aff..78a8da3 100644
+--- a/backend/src/ocl_stdlib.h
++++ b/backend/src/ocl_stdlib.h
+@@ -4257,7 +4257,9 @@ OVERLOADABLE void __gen_ocl_write_imagef(uint surface_id, int u, int v, int w, f
+ OVERLOADABLE void __gen_ocl_write_imagef(uint surface_id, float u, float v, float w, float4 color);
+ int __gen_ocl_get_image_width(uint surface_id);
+ int __gen_ocl_get_image_height(uint surface_id);
+-//OVERLOADABLE int __gen_ocl_get_image_depth(image3d_t image);
++int __gen_ocl_get_image_channel_data_type(uint surface_id);
++int __gen_ocl_get_image_channel_order(uint surface_id);
++int __gen_ocl_get_image_depth(uint surface_id);
+ 
+ #define GET_IMAGE(cl_image, surface_id) \
+     uint surface_id = (uint)cl_image
+@@ -4309,17 +4311,32 @@ DECL_IMAGE(float4, f)
+   { \
+     GET_IMAGE(image, surface_id);\
+     return __gen_ocl_get_image_height(surface_id); \
+-  }
+-#if 0
++  } \
+   INLINE_OVERLOADABLE  int get_image_channel_data_type(image_type image)\
+-  { NOT_IMPLEMENTED; }\
++  { \
++    GET_IMAGE(image, surface_id);\
++    return __gen_ocl_get_image_channel_data_type(surface_id); \
++  }\
+   INLINE_OVERLOADABLE  int get_image_channel_order(image_type image)\
+-  { NOT_IMPLEMENTED; }
+-#endif
+-
++  { \
++    GET_IMAGE(image, surface_id);\
++    return __gen_ocl_get_image_channel_order(surface_id); \
++  }
+ 
+ DECL_IMAGE_INFO(image2d_t)
+ DECL_IMAGE_INFO(image3d_t)
++
++INLINE_OVERLOADABLE  int get_image_depth(image3d_t image)
++  {
++   GET_IMAGE(image, surface_id);
++   return __gen_ocl_get_image_depth(surface_id);
++  }
++
++INLINE_OVERLOADABLE  int2 get_image_dim(image2d_t image)
++  { return (int2){get_image_width(image), get_image_height(image)}; }
++
++INLINE_OVERLOADABLE  int4 get_image_dim(image3d_t image)
++  { return (int4){get_image_width(image), get_image_height(image), get_image_depth(image), 0}; }
+ #if 0
+ /* The following functions are not implemented yet. */
+ DECL_IMAGE_INFO(image1d_t)
+@@ -4327,12 +4344,6 @@ DECL_IMAGE_INFO(image1d_buffer_t)
+ DECL_IMAGE_INFO(image1d_array_t)
+ DECL_IMAGE_INFO(image2d_array_t)
+ 
+-INLINE_OVERLOADABLE  int get_image_depth(image3d_t image)
+-  { return __gen_ocl_get_image_depth(image); }
+-
+-INLINE_OVERLOADABLE  int2 get_image_dim(image2d_t image)
+-  { return __gen_ocl_get_image_dim(image); }
+-
+ INLINE_OVERLOADABLE  int2 get_image_dim(image2d_array_t image)
+   { return __gen_ocl_get_image_dim(image); }
+ 
+diff --git a/src/cl_command_queue.c b/src/cl_command_queue.c
+index 6ce9016..1a37c78 100644
+--- a/src/cl_command_queue.c
++++ b/src/cl_command_queue.c
+@@ -105,6 +105,12 @@ set_image_info(char *curbe, struct ImageInfo * image_info, cl_mem image)
+     *(uint32_t*)(curbe + image_info->wSlot) = image->w;
+   if (image_info->hSlot >= 0)
+     *(uint32_t*)(curbe + image_info->hSlot) = image->h;
++  if (image_info->depthSlot >= 0)
++    *(uint32_t*)(curbe + image_info->depthSlot) = image->depth;
++  if (image_info->channelOrderSlot >= 0)
++    *(uint32_t*)(curbe + image_info->channelOrderSlot) = image->fmt.image_channel_order;
++  if (image_info->dataTypeSlot >= 0)
++    *(uint32_t*)(curbe + image_info->dataTypeSlot) = image->fmt.image_channel_data_type;
+ }
+ 
+ LOCAL cl_int
+-- 
+1.7.10.4
+

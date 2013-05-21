@@ -1,3 +1,10 @@
+beignet (0.1+git20130521+a7ea35c-1~prerename) experimental; urgency=low
+
+  * New upstream release
+  * Move libraries to /usr/lib/beignet (should not be used directly)
+
+ -- Simon Richter <sjr@debian.org>  Tue, 21 May 2013 09:17:45 +0200
+
 beignet (0.1+git20130514+19e9c58-1) experimental; urgency=low
 
   * New upstream release
