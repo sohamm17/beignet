@@ -1,3 +1,9 @@
+beignet (0.1+git20130521+a7ea35c-1) experimental; urgency=low
+
+  * Rename binary package
+
+ -- Simon Richter <sjr@debian.org>  Tue, 21 May 2013 10:48:39 +0200
+
 beignet (0.1+git20130521+a7ea35c-1~prerename) experimental; urgency=low
 
   * New upstream release

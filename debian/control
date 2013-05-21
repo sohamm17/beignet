@@ -10,7 +10,7 @@ Homepage: http://cgit.freedesktop.org/beignet/
 Package: beignet-dev
 Section: libdevel
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet0.0.1 (= ${binary:Version}), ${misc:Depends}
+Depends: beignet (= ${binary:Version}), ${misc:Depends}
 Description: Intel OpenCL library
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
@@ -19,10 +19,12 @@ Description: Intel OpenCL library
  This package contains the development files for directly linking against
  the Intel implementation.
 
-Package: beignet0.0.1
+Package: beignet
 Section: libs
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Conflicts: beignet0.0.1
+Replaces: beignet0.0.1
 Provides: opencl-icd
 Description: Intel OpenCL library
  OpenCL (Open Computing Language) is a multivendor open standard for
