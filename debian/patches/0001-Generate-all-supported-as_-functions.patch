@@ -1,36 +1,35 @@
-From 67668ad9be1186f021a7ee2dd56d00297593b6d0 Mon Sep 17 00:00:00 2001
+From a1926ba22c15aee973d651d700fdc7b94cd8bf4d Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Mon, 13 May 2013 22:43:34 +0200
-Subject: [PATCH 1/7] Generate all supported as_* functions
+Subject: [PATCH 1/4] Generate all supported as_* functions
 To: beignet@lists.freedesktop.org
 
-This adds support for all type conversions currently possible.
+This adds support for all reinterpreting type conversions currently
+possible.
 
 The conversion functions can be updated by invoking the
-update_conversions.sh script.
+update_as.sh script.
 ---
- backend/src/gen_conversions.sh    |   89 +++
- backend/src/ocl_stdlib.h          | 1138 ++++++++++++++++++++++++++++++++++++-
- backend/src/update_conversions.sh |   11 +
- 3 files changed, 1231 insertions(+), 7 deletions(-)
- create mode 100755 backend/src/gen_conversions.sh
- create mode 100755 backend/src/update_conversions.sh
+ backend/src/gen_as.sh    |   83 ++++
+ backend/src/genconfig.sh |   11 +
+ backend/src/ocl_stdlib.h | 1137 +++++++++++++++++++++++++++++++++++++++++++++-
+ backend/src/update.sh    |    2 +
+ backend/src/update_as.sh |   11 +
+ 5 files changed, 1237 insertions(+), 7 deletions(-)
+ create mode 100755 backend/src/gen_as.sh
+ create mode 100644 backend/src/genconfig.sh
+ create mode 100755 backend/src/update.sh
+ create mode 100755 backend/src/update_as.sh
 
-diff --git a/backend/src/gen_conversions.sh b/backend/src/gen_conversions.sh
+diff --git a/backend/src/gen_as.sh b/backend/src/gen_as.sh
 new file mode 100755
-index 0000000..50a3668
+index 0000000..76fedf8
 --- /dev/null
-+++ b/backend/src/gen_conversions.sh
-@@ -0,0 +1,89 @@
++++ b/backend/src/gen_as.sh
+@@ -0,0 +1,83 @@
 +#! /bin/sh -e
 +
-+# Supported base types and their lengths
-+TYPES="int:4 uint:4 short:2 ushort:2 char:1 uchar:1 float:4"
-+
-+# Supported vector lengths
-+VECTOR_LENGTHS="1 2 3 4 8 16"
-+
-+## No user serviceable parts below here
++. ./genconfig.sh
 +
 +# Generate list of union sizes
 +for type in $TYPES; do
@@ -111,15 +110,28 @@ index 0000000..50a3668
 +        done
 +
 +done
+diff --git a/backend/src/genconfig.sh b/backend/src/genconfig.sh
+new file mode 100644
+index 0000000..60edafd
+--- /dev/null
++++ b/backend/src/genconfig.sh
+@@ -0,0 +1,11 @@
++#! /bin/false
++# This is to be sourced by the generation scripts
++
++# Supported base types and their lengths
++TYPES="int:4 uint:4 short:2 ushort:2 char:1 uchar:1 float:4"
++
++# Supported vector lengths
++VECTOR_LENGTHS="1 2 3 4 8 16"
++
++## No user serviceable parts below here
++
 diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index 92f9ba9..a051803 100644
+index 46b81e1..d00de44 100644
 --- a/backend/src/ocl_stdlib.h
 +++ b/backend/src/ocl_stdlib.h
-@@ -78,18 +78,1142 @@ struct _image3d_t;
- typedef __texture struct _image3d_t* image3d_t;
- typedef uint sampler_t;
- typedef size_t event_t;
-+
+@@ -91,15 +91,1138 @@ typedef size_t __event_t;
  /////////////////////////////////////////////////////////////////////////////
  // OpenCL conversions & type casting
  /////////////////////////////////////////////////////////////////////////////
@@ -127,7 +139,7 @@ index 92f9ba9..a051803 100644
 -  float f;
 -  uchar4 u4;
 +
-+// ##BEGIN_CONVERSIONS##
++// ##BEGIN_AS##
 +union _type_cast_1_b {
 +  char _char;
 +  uchar _uchar;
@@ -150,11 +162,7 @@ index 92f9ba9..a051803 100644
 +  ushort _ushort;
 +  char2 _char2;
 +  uchar2 _uchar2;
- };
--uchar4 INLINE_OVERLOADABLE as_uchar4(float f) {
--    union type_cast_4_b u;
--    u.f = f;
--    return u.u4;
++};
 +
 +INLINE OVERLOADABLE ushort as_ushort(short v) {
 +  union _type_cast_2_b u;
@@ -700,7 +708,7 @@ index 92f9ba9..a051803 100644
 +  union _type_cast_8_b u;
 +  u._char8 = v;
 +  return u._ushort4;
- }
++}
 +
 +INLINE OVERLOADABLE uchar8 as_uchar8(char8 v) {
 +  union _type_cast_8_b u;
@@ -1096,7 +1104,11 @@ index 92f9ba9..a051803 100644
 +  short16 _short16;
 +  ushort16 _ushort16;
 +  float8 _float8;
-+};
+ };
+-uchar4 INLINE_OVERLOADABLE as_uchar4(float f) {
+-    union type_cast_4_b u;
+-    u.f = f;
+-    return u.u4;
 +
 +INLINE OVERLOADABLE uint8 as_uint8(int8 v) {
 +  union _type_cast_32_b u;
@@ -1126,7 +1138,7 @@ index 92f9ba9..a051803 100644
 +  union _type_cast_32_b u;
 +  u._uint8 = v;
 +  return u._int8;
-+}
+ }
 +
 +INLINE OVERLOADABLE short16 as_short16(uint8 v) {
 +  union _type_cast_32_b u;
@@ -1260,25 +1272,33 @@ index 92f9ba9..a051803 100644
 +  return u._uint16;
 +}
 +
-+// ##END_CONVERSIONS##
++// ##END_AS##
 +
  #define DEF(type, n, type2) type##n INLINE_OVERLOADABLE convert_##type##n(type2##n d) { \
      return (type##n)((type)(d.s0), (type)(d.s1), (type)(d.s2), (type)(d.s3)); \
   }
-diff --git a/backend/src/update_conversions.sh b/backend/src/update_conversions.sh
+diff --git a/backend/src/update.sh b/backend/src/update.sh
 new file mode 100755
-index 0000000..bd9099f
+index 0000000..4f9af8c
 --- /dev/null
-+++ b/backend/src/update_conversions.sh
++++ b/backend/src/update.sh
+@@ -0,0 +1,2 @@
++#! /bin/sh -e
++./update_as.sh
+diff --git a/backend/src/update_as.sh b/backend/src/update_as.sh
+new file mode 100755
+index 0000000..54b4191
+--- /dev/null
++++ b/backend/src/update_as.sh
 @@ -0,0 +1,11 @@
 +#! /bin/sh -e
 +
 +STDLIB_HEADER=ocl_stdlib.h
 +
 +exec >$STDLIB_HEADER.tmp
-+sed -n -e '1,/##BEGIN_CONVERSIONS##/p' $STDLIB_HEADER
-+./gen_conversions.sh
-+sed -n -e '/##END_CONVERSIONS##/,$p' $STDLIB_HEADER
++sed -n -e '1,/##BEGIN_AS##/p' $STDLIB_HEADER
++./gen_as.sh
++sed -n -e '/##END_AS##/,$p' $STDLIB_HEADER
 +exec >&2
 +
 +mv $STDLIB_HEADER.tmp $STDLIB_HEADER

@@ -1,3 +1,9 @@
+beignet (0.1+git20130614+89b5e40-1) experimental; urgency=low
+
+  * New upstream release
+
+ -- Simon Richter <sjr@debian.org>  Fri, 14 Jun 2013 15:22:18 +0200
+
 beignet (0.1+git20130521+a7ea35c-1) experimental; urgency=low
 
   * Rename binary package

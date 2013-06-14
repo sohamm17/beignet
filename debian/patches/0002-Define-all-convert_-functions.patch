@@ -1,24 +1,29 @@
-From dd0b29265577ad8cf2cc4373bf73a6f549a8263d Mon Sep 17 00:00:00 2001
+From 1900bf07f138edbf956e01618c304a7b10c59a9b Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Tue, 14 May 2013 17:04:56 +0200
-Subject: [PATCH 2/7] Define all convert_* functions.
+Subject: [PATCH 2/4] Define all convert_* functions.
 To: beignet@lists.freedesktop.org
 
 These functions convert between vectors of the same length by casting each
 member in turn.
 ---
- backend/src/gen_conversions.sh |   49 +++
- backend/src/ocl_stdlib.h       |  863 ++++++++++++++++++++++++++++++++++++++--
- 2 files changed, 889 insertions(+), 23 deletions(-)
+ backend/src/gen_convert.sh    |   52 +++
+ backend/src/ocl_stdlib.h      |  866 +++++++++++++++++++++++++++++++++++++++--
+ backend/src/update.sh         |    1 +
+ backend/src/update_convert.sh |   11 +
+ 4 files changed, 907 insertions(+), 23 deletions(-)
+ create mode 100755 backend/src/gen_convert.sh
+ create mode 100755 backend/src/update_convert.sh
 
-diff --git a/backend/src/gen_conversions.sh b/backend/src/gen_conversions.sh
-index 50a3668..d0b1b58 100755
---- a/backend/src/gen_conversions.sh
-+++ b/backend/src/gen_conversions.sh
-@@ -87,3 +87,52 @@ for union_size in $union_sizes; do
-         done
- 
- done
+diff --git a/backend/src/gen_convert.sh b/backend/src/gen_convert.sh
+new file mode 100755
+index 0000000..74fc73c
+--- /dev/null
++++ b/backend/src/gen_convert.sh
+@@ -0,0 +1,52 @@
++#! /bin/sh -e
++
++. ./genconfig.sh
 +
 +# For all vector lengths and types, generate conversion functions
 +for vector_length in $VECTOR_LENGTHS; do
@@ -69,13 +74,37 @@ index 50a3668..d0b1b58 100755
 +        done
 +done
 diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index a051803..4e0459a 100644
+index d00de44..913917f 100644
 --- a/backend/src/ocl_stdlib.h
 +++ b/backend/src/ocl_stdlib.h
-@@ -1212,31 +1212,848 @@ INLINE OVERLOADABLE uint16 as_uint16(float16 v) {
-   return u._uint16;
- }
+@@ -1223,29 +1223,849 @@ INLINE OVERLOADABLE uint16 as_uint16(float16 v) {
  
+ // ##END_AS##
+ 
+-#define DEF(type, n, type2) type##n INLINE_OVERLOADABLE convert_##type##n(type2##n d) { \
+-    return (type##n)((type)(d.s0), (type)(d.s1), (type)(d.s2), (type)(d.s3)); \
+- }
+-#define DEF2(type) DEF(type, 4, char); \
+-                   DEF(type, 4, uchar); \
+-                   DEF(type, 4, short); \
+-                   DEF(type, 4, ushort); \
+-                   DEF(type, 4, int); \
+-                   DEF(type, 4, uint); \
+-                   DEF(type, 4, long); \
+-                   DEF(type, 4, ulong); \
+-                   DEF(type, 4, float);
+-DEF2(char);
+-DEF2(uchar);
+-DEF2(short);
+-DEF2(ushort);
+-DEF2(int);
+-DEF2(uint);
+-DEF2(long);
+-DEF2(ulong);
+-DEF2(float);
+-#undef DEF2
+-#undef DEF
++// ##BEGIN_CONVERT##
 +INLINE OVERLOADABLE uint2 convert_uint2(int2 v) {
 +  return (uint2)((uint)(v.s0), (uint)(v.s1));
 +}
@@ -916,34 +945,36 @@ index a051803..4e0459a 100644
 +  return (uchar16)((uchar)(v.s0), (uchar)(v.s1), (uchar)(v.s2), (uchar)(v.s3), (uchar)(v.s4), (uchar)(v.s5), (uchar)(v.s6), (uchar)(v.s7), (uchar)(v.s8), (uchar)(v.s9), (uchar)(v.sA), (uchar)(v.sB), (uchar)(v.sC), (uchar)(v.sD), (uchar)(v.sE), (uchar)(v.sF));
 +}
 +
- // ##END_CONVERSIONS##
- 
--#define DEF(type, n, type2) type##n INLINE_OVERLOADABLE convert_##type##n(type2##n d) { \
--    return (type##n)((type)(d.s0), (type)(d.s1), (type)(d.s2), (type)(d.s3)); \
-- }
--#define DEF2(type) DEF(type, 4, char); \
--                   DEF(type, 4, uchar); \
--                   DEF(type, 4, short); \
--                   DEF(type, 4, ushort); \
--                   DEF(type, 4, int); \
--                   DEF(type, 4, uint); \
--                   DEF(type, 4, long); \
--                   DEF(type, 4, ulong); \
--                   DEF(type, 4, float);
--DEF2(char);
--DEF2(uchar);
--DEF2(short);
--DEF2(ushort);
--DEF2(int);
--DEF2(uint);
--DEF2(long);
--DEF2(ulong);
--DEF2(float);
--#undef DEF2
--#undef DEF
++// ##END_CONVERT##
++
  /////////////////////////////////////////////////////////////////////////////
  // OpenCL preprocessor directives & macros
  /////////////////////////////////////////////////////////////////////////////
+diff --git a/backend/src/update.sh b/backend/src/update.sh
+index 4f9af8c..0e5f8c0 100755
+--- a/backend/src/update.sh
++++ b/backend/src/update.sh
+@@ -1,2 +1,3 @@
+ #! /bin/sh -e
+ ./update_as.sh
++./update_convert.sh
+diff --git a/backend/src/update_convert.sh b/backend/src/update_convert.sh
+new file mode 100755
+index 0000000..f1fcd36
+--- /dev/null
++++ b/backend/src/update_convert.sh
+@@ -0,0 +1,11 @@
++#! /bin/sh -e
++
++STDLIB_HEADER=ocl_stdlib.h
++
++exec >$STDLIB_HEADER.tmp
++sed -n -e '1,/##BEGIN_CONVERT##/p' $STDLIB_HEADER
++./gen_convert.sh
++sed -n -e '/##END_CONVERT##/,$p' $STDLIB_HEADER
++exec >&2
++
++mv $STDLIB_HEADER.tmp $STDLIB_HEADER
 -- 
 1.7.10.4
 

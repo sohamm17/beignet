@@ -4,8 +4,5 @@ khronos
 private
 0001-Generate-all-supported-as_-functions.patch
 0002-Define-all-convert_-functions.patch
-0003-Add-long-and-ulong-types-to-conversions.patch
+0003-Add-long-and-ulong-types-to-generated-functions.patch
 0004-Add-vector-argument-test-case.patch
-0005-Add-more-get-image-info-functions.patch
-0006-utests-extent-get_image_size-cases-to-other-informat.patch
-0007-Change-clang-system-call-to-libclang-api-call.patch
