@@ -1,3 +1,10 @@
+beignet (0.1+git20130614+89b5e40-2) unstable; urgency=low
+
+  * Add Ubuntu support
+  * Upload to unstable to get an ICD capable package there
+
+ -- Simon Richter <sjr@debian.org>  Fri, 14 Jun 2013 17:40:45 +0200
+
 beignet (0.1+git20130614+89b5e40-1) experimental; urgency=low
 
   * New upstream release
