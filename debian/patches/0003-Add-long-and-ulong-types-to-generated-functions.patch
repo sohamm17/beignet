@@ -1,7 +1,7 @@
-From 44161ff1568479390464c0b0a282f5aeeb86915d Mon Sep 17 00:00:00 2001
+From f3c047e020d2e9f6d84cbcc10b2391d980572e3d Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Tue, 14 May 2013 17:04:57 +0200
-Subject: [PATCH 3/4] Add long and ulong types to generated functions.
+Subject: [PATCH 03/12] Add long and ulong types to generated functions.
 To: beignet@lists.freedesktop.org
 
 This enables all generated functions for 64 bit integers.
@@ -10,10 +10,10 @@ This enables all generated functions for 64 bit integers.
  backend/src/ocl_stdlib.h | 1248 +++++++++++++++++++++++++++++++++++++++++++++-
  2 files changed, 1234 insertions(+), 16 deletions(-)
 
-diff --git a/backend/src/genconfig.sh b/backend/src/genconfig.sh
-index 60edafd..a3ba3f9 100644
---- a/backend/src/genconfig.sh
-+++ b/backend/src/genconfig.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/genconfig.sh
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/genconfig.sh	2013-06-19 21:04:37.838666758 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/genconfig.sh	2013-06-19 21:04:40.598666635 +0200
 @@ -2,7 +2,7 @@
  # This is to be sourced by the generation scripts
  
@@ -23,11 +23,11 @@ index 60edafd..a3ba3f9 100644
  
  # Supported vector lengths
  VECTOR_LENGTHS="1 2 3 4 8 16"
-diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index 913917f..2f55184 100644
---- a/backend/src/ocl_stdlib.h
-+++ b/backend/src/ocl_stdlib.h
-@@ -486,6 +486,8 @@ INLINE OVERLOADABLE short3 as_short3(ushort3 v) {
+Index: beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/ocl_stdlib.h	2013-06-19 21:04:39.250666695 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h	2013-06-19 21:04:40.602666635 +0200
+@@ -486,6 +486,8 @@
  }
  
  union _type_cast_8_b {
@@ -36,7 +36,7 @@ index 913917f..2f55184 100644
    int2 _int2;
    uint2 _uint2;
    short4 _short4;
-@@ -495,6 +497,114 @@ union _type_cast_8_b {
+@@ -495,6 +497,114 @@
    float2 _float2;
  };
  
@@ -151,7 +151,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint2 as_uint2(int2 v) {
    union _type_cast_8_b u;
    u._int2 = v;
-@@ -531,6 +641,18 @@ INLINE OVERLOADABLE float2 as_float2(int2 v) {
+@@ -531,6 +641,18 @@
    return u._float2;
  }
  
@@ -170,7 +170,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(uint2 v) {
    union _type_cast_8_b u;
    u._uint2 = v;
-@@ -567,6 +689,18 @@ INLINE OVERLOADABLE float2 as_float2(uint2 v) {
+@@ -567,6 +689,18 @@
    return u._float2;
  }
  
@@ -189,7 +189,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(short4 v) {
    union _type_cast_8_b u;
    u._short4 = v;
-@@ -603,6 +737,18 @@ INLINE OVERLOADABLE float2 as_float2(short4 v) {
+@@ -603,6 +737,18 @@
    return u._float2;
  }
  
@@ -208,7 +208,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(ushort4 v) {
    union _type_cast_8_b u;
    u._ushort4 = v;
-@@ -639,6 +785,18 @@ INLINE OVERLOADABLE float2 as_float2(ushort4 v) {
+@@ -639,6 +785,18 @@
    return u._float2;
  }
  
@@ -227,7 +227,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(char8 v) {
    union _type_cast_8_b u;
    u._char8 = v;
-@@ -675,6 +833,18 @@ INLINE OVERLOADABLE float2 as_float2(char8 v) {
+@@ -675,6 +833,18 @@
    return u._float2;
  }
  
@@ -246,7 +246,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(uchar8 v) {
    union _type_cast_8_b u;
    u._uchar8 = v;
-@@ -711,6 +881,18 @@ INLINE OVERLOADABLE float2 as_float2(uchar8 v) {
+@@ -711,6 +881,18 @@
    return u._float2;
  }
  
@@ -265,7 +265,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 as_int2(float2 v) {
    union _type_cast_8_b u;
    u._float2 = v;
-@@ -790,6 +972,8 @@ INLINE OVERLOADABLE uint3 as_uint3(float3 v) {
+@@ -790,6 +972,8 @@
  }
  
  union _type_cast_16_b {
@@ -274,7 +274,7 @@ index 913917f..2f55184 100644
    int4 _int4;
    uint4 _uint4;
    short8 _short8;
-@@ -799,6 +983,114 @@ union _type_cast_16_b {
+@@ -799,6 +983,114 @@
    float4 _float4;
  };
  
@@ -389,7 +389,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint4 as_uint4(int4 v) {
    union _type_cast_16_b u;
    u._int4 = v;
-@@ -835,6 +1127,18 @@ INLINE OVERLOADABLE float4 as_float4(int4 v) {
+@@ -835,6 +1127,18 @@
    return u._float4;
  }
  
@@ -408,7 +408,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(uint4 v) {
    union _type_cast_16_b u;
    u._uint4 = v;
-@@ -871,6 +1175,18 @@ INLINE OVERLOADABLE float4 as_float4(uint4 v) {
+@@ -871,6 +1175,18 @@
    return u._float4;
  }
  
@@ -427,7 +427,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(short8 v) {
    union _type_cast_16_b u;
    u._short8 = v;
-@@ -907,6 +1223,18 @@ INLINE OVERLOADABLE float4 as_float4(short8 v) {
+@@ -907,6 +1223,18 @@
    return u._float4;
  }
  
@@ -446,7 +446,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(ushort8 v) {
    union _type_cast_16_b u;
    u._ushort8 = v;
-@@ -943,6 +1271,18 @@ INLINE OVERLOADABLE float4 as_float4(ushort8 v) {
+@@ -943,6 +1271,18 @@
    return u._float4;
  }
  
@@ -465,7 +465,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(char16 v) {
    union _type_cast_16_b u;
    u._char16 = v;
-@@ -979,6 +1319,18 @@ INLINE OVERLOADABLE float4 as_float4(char16 v) {
+@@ -979,6 +1319,18 @@
    return u._float4;
  }
  
@@ -484,7 +484,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(uchar16 v) {
    union _type_cast_16_b u;
    u._uchar16 = v;
-@@ -1015,6 +1367,18 @@ INLINE OVERLOADABLE float4 as_float4(uchar16 v) {
+@@ -1015,6 +1367,18 @@
    return u._float4;
  }
  
@@ -503,7 +503,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 as_int4(float4 v) {
    union _type_cast_16_b u;
    u._float4 = v;
-@@ -1051,7 +1415,26 @@ INLINE OVERLOADABLE uchar16 as_uchar16(float4 v) {
+@@ -1051,7 +1415,26 @@
    return u._uchar16;
  }
  
@@ -530,7 +530,7 @@ index 913917f..2f55184 100644
    int8 _int8;
    uint8 _uint8;
    short16 _short16;
-@@ -1059,30 +1442,126 @@ union _type_cast_32_b {
+@@ -1059,30 +1442,126 @@
    float8 _float8;
  };
  
@@ -664,7 +664,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 as_int8(uint8 v) {
    union _type_cast_32_b u;
    u._uint8 = v;
-@@ -1107,6 +1586,18 @@ INLINE OVERLOADABLE float8 as_float8(uint8 v) {
+@@ -1107,6 +1586,18 @@
    return u._float8;
  }
  
@@ -683,7 +683,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 as_int8(short16 v) {
    union _type_cast_32_b u;
    u._short16 = v;
-@@ -1131,6 +1622,18 @@ INLINE OVERLOADABLE float8 as_float8(short16 v) {
+@@ -1131,6 +1622,18 @@
    return u._float8;
  }
  
@@ -702,7 +702,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 as_int8(ushort16 v) {
    union _type_cast_32_b u;
    u._ushort16 = v;
-@@ -1155,6 +1658,18 @@ INLINE OVERLOADABLE float8 as_float8(ushort16 v) {
+@@ -1155,6 +1658,18 @@
    return u._float8;
  }
  
@@ -721,7 +721,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 as_int8(float8 v) {
    union _type_cast_32_b u;
    u._float8 = v;
-@@ -1180,11 +1695,73 @@ INLINE OVERLOADABLE ushort16 as_ushort16(float8 v) {
+@@ -1180,11 +1695,73 @@
  }
  
  union _type_cast_64_b {
@@ -795,7 +795,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint16 as_uint16(int16 v) {
    union _type_cast_64_b u;
    u._int16 = v;
-@@ -1197,6 +1774,18 @@ INLINE OVERLOADABLE float16 as_float16(int16 v) {
+@@ -1197,6 +1774,18 @@
    return u._float16;
  }
  
@@ -814,7 +814,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 as_int16(uint16 v) {
    union _type_cast_64_b u;
    u._uint16 = v;
-@@ -1209,6 +1798,18 @@ INLINE OVERLOADABLE float16 as_float16(uint16 v) {
+@@ -1209,6 +1798,18 @@
    return u._float16;
  }
  
@@ -833,7 +833,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 as_int16(float16 v) {
    union _type_cast_64_b u;
    u._float16 = v;
-@@ -1221,9 +1822,98 @@ INLINE OVERLOADABLE uint16 as_uint16(float16 v) {
+@@ -1221,9 +1822,98 @@
    return u._uint16;
  }
  
@@ -932,7 +932,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint2 convert_uint2(int2 v) {
    return (uint2)((uint)(v.s0), (uint)(v.s1));
  }
-@@ -1248,6 +1938,14 @@ INLINE OVERLOADABLE float2 convert_float2(int2 v) {
+@@ -1248,6 +1938,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -947,7 +947,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(uint2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1272,6 +1970,14 @@ INLINE OVERLOADABLE float2 convert_float2(uint2 v) {
+@@ -1272,6 +1970,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -962,7 +962,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(short2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1296,6 +2002,14 @@ INLINE OVERLOADABLE float2 convert_float2(short2 v) {
+@@ -1296,6 +2002,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -977,7 +977,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(ushort2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1320,6 +2034,14 @@ INLINE OVERLOADABLE float2 convert_float2(ushort2 v) {
+@@ -1320,6 +2034,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -992,7 +992,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(char2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1344,6 +2066,14 @@ INLINE OVERLOADABLE float2 convert_float2(char2 v) {
+@@ -1344,6 +2066,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -1007,7 +1007,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(uchar2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1368,6 +2098,14 @@ INLINE OVERLOADABLE float2 convert_float2(uchar2 v) {
+@@ -1368,6 +2098,14 @@
    return (float2)((float)(v.s0), (float)(v.s1));
  }
  
@@ -1022,7 +1022,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int2 convert_int2(float2 v) {
    return (int2)((int)(v.s0), (int)(v.s1));
  }
-@@ -1376,20 +2114,92 @@ INLINE OVERLOADABLE uint2 convert_uint2(float2 v) {
+@@ -1376,20 +2114,92 @@
    return (uint2)((uint)(v.s0), (uint)(v.s1));
  }
  
@@ -1123,7 +1123,7 @@ index 913917f..2f55184 100644
  }
  
  INLINE OVERLOADABLE uint3 convert_uint3(int3 v) {
-@@ -1416,6 +2226,14 @@ INLINE OVERLOADABLE float3 convert_float3(int3 v) {
+@@ -1416,6 +2226,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1138,7 +1138,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(uint3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1440,6 +2258,14 @@ INLINE OVERLOADABLE float3 convert_float3(uint3 v) {
+@@ -1440,6 +2258,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1153,7 +1153,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(short3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1464,6 +2290,14 @@ INLINE OVERLOADABLE float3 convert_float3(short3 v) {
+@@ -1464,6 +2290,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1168,7 +1168,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(ushort3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1488,6 +2322,14 @@ INLINE OVERLOADABLE float3 convert_float3(ushort3 v) {
+@@ -1488,6 +2322,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1183,7 +1183,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(char3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1512,6 +2354,14 @@ INLINE OVERLOADABLE float3 convert_float3(char3 v) {
+@@ -1512,6 +2354,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1198,7 +1198,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(uchar3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1536,6 +2386,14 @@ INLINE OVERLOADABLE float3 convert_float3(uchar3 v) {
+@@ -1536,6 +2386,14 @@
    return (float3)((float)(v.s0), (float)(v.s1), (float)(v.s2));
  }
  
@@ -1213,7 +1213,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int3 convert_int3(float3 v) {
    return (int3)((int)(v.s0), (int)(v.s1), (int)(v.s2));
  }
-@@ -1560,6 +2418,78 @@ INLINE OVERLOADABLE uchar3 convert_uchar3(float3 v) {
+@@ -1560,6 +2418,78 @@
    return (uchar3)((uchar)(v.s0), (uchar)(v.s1), (uchar)(v.s2));
  }
  
@@ -1292,7 +1292,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint4 convert_uint4(int4 v) {
    return (uint4)((uint)(v.s0), (uint)(v.s1), (uint)(v.s2), (uint)(v.s3));
  }
-@@ -1584,6 +2514,14 @@ INLINE OVERLOADABLE float4 convert_float4(int4 v) {
+@@ -1584,6 +2514,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1307,7 +1307,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(uint4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1608,6 +2546,14 @@ INLINE OVERLOADABLE float4 convert_float4(uint4 v) {
+@@ -1608,6 +2546,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1322,7 +1322,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(short4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1632,6 +2578,14 @@ INLINE OVERLOADABLE float4 convert_float4(short4 v) {
+@@ -1632,6 +2578,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1337,7 +1337,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(ushort4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1656,6 +2610,14 @@ INLINE OVERLOADABLE float4 convert_float4(ushort4 v) {
+@@ -1656,6 +2610,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1352,7 +1352,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(char4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1680,6 +2642,14 @@ INLINE OVERLOADABLE float4 convert_float4(char4 v) {
+@@ -1680,6 +2642,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1367,7 +1367,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(uchar4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1704,6 +2674,14 @@ INLINE OVERLOADABLE float4 convert_float4(uchar4 v) {
+@@ -1704,6 +2674,14 @@
    return (float4)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3));
  }
  
@@ -1382,7 +1382,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int4 convert_int4(float4 v) {
    return (int4)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3));
  }
-@@ -1728,6 +2706,78 @@ INLINE OVERLOADABLE uchar4 convert_uchar4(float4 v) {
+@@ -1728,6 +2706,78 @@
    return (uchar4)((uchar)(v.s0), (uchar)(v.s1), (uchar)(v.s2), (uchar)(v.s3));
  }
  
@@ -1461,7 +1461,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint8 convert_uint8(int8 v) {
    return (uint8)((uint)(v.s0), (uint)(v.s1), (uint)(v.s2), (uint)(v.s3), (uint)(v.s4), (uint)(v.s5), (uint)(v.s6), (uint)(v.s7));
  }
-@@ -1752,6 +2802,14 @@ INLINE OVERLOADABLE float8 convert_float8(int8 v) {
+@@ -1752,6 +2802,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1476,7 +1476,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(uint8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1776,6 +2834,14 @@ INLINE OVERLOADABLE float8 convert_float8(uint8 v) {
+@@ -1776,6 +2834,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1491,7 +1491,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(short8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1800,6 +2866,14 @@ INLINE OVERLOADABLE float8 convert_float8(short8 v) {
+@@ -1800,6 +2866,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1506,7 +1506,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(ushort8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1824,6 +2898,14 @@ INLINE OVERLOADABLE float8 convert_float8(ushort8 v) {
+@@ -1824,6 +2898,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1521,7 +1521,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(char8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1848,6 +2930,14 @@ INLINE OVERLOADABLE float8 convert_float8(char8 v) {
+@@ -1848,6 +2930,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1536,7 +1536,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(uchar8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1872,6 +2962,14 @@ INLINE OVERLOADABLE float8 convert_float8(uchar8 v) {
+@@ -1872,6 +2962,14 @@
    return (float8)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7));
  }
  
@@ -1551,7 +1551,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int8 convert_int8(float8 v) {
    return (int8)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7));
  }
-@@ -1896,6 +2994,78 @@ INLINE OVERLOADABLE uchar8 convert_uchar8(float8 v) {
+@@ -1896,6 +2994,78 @@
    return (uchar8)((uchar)(v.s0), (uchar)(v.s1), (uchar)(v.s2), (uchar)(v.s3), (uchar)(v.s4), (uchar)(v.s5), (uchar)(v.s6), (uchar)(v.s7));
  }
  
@@ -1630,7 +1630,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE uint16 convert_uint16(int16 v) {
    return (uint16)((uint)(v.s0), (uint)(v.s1), (uint)(v.s2), (uint)(v.s3), (uint)(v.s4), (uint)(v.s5), (uint)(v.s6), (uint)(v.s7), (uint)(v.s8), (uint)(v.s9), (uint)(v.sA), (uint)(v.sB), (uint)(v.sC), (uint)(v.sD), (uint)(v.sE), (uint)(v.sF));
  }
-@@ -1920,6 +3090,14 @@ INLINE OVERLOADABLE float16 convert_float16(int16 v) {
+@@ -1920,6 +3090,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1645,7 +1645,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(uint16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
-@@ -1944,6 +3122,14 @@ INLINE OVERLOADABLE float16 convert_float16(uint16 v) {
+@@ -1944,6 +3122,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1660,7 +1660,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(short16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
-@@ -1968,6 +3154,14 @@ INLINE OVERLOADABLE float16 convert_float16(short16 v) {
+@@ -1968,6 +3154,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1675,7 +1675,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(ushort16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
-@@ -1992,6 +3186,14 @@ INLINE OVERLOADABLE float16 convert_float16(ushort16 v) {
+@@ -1992,6 +3186,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1690,7 +1690,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(char16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
-@@ -2016,6 +3218,14 @@ INLINE OVERLOADABLE float16 convert_float16(char16 v) {
+@@ -2016,6 +3218,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1705,7 +1705,7 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(uchar16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
-@@ -2040,6 +3250,14 @@ INLINE OVERLOADABLE float16 convert_float16(uchar16 v) {
+@@ -2040,6 +3250,14 @@
    return (float16)((float)(v.s0), (float)(v.s1), (float)(v.s2), (float)(v.s3), (float)(v.s4), (float)(v.s5), (float)(v.s6), (float)(v.s7), (float)(v.s8), (float)(v.s9), (float)(v.sA), (float)(v.sB), (float)(v.sC), (float)(v.sD), (float)(v.sE), (float)(v.sF));
  }
  
@@ -1720,6 +1720,3 @@ index 913917f..2f55184 100644
  INLINE OVERLOADABLE int16 convert_int16(float16 v) {
    return (int16)((int)(v.s0), (int)(v.s1), (int)(v.s2), (int)(v.s3), (int)(v.s4), (int)(v.s5), (int)(v.s6), (int)(v.s7), (int)(v.s8), (int)(v.s9), (int)(v.sA), (int)(v.sB), (int)(v.sC), (int)(v.sD), (int)(v.sE), (int)(v.sF));
  }
--- 
-1.7.10.4
-

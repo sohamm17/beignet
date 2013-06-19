@@ -1,7 +1,7 @@
-From a1926ba22c15aee973d651d700fdc7b94cd8bf4d Mon Sep 17 00:00:00 2001
+From d276ed9d54e7026a777c80048a91e8dd078c4319 Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Mon, 13 May 2013 22:43:34 +0200
-Subject: [PATCH 1/4] Generate all supported as_* functions
+Subject: [PATCH 01/12] Generate all supported as_* functions
 To: beignet@lists.freedesktop.org
 
 This adds support for all reinterpreting type conversions currently
@@ -21,11 +21,10 @@ update_as.sh script.
  create mode 100755 backend/src/update.sh
  create mode 100755 backend/src/update_as.sh
 
-diff --git a/backend/src/gen_as.sh b/backend/src/gen_as.sh
-new file mode 100755
-index 0000000..76fedf8
---- /dev/null
-+++ b/backend/src/gen_as.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/gen_as.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/gen_as.sh	2013-06-19 21:04:37.838666758 +0200
 @@ -0,0 +1,83 @@
 +#! /bin/sh -e
 +
@@ -110,11 +109,10 @@ index 0000000..76fedf8
 +        done
 +
 +done
-diff --git a/backend/src/genconfig.sh b/backend/src/genconfig.sh
-new file mode 100644
-index 0000000..60edafd
---- /dev/null
-+++ b/backend/src/genconfig.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/genconfig.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/genconfig.sh	2013-06-19 21:04:37.838666758 +0200
 @@ -0,0 +1,11 @@
 +#! /bin/false
 +# This is to be sourced by the generation scripts
@@ -127,17 +125,22 @@ index 0000000..60edafd
 +
 +## No user serviceable parts below here
 +
-diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index 46b81e1..d00de44 100644
---- a/backend/src/ocl_stdlib.h
-+++ b/backend/src/ocl_stdlib.h
-@@ -91,15 +91,1138 @@ typedef size_t __event_t;
+Index: beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/ocl_stdlib.h	2013-06-19 21:04:22.050667462 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h	2013-06-19 21:04:37.838666758 +0200
+@@ -91,15 +91,1138 @@
  /////////////////////////////////////////////////////////////////////////////
  // OpenCL conversions & type casting
  /////////////////////////////////////////////////////////////////////////////
 -union type_cast_4_b {
 -  float f;
 -  uchar4 u4;
+-};
+-uchar4 INLINE_OVERLOADABLE as_uchar4(float f) {
+-    union type_cast_4_b u;
+-    u.f = f;
+-    return u.u4;
 +
 +// ##BEGIN_AS##
 +union _type_cast_1_b {
@@ -1104,11 +1107,7 @@ index 46b81e1..d00de44 100644
 +  short16 _short16;
 +  ushort16 _ushort16;
 +  float8 _float8;
- };
--uchar4 INLINE_OVERLOADABLE as_uchar4(float f) {
--    union type_cast_4_b u;
--    u.f = f;
--    return u.u4;
++};
 +
 +INLINE OVERLOADABLE uint8 as_uint8(int8 v) {
 +  union _type_cast_32_b u;
@@ -1138,7 +1137,7 @@ index 46b81e1..d00de44 100644
 +  union _type_cast_32_b u;
 +  u._uint8 = v;
 +  return u._int8;
- }
++}
 +
 +INLINE OVERLOADABLE short16 as_short16(uint8 v) {
 +  union _type_cast_32_b u;
@@ -1270,26 +1269,24 @@ index 46b81e1..d00de44 100644
 +  union _type_cast_64_b u;
 +  u._float16 = v;
 +  return u._uint16;
-+}
+ }
 +
 +// ##END_AS##
 +
  #define DEF(type, n, type2) type##n INLINE_OVERLOADABLE convert_##type##n(type2##n d) { \
      return (type##n)((type)(d.s0), (type)(d.s1), (type)(d.s2), (type)(d.s3)); \
   }
-diff --git a/backend/src/update.sh b/backend/src/update.sh
-new file mode 100755
-index 0000000..4f9af8c
---- /dev/null
-+++ b/backend/src/update.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/update.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/update.sh	2013-06-19 21:04:37.838666758 +0200
 @@ -0,0 +1,2 @@
 +#! /bin/sh -e
 +./update_as.sh
-diff --git a/backend/src/update_as.sh b/backend/src/update_as.sh
-new file mode 100755
-index 0000000..54b4191
---- /dev/null
-+++ b/backend/src/update_as.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/update_as.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/update_as.sh	2013-06-19 21:04:37.838666758 +0200
 @@ -0,0 +1,11 @@
 +#! /bin/sh -e
 +
@@ -1302,6 +1299,3 @@ index 0000000..54b4191
 +exec >&2
 +
 +mv $STDLIB_HEADER.tmp $STDLIB_HEADER
--- 
-1.7.10.4
-

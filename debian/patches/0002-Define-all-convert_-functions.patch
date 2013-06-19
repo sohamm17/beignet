@@ -1,7 +1,7 @@
-From 1900bf07f138edbf956e01618c304a7b10c59a9b Mon Sep 17 00:00:00 2001
+From 05cfdc1a307a209295263322121b63c5d244d613 Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Tue, 14 May 2013 17:04:56 +0200
-Subject: [PATCH 2/4] Define all convert_* functions.
+Subject: [PATCH 02/12] Define all convert_* functions.
 To: beignet@lists.freedesktop.org
 
 These functions convert between vectors of the same length by casting each
@@ -15,11 +15,10 @@ member in turn.
  create mode 100755 backend/src/gen_convert.sh
  create mode 100755 backend/src/update_convert.sh
 
-diff --git a/backend/src/gen_convert.sh b/backend/src/gen_convert.sh
-new file mode 100755
-index 0000000..74fc73c
---- /dev/null
-+++ b/backend/src/gen_convert.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/gen_convert.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/gen_convert.sh	2013-06-19 21:04:39.250666695 +0200
 @@ -0,0 +1,52 @@
 +#! /bin/sh -e
 +
@@ -73,11 +72,11 @@ index 0000000..74fc73c
 +                done
 +        done
 +done
-diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index d00de44..913917f 100644
---- a/backend/src/ocl_stdlib.h
-+++ b/backend/src/ocl_stdlib.h
-@@ -1223,29 +1223,849 @@ INLINE OVERLOADABLE uint16 as_uint16(float16 v) {
+Index: beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/ocl_stdlib.h	2013-06-19 21:04:37.838666758 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h	2013-06-19 21:04:39.250666695 +0200
+@@ -1223,29 +1223,849 @@
  
  // ##END_AS##
  
@@ -950,19 +949,18 @@ index d00de44..913917f 100644
  /////////////////////////////////////////////////////////////////////////////
  // OpenCL preprocessor directives & macros
  /////////////////////////////////////////////////////////////////////////////
-diff --git a/backend/src/update.sh b/backend/src/update.sh
-index 4f9af8c..0e5f8c0 100755
---- a/backend/src/update.sh
-+++ b/backend/src/update.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/update.sh
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/update.sh	2013-06-19 21:04:37.838666758 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/update.sh	2013-06-19 21:04:39.250666695 +0200
 @@ -1,2 +1,3 @@
  #! /bin/sh -e
  ./update_as.sh
 +./update_convert.sh
-diff --git a/backend/src/update_convert.sh b/backend/src/update_convert.sh
-new file mode 100755
-index 0000000..f1fcd36
---- /dev/null
-+++ b/backend/src/update_convert.sh
+Index: beignet-0.1+git20130619+42967d2/backend/src/update_convert.sh
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/backend/src/update_convert.sh	2013-06-19 21:04:39.250666695 +0200
 @@ -0,0 +1,11 @@
 +#! /bin/sh -e
 +
@@ -975,6 +973,3 @@ index 0000000..f1fcd36
 +exec >&2
 +
 +mv $STDLIB_HEADER.tmp $STDLIB_HEADER
--- 
-1.7.10.4
-

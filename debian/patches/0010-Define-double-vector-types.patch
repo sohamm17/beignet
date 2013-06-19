@@ -1,0 +1,23 @@
+From e8d0c6882addfc71dbc9cf3f973d86c24f73c133 Mon Sep 17 00:00:00 2001
+From: Simon Richter <Simon.Richter@hogyros.de>
+Date: Wed, 19 Jun 2013 11:44:22 +0200
+Subject: [PATCH 10/12] Define double vector types
+To: beignet@lists.freedesktop.org
+
+Add the definition for the "doubleN" vector types
+---
+ backend/src/ocl_stdlib.h |    1 +
+ 1 file changed, 1 insertion(+)
+
+Index: beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/backend/src/ocl_stdlib.h	2013-06-19 21:04:48.974666262 +0200
++++ beignet-0.1+git20130619+42967d2/backend/src/ocl_stdlib.h	2013-06-19 21:04:50.314666202 +0200
+@@ -72,6 +72,7 @@
+ DEF(long);
+ DEF(ulong);
+ DEF(float);
++DEF(double);
+ #undef DEF
+ /////////////////////////////////////////////////////////////////////////////
+ // OpenCL other built-in data types

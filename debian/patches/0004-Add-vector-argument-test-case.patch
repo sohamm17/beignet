@@ -1,7 +1,7 @@
-From e9f476243902f2f3989c880030b267c384d7c040 Mon Sep 17 00:00:00 2001
+From b5563b40490e799465a597dab817c9e603c24028 Mon Sep 17 00:00:00 2001
 From: Yang Rong <rong.r.yang@intel.com>
 Date: Thu, 16 May 2013 12:36:35 +0800
-Subject: [PATCH 4/4] Add vector argument test case.
+Subject: [PATCH 04/12] Add vector argument test case.
 To: beignet@lists.freedesktop.org
 
 Signed-off-by: Yang Rong <rong.r.yang@intel.com>
@@ -13,11 +13,10 @@ Signed-off-by: Yang Rong <rong.r.yang@intel.com>
  create mode 100644 kernels/compiler_function_argument2.cl
  create mode 100644 utests/compiler_function_argument2.cpp
 
-diff --git a/kernels/compiler_function_argument2.cl b/kernels/compiler_function_argument2.cl
-new file mode 100644
-index 0000000..0985dbd
---- /dev/null
-+++ b/kernels/compiler_function_argument2.cl
+Index: beignet-0.1+git20130619+42967d2/kernels/compiler_function_argument2.cl
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/kernels/compiler_function_argument2.cl	2013-06-19 21:04:43.270666516 +0200
 @@ -0,0 +1,6 @@
 +__kernel void
 +compiler_function_argument2(__global int *dst, int4 value)
@@ -25,11 +24,11 @@ index 0000000..0985dbd
 +  int id = (int)get_global_id(0);
 +  dst[id] = value.w;
 +}
-diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
-index e5c03ee..f0bbe46 100644
---- a/utests/CMakeLists.txt
-+++ b/utests/CMakeLists.txt
-@@ -34,6 +34,7 @@ set (utests_sources
+Index: beignet-0.1+git20130619+42967d2/utests/CMakeLists.txt
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/utests/CMakeLists.txt	2013-06-19 21:03:26.278669949 +0200
++++ beignet-0.1+git20130619+42967d2/utests/CMakeLists.txt	2013-06-19 21:04:43.270666516 +0200
+@@ -34,6 +34,7 @@
    compiler_fill_image_3d_2.cpp
    compiler_function_argument0.cpp
    compiler_function_argument1.cpp
@@ -37,11 +36,10 @@ index e5c03ee..f0bbe46 100644
    compiler_function_argument.cpp
    compiler_function_constant0.cpp
    compiler_function_constant1.cpp
-diff --git a/utests/compiler_function_argument2.cpp b/utests/compiler_function_argument2.cpp
-new file mode 100644
-index 0000000..1e398a9
---- /dev/null
-+++ b/utests/compiler_function_argument2.cpp
+Index: beignet-0.1+git20130619+42967d2/utests/compiler_function_argument2.cpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ beignet-0.1+git20130619+42967d2/utests/compiler_function_argument2.cpp	2013-06-19 21:04:43.270666516 +0200
 @@ -0,0 +1,26 @@
 +#include "utest_helper.hpp"
 +
@@ -69,6 +67,3 @@ index 0000000..1e398a9
 +}
 +
 +MAKE_UTEST_FROM_FUNCTION(compiler_function_argument2);
--- 
-1.7.10.4
-

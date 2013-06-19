@@ -2,10 +2,10 @@ Description: Debian compliant compiler flags handling
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130521+a7ea35c/CMakeLists.txt
+Index: beignet-0.1+git20130619+42967d2/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130521+a7ea35c.orig/CMakeLists.txt	2013-05-21 10:40:02.635944526 +0200
-+++ beignet-0.1+git20130521+a7ea35c/CMakeLists.txt	2013-05-21 10:40:37.351942978 +0200
+--- beignet-0.1+git20130619+42967d2.orig/CMakeLists.txt	2013-06-19 21:04:24.770667341 +0200
++++ beignet-0.1+git20130619+42967d2/CMakeLists.txt	2013-06-19 21:04:31.958667020 +0200
 @@ -18,7 +18,6 @@
  
  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
@@ -14,10 +14,10 @@ Index: beignet-0.1+git20130521+a7ea35c/CMakeLists.txt
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
  SET(EMULATE_IVB false CACHE BOOL "To emulate IVB")
  SET(EMULATE_SNB false CACHE BOOL "To emulate SNB")
-Index: beignet-0.1+git20130521+a7ea35c/backend/CMakeLists.txt
+Index: beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130521+a7ea35c.orig/backend/CMakeLists.txt	2013-05-21 10:40:03.103944505 +0200
-+++ beignet-0.1+git20130521+a7ea35c/backend/CMakeLists.txt	2013-05-21 10:40:37.351942978 +0200
+--- beignet-0.1+git20130619+42967d2.orig/backend/CMakeLists.txt	2013-06-19 21:04:24.770667341 +0200
++++ beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt	2013-06-19 21:04:31.958667020 +0200
 @@ -45,39 +45,39 @@
  if (COMPILER STREQUAL "GCC")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")

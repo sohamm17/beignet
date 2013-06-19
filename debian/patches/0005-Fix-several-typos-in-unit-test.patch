@@ -1,0 +1,58 @@
+From 050e16612260137274a71e3abe3bbcf607cc2f86 Mon Sep 17 00:00:00 2001
+From: Ruiling Song <ruiling.song@intel.com>
+Date: Wed, 19 Jun 2013 10:04:54 +0800
+Subject: [PATCH 05/12] Fix several typos in unit test.
+To: beignet@lists.freedesktop.org
+
+compiler_sub_bytes and compiler_sub_shorts
+
+Signed-off-by: Ruiling Song <ruiling.song@intel.com>
+---
+ utests/compiler_sub_bytes.cpp  |    4 ++--
+ utests/compiler_sub_shorts.cpp |    4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+Index: beignet-0.1+git20130619+42967d2/utests/compiler_sub_bytes.cpp
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/utests/compiler_sub_bytes.cpp	2013-06-19 21:03:25.994669961 +0200
++++ beignet-0.1+git20130619+42967d2/utests/compiler_sub_bytes.cpp	2013-06-19 21:04:44.686666453 +0200
+@@ -11,7 +11,7 @@
+   for (uint32_t i = 0; i < n; ++i) ((int8_t*)buf_data[0])[i] = (int8_t) rand();
+   for (uint32_t i = 0; i < n; ++i) ((int8_t*)buf_data[1])[i] = (int8_t) rand();
+   OCL_CREATE_BUFFER(buf[0], CL_MEM_COPY_HOST_PTR, n * sizeof(int8_t), buf_data[0]);
+-  OCL_CREATE_BUFFER(buf[1], CL_MEM_COPY_HOST_PTR, n * sizeof(int8_t), buf_data[0]);
++  OCL_CREATE_BUFFER(buf[1], CL_MEM_COPY_HOST_PTR, n * sizeof(int8_t), buf_data[1]);
+   OCL_CREATE_BUFFER(buf[2], 0, n * sizeof(int8_t), NULL);
+ 
+   // Run the kernel
+@@ -25,7 +25,7 @@
+   // Check result
+   OCL_MAP_BUFFER(2);
+   for (uint32_t i = 0; i < n; ++i)
+-    OCL_ASSERT(((int8_t*)buf_data[2])[i] = ((int8_t*)buf_data[0])[i] - ((int8_t*)buf_data[1])[i]);
++    OCL_ASSERT(((int8_t*)buf_data[2])[i] == (int8_t)(((int8_t*)buf_data[0])[i] - ((int8_t*)buf_data[1])[i]));
+   free(buf_data[0]);
+   free(buf_data[1]);
+   buf_data[0] = buf_data[1] = NULL;
+Index: beignet-0.1+git20130619+42967d2/utests/compiler_sub_shorts.cpp
+===================================================================
+--- beignet-0.1+git20130619+42967d2.orig/utests/compiler_sub_shorts.cpp	2013-06-19 21:03:25.994669961 +0200
++++ beignet-0.1+git20130619+42967d2/utests/compiler_sub_shorts.cpp	2013-06-19 21:04:44.686666453 +0200
+@@ -11,7 +11,7 @@
+   for (uint32_t i = 0; i < n; ++i) ((int16_t*)buf_data[0])[i] = (int16_t) rand();
+   for (uint32_t i = 0; i < n; ++i) ((int16_t*)buf_data[1])[i] = (int16_t) rand();
+   OCL_CREATE_BUFFER(buf[0], CL_MEM_COPY_HOST_PTR, n * sizeof(int16_t), buf_data[0]);
+-  OCL_CREATE_BUFFER(buf[1], CL_MEM_COPY_HOST_PTR, n * sizeof(int16_t), buf_data[0]);
++  OCL_CREATE_BUFFER(buf[1], CL_MEM_COPY_HOST_PTR, n * sizeof(int16_t), buf_data[1]);
+   OCL_CREATE_BUFFER(buf[2], 0, n * sizeof(int16_t), NULL);
+ 
+   // Run the kernel
+@@ -25,7 +25,7 @@
+   // Check result
+   OCL_MAP_BUFFER(2);
+   for (uint32_t i = 0; i < n; ++i)
+-    OCL_ASSERT(((int16_t*)buf_data[2])[i] = ((int16_t*)buf_data[0])[i] - ((int16_t*)buf_data[1])[i]);
++    OCL_ASSERT(((int16_t*)buf_data[2])[i] == (int16_t)(((int16_t*)buf_data[0])[i] - ((int16_t*)buf_data[1])[i]));
+   free(buf_data[0]);
+   free(buf_data[1]);
+   buf_data[0] = buf_data[1] = NULL;

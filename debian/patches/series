@@ -1,8 +1,16 @@
 debug
 flags
 khronos
+deprecated-in-utest
 private
 0001-Generate-all-supported-as_-functions.patch
 0002-Define-all-convert_-functions.patch
 0003-Add-long-and-ulong-types-to-generated-functions.patch
 0004-Add-vector-argument-test-case.patch
+0005-Fix-several-typos-in-unit-test.patch
+0006-Support-64-bit-float.patch
+0007-test-case-for-64-bit-float.patch
+0009-Enable-cl_khr_fp64-extension-for-OpenCL-stdlib-heade.patch
+0010-Define-double-vector-types.patch
+0011-Enable-generation-of-convert_-and-as_-functions-for-.patch
+0012-GBE-Fixed-one-bug-in-scalarize-pass.patch
