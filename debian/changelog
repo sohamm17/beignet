@@ -1,3 +1,9 @@
+beignet (0.1+git20130619+42967d2-2) unstable; urgency=low
+
+  * Drop EGL support for kFreeBSD for the time being
+
+ -- Simon Richter <sjr@debian.org>  Thu, 20 Jun 2013 11:18:59 +0200
+
 beignet (0.1+git20130619+42967d2-1) unstable; urgency=low
 
   * New upstream release
