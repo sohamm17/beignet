@@ -4,3 +4,9 @@ khronos
 deprecated-in-utest
 private
 0001-Add-vector-argument-test-case.patch
+0003-GBE-Add-more-support-of-char-and-short-arithmetic.patch
+0004-utests-Add-basic-arithmetic-test-case.patch
+0005-Add-the-builtin-function-abs-and-the-according-test-.patch
+0006-PATCH-Refine-the-get_local_id-.-builtins.patch
+0007-Add-the-support-of-the-API-clGetCommandQueueInfo.patch
+0008-Add-the-test-case-for-clGetCommandQueueInfo-API.patch

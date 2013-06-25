@@ -1,0 +1,55 @@
+From 8a2826a9a7b2085935f5396ae633645d35255b17 Mon Sep 17 00:00:00 2001
+From: Zhigang Gong <zhigang.gong@linux.intel.com>
+Date: Tue, 25 Jun 2013 14:15:09 +0800
+Subject: [PATCH 6/8] [PATCH] Refine the get_local_id/... builtins.
+To: beignet@lists.freedesktop.org
+
+As we could prepare correct value on runtime library side and give
+a correct value in the payload for dim 0, 1 and 2. So for these 3
+dim argument, we don't need to check it whether in the valid range,
+we just read the payload's value.
+
+This way, we can avoid any unecessary branching for normal usage of
+these builtin functions. And could avoid a known bool related bug.
+
+Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
+---
+ backend/src/ocl_stdlib.h |    8 +++-----
+ src/cl_api.c             |    2 +-
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
+index eaf8f21..dd70da9 100644
+--- a/backend/src/ocl_stdlib.h
++++ b/backend/src/ocl_stdlib.h
+@@ -4315,11 +4315,9 @@ DECL_INTERNAL_WORK_ITEM_FN(get_num_groups)
+ #define DECL_PUBLIC_WORK_ITEM_FN(NAME, OTHER_RET)    \
+ INLINE unsigned NAME(unsigned int dim) {             \
+   if (dim == 0) return __gen_ocl_##NAME##0();        \
+-  else if (dim > 0 && dim < get_work_dim()) {        \
+-    if (dim == 1) return __gen_ocl_##NAME##1();      \
+-    else if (dim == 2) return __gen_ocl_##NAME##2(); \
+-  }                                                  \
+-  return OTHER_RET;                                  \
++  else if (dim == 1) return __gen_ocl_##NAME##1();   \
++  else if (dim == 2) return __gen_ocl_##NAME##2();   \
++  else return OTHER_RET;                             \
+ }
+ 
+ DECL_PUBLIC_WORK_ITEM_FN(get_group_id, 0)
+diff --git a/src/cl_api.c b/src/cl_api.c
+index 3c78243..ebca294 100644
+--- a/src/cl_api.c
++++ b/src/cl_api.c
+@@ -1570,7 +1570,7 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
+ {
+   size_t fixed_global_off[] = {0,0,0};
+   size_t fixed_global_sz[] = {1,1,1};
+-  size_t fixed_local_sz[] = {16,1,1};
++  size_t fixed_local_sz[] = {1,1,1};
+   cl_int err = CL_SUCCESS;
+   cl_uint i;
+ 
+-- 
+1.7.10.4
+

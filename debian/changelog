@@ -1,3 +1,9 @@
+beignet (0.1+git20130625+97c3a9b-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Simon Richter <sjr@debian.org>  Tue, 25 Jun 2013 13:52:00 +0200
+
 beignet (0.1+git20130621+30586bf-1) unstable; urgency=low
 
   * New upstream release
