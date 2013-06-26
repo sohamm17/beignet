@@ -1,7 +1,7 @@
-From 8a2826a9a7b2085935f5396ae633645d35255b17 Mon Sep 17 00:00:00 2001
+From 3c0ee8cab035426e7e28425d2142e15051d83c90 Mon Sep 17 00:00:00 2001
 From: Zhigang Gong <zhigang.gong@linux.intel.com>
 Date: Tue, 25 Jun 2013 14:15:09 +0800
-Subject: [PATCH 6/8] [PATCH] Refine the get_local_id/... builtins.
+Subject: [PATCH 04/11] [PATCH] Refine the get_local_id/... builtins.
 To: beignet@lists.freedesktop.org
 
 As we could prepare correct value on runtime library side and give
@@ -19,10 +19,10 @@ Signed-off-by: Zhigang Gong <zhigang.gong@linux.intel.com>
  2 files changed, 4 insertions(+), 6 deletions(-)
 
 diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index eaf8f21..dd70da9 100644
+index 5ad829e..227454d 100644
 --- a/backend/src/ocl_stdlib.h
 +++ b/backend/src/ocl_stdlib.h
-@@ -4315,11 +4315,9 @@ DECL_INTERNAL_WORK_ITEM_FN(get_num_groups)
+@@ -4379,11 +4379,9 @@ DECL_INTERNAL_WORK_ITEM_FN(get_num_groups)
  #define DECL_PUBLIC_WORK_ITEM_FN(NAME, OTHER_RET)    \
  INLINE unsigned NAME(unsigned int dim) {             \
    if (dim == 0) return __gen_ocl_##NAME##0();        \
@@ -38,10 +38,10 @@ index eaf8f21..dd70da9 100644
  
  DECL_PUBLIC_WORK_ITEM_FN(get_group_id, 0)
 diff --git a/src/cl_api.c b/src/cl_api.c
-index 3c78243..ebca294 100644
+index f7db4bc..bb09c07 100644
 --- a/src/cl_api.c
 +++ b/src/cl_api.c
-@@ -1570,7 +1570,7 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
+@@ -1581,7 +1581,7 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
  {
    size_t fixed_global_off[] = {0,0,0};
    size_t fixed_global_sz[] = {1,1,1};

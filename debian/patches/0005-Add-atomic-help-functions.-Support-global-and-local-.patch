@@ -1,0 +1,611 @@
+From 6e70caed68eb0ace38a8b42b105c0fd4c38e8f9e Mon Sep 17 00:00:00 2001
+From: Yang Rong <rong.r.yang@intel.com>
+Date: Wed, 26 Jun 2013 15:29:21 +0800
+Subject: [PATCH 05/11] Add atomic help functions. Support global and local
+ buffer.
+To: beignet@lists.freedesktop.org
+
+Signed-off-by: Yang Rong <rong.r.yang@intel.com>
+---
+ backend/src/backend/gen_context.cpp                |    9 +++
+ backend/src/backend/gen_context.hpp                |    1 +
+ backend/src/backend/gen_defs.hpp                   |   49 ++++++++++++--
+ backend/src/backend/gen_encoder.cpp                |   35 ++++++++++
+ backend/src/backend/gen_encoder.hpp                |    2 +
+ .../src/backend/gen_insn_gen7_schedule_info.hxx    |    2 +-
+ backend/src/backend/gen_insn_selection.cpp         |   61 +++++++++++++++++
+ backend/src/backend/gen_insn_selection.hpp         |    4 +-
+ backend/src/backend/gen_insn_selection.hxx         |    1 +
+ backend/src/ir/context.hpp                         |    6 ++
+ backend/src/ir/instruction.cpp                     |   70 +++++++++++++++++++-
+ backend/src/ir/instruction.hpp                     |   43 +++++++++++-
+ backend/src/ir/instruction.hxx                     |   13 ++++
+ 13 files changed, 283 insertions(+), 13 deletions(-)
+
+diff --git a/backend/src/backend/gen_context.cpp b/backend/src/backend/gen_context.cpp
+index 93d3932..41cab90 100644
+--- a/backend/src/backend/gen_context.cpp
++++ b/backend/src/backend/gen_context.cpp
+@@ -226,6 +226,15 @@ namespace gbe
+     }
+   }
+ 
++  void GenContext::emitAtomicInstruction(const SelectionInstruction &insn) {
++    const GenRegister src = ra->genReg(insn.src(0));
++    const GenRegister dst = ra->genReg(insn.dst(0));
++    const uint32_t function = insn.extra.function;
++    const uint32_t bti = insn.extra.elem;
++
++    p->ATOMIC(dst, function, src, bti, insn.srcNum);
++  }
++
+   void GenContext::emitIndirectMoveInstruction(const SelectionInstruction &insn) {
+     GenRegister src = ra->genReg(insn.src(0));
+     if(isScalarReg(src.reg()))
+diff --git a/backend/src/backend/gen_context.hpp b/backend/src/backend/gen_context.hpp
+index 804384d..5dfaef9 100644
+--- a/backend/src/backend/gen_context.hpp
++++ b/backend/src/backend/gen_context.hpp
+@@ -91,6 +91,7 @@ namespace gbe
+     void emitWriteFloat64Instruction(const SelectionInstruction &insn);
+     void emitUntypedReadInstruction(const SelectionInstruction &insn);
+     void emitUntypedWriteInstruction(const SelectionInstruction &insn);
++    void emitAtomicInstruction(const SelectionInstruction &insn);
+     void emitByteGatherInstruction(const SelectionInstruction &insn);
+     void emitByteScatterInstruction(const SelectionInstruction &insn);
+     void emitSampleInstruction(const SelectionInstruction &insn);
+diff --git a/backend/src/backend/gen_defs.hpp b/backend/src/backend/gen_defs.hpp
+index d1ce6b2..61412c4 100644
+--- a/backend/src/backend/gen_defs.hpp
++++ b/backend/src/backend/gen_defs.hpp
+@@ -1,4 +1,4 @@
+-/* 
++/*
+  * Copyright © 2012 Intel Corporation
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -21,7 +21,7 @@
+  Copyright (C) Intel Corp.  2006.  All Rights Reserved.
+  Intel funded Tungsten Graphics (http://www.tungstengraphics.com) to
+  develop this 3D driver.
+- 
++
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+@@ -29,11 +29,11 @@
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+- 
++
+  The above copyright notice and this permission notice (including the
+  next paragraph) shall be included in all copies or substantial
+  portions of the Software.
+- 
++
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+@@ -41,7 +41,7 @@
+  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- 
++
+  **********************************************************************/
+  /*
+   * Authors:
+@@ -169,6 +169,28 @@ enum opcode {
+   GEN_OPCODE_NOP = 126,
+ };
+ 
++#define GEN_ATOMIC_SIMD16   0
++#define GEN_ATOMIC_SIMD8    1
++
++enum GenAtomicOpCode {
++  GEN_ATOMIC_OP_CMPWR8B   = 0,
++  GEN_ATOMIC_OP_AND       = 1,
++  GEN_ATOMIC_OP_OR        = 2,
++  GEN_ATOMIC_OP_XOR       = 3,
++  GEN_ATOMIC_OP_MOV       = 4,
++  GEN_ATOMIC_OP_INC       = 5,
++  GEN_ATOMIC_OP_DEC       = 6,
++  GEN_ATOMIC_OP_ADD       = 7,
++  GEN_ATOMIC_OP_SUB       = 8,
++  GEN_ATOMIC_OP_REVSUB    = 9,
++  GEN_ATOMIC_OP_IMAX      = 10,
++  GEN_ATOMIC_OP_IMIN      = 11,
++  GEN_ATOMIC_OP_UMAX      = 12,
++  GEN_ATOMIC_OP_UMIN      = 13,
++  GEN_ATOMIC_OP_CMPWR     = 14,
++  GEN_ATOMIC_OP_PREDEC    = 15
++};
++
+ /*! Gen SFID */
+ enum GenMessageTarget {
+   GEN_SFID_NULL                     = 0,
+@@ -772,7 +794,7 @@ struct GenInstruction
+     /*! Memory fence */
+     struct {
+       uint32_t bti:8;
+-      uint32_t ingored:5;
++      uint32_t pad:5;
+       uint32_t commit_enable:1;
+       uint32_t msg_type:4;
+       uint32_t pad2:1;
+@@ -783,6 +805,21 @@ struct GenInstruction
+       uint32_t end_of_thread:1;
+     } gen7_memory_fence;
+ 
++    /*! atomic messages */
++    struct {
++      uint32_t bti:8;
++      uint32_t aop_type:4;
++      uint32_t simd_mode:1;
++      uint32_t return_data:1;
++      uint32_t msg_type:4;
++      uint32_t category:1;
++      uint32_t header_present:1;
++      uint32_t response_length:5;
++      uint32_t msg_length:4;
++      uint32_t pad3:2;
++      uint32_t end_of_thread:1;
++    } gen7_atomic_op;
++
+     struct {
+       uint32_t src1_subreg_nr_high:1;
+       uint32_t src1_reg_nr:8;
+diff --git a/backend/src/backend/gen_encoder.cpp b/backend/src/backend/gen_encoder.cpp
+index e96678b..43658e8 100644
+--- a/backend/src/backend/gen_encoder.cpp
++++ b/backend/src/backend/gen_encoder.cpp
+@@ -558,6 +558,41 @@ namespace gbe
+                            response_length);
+   }
+ 
++  void GenEncoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, uint32_t bti, uint32_t srcNum) {
++    GenInstruction *insn = this->next(GEN_OPCODE_SEND);
++    uint32_t msg_length = 0;
++    uint32_t response_length = 0;
++
++    if (this->curr.execWidth == 8) {
++      msg_length = srcNum;
++      response_length = 1;
++    } else if (this->curr.execWidth == 16) {
++      msg_length = 2*srcNum;
++      response_length = 2;
++    } else
++      NOT_IMPLEMENTED;
++
++    this->setHeader(insn);
++    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
++    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
++    this->setSrc1(insn, GenRegister::immud(0));
++
++    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
++    setMessageDescriptor(this, insn, sfid, msg_length, response_length);
++    insn->bits3.gen7_atomic_op.msg_type = GEN_UNTYPED_ATOMIC_READ;
++    insn->bits3.gen7_atomic_op.bti = bti;
++    insn->bits3.gen7_atomic_op.return_data = 1;
++    insn->bits3.gen7_atomic_op.aop_type = function;
++
++    if (this->curr.execWidth == 8)
++      insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD8;
++    else if (this->curr.execWidth == 16)
++      insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD16;
++    else
++      NOT_SUPPORTED;
++
++  }
++
+   GenInstruction *GenEncoder::next(uint32_t opcode) {
+      GenInstruction insn;
+      std::memset(&insn, 0, sizeof(GenInstruction));
+diff --git a/backend/src/backend/gen_encoder.hpp b/backend/src/backend/gen_encoder.hpp
+index 88a3e77..3ff8c97 100644
+--- a/backend/src/backend/gen_encoder.hpp
++++ b/backend/src/backend/gen_encoder.hpp
+@@ -136,6 +136,8 @@ namespace gbe
+     void NOP(void);
+     /*! Wait instruction (used for the barrier) */
+     void WAIT(void);
++    /*! Atomic instructions */
++    void ATOMIC(GenRegister dst, uint32_t function, GenRegister src, uint32_t bti, uint32_t srcNum);
+     /*! Read 64-bits float arrays */
+     void READ_FLOAT64(GenRegister dst, GenRegister src, uint32_t bti, uint32_t elemNum);
+     /*! Write 64-bits float arrays */
+diff --git a/backend/src/backend/gen_insn_gen7_schedule_info.hxx b/backend/src/backend/gen_insn_gen7_schedule_info.hxx
+index a3b4621..f3f4a25 100644
+--- a/backend/src/backend/gen_insn_gen7_schedule_info.hxx
++++ b/backend/src/backend/gen_insn_gen7_schedule_info.hxx
+@@ -21,4 +21,4 @@ DECL_GEN7_SCHEDULE(ByteScatter,     80,        1,        1)
+ DECL_GEN7_SCHEDULE(Sample,          80,        1,        1)
+ DECL_GEN7_SCHEDULE(TypedWrite,      80,        1,        1)
+ DECL_GEN7_SCHEDULE(GetImageInfo,    20,        4,        2)
+-
++DECL_GEN7_SCHEDULE(Atomic,          80,        1,        1)
+diff --git a/backend/src/backend/gen_insn_selection.cpp b/backend/src/backend/gen_insn_selection.cpp
+index 11efcb9..c64afd9 100644
+--- a/backend/src/backend/gen_insn_selection.cpp
++++ b/backend/src/backend/gen_insn_selection.cpp
+@@ -168,12 +168,14 @@ namespace gbe
+   bool SelectionInstruction::isRead(void) const {
+     return this->opcode == SEL_OP_UNTYPED_READ ||
+            this->opcode == SEL_OP_READ_FLOAT64 ||
++           this->opcode == SEL_OP_ATOMIC       ||
+            this->opcode == SEL_OP_BYTE_GATHER;
+   }
+ 
+   bool SelectionInstruction::isWrite(void) const {
+     return this->opcode == SEL_OP_UNTYPED_WRITE ||
+            this->opcode == SEL_OP_WRITE_FLOAT64 ||
++           this->opcode == SEL_OP_ATOMIC        ||
+            this->opcode == SEL_OP_BYTE_SCATTER;
+   }
+ 
+@@ -456,6 +458,8 @@ namespace gbe
+     void NOP(void);
+     /*! Wait instruction (used for the barrier) */
+     void WAIT(void);
++    /*! Atomic instruction */
++    void ATOMIC(Reg dst, uint32_t function, uint32_t srcNum, Reg src0, Reg src1, Reg src2, uint32_t bti);
+     /*! Read 64 bits float array */
+     void READ_FLOAT64(Reg addr, const GenRegister *dst, uint32_t elemNum, uint32_t bti);
+     /*! Write 64 bits float array */
+@@ -730,6 +734,23 @@ namespace gbe
+     insn->src(0) = src;
+   }
+ 
++  void Selection::Opaque::ATOMIC(Reg dst, uint32_t function,
++                                     uint32_t srcNum, Reg src0,
++                                     Reg src1, Reg src2, uint32_t bti) {
++    SelectionInstruction *insn = this->appendInsn(SEL_OP_ATOMIC, 1, srcNum);
++    insn->dst(0) = dst;
++    insn->src(0) = src0;
++    if(srcNum > 1) insn->src(1) = src1;
++    if(srcNum > 2) insn->src(2) = src2;
++    insn->extra.function = function;
++    insn->extra.elem     = bti;
++    SelectionVector *vector = this->appendVector();
++
++    vector->regNum = srcNum;
++    vector->reg = &insn->src(0);
++    vector->isSrc = 1;
++  }
++
+   void Selection::Opaque::EOT(void) { this->appendInsn(SEL_OP_EOT, 0, 0); }
+   void Selection::Opaque::NOP(void) { this->appendInsn(SEL_OP_NOP, 0, 0); }
+   void Selection::Opaque::WAIT(void) { this->appendInsn(SEL_OP_WAIT, 0, 0); }
+@@ -916,6 +937,7 @@ namespace gbe
+   bool Selection::Opaque::isRoot(const ir::Instruction &insn) const {
+     if (insn.getDstNum() > 1 ||
+         insn.hasSideEffect() ||
++        insn.isMemberOf<ir::AtomicInstruction>() ||
+         insn.isMemberOf<ir::BranchInstruction>() ||
+         insn.isMemberOf<ir::LabelInstruction>())
+     return true;
+@@ -2033,6 +2055,44 @@ namespace gbe
+     DECL_CTOR(ConvertInstruction, 1, 1);
+   };
+ 
++  /*! Convert instruction pattern */
++  DECL_PATTERN(AtomicInstruction)
++  {
++    INLINE bool emitOne(Selection::Opaque &sel, const ir::AtomicInstruction &insn) const
++    {
++      using namespace ir;
++      const Opcode opcode = insn.getOpcode();
++      const AddressSpace space = insn.getAddressSpace();
++      const uint32_t bti = space == MEM_LOCAL ? 0xfe : 0x01;
++      const uint32_t srcNum = insn.getSrcNum();
++      const GenRegister src0 = sel.selReg(insn.getSrc(0), TYPE_U32);   //address
++      GenRegister src1 = src0, src2 = src0;
++      if(srcNum > 1) src1 = sel.selReg(insn.getSrc(1), TYPE_U32);
++      if(srcNum > 2) src2 = sel.selReg(insn.getSrc(2), TYPE_U32);
++      GenRegister dst  = sel.selReg(insn.getDst(0), TYPE_U32);
++      GenAtomicOpCode aop = GEN_ATOMIC_OP_CMPWR8B;
++      switch (opcode) {
++        case OP_ATOMIC_ADD:     aop = GEN_ATOMIC_OP_ADD; break;
++        case OP_ATOMIC_SUB:     aop = GEN_ATOMIC_OP_SUB; break;
++        case OP_ATOMIC_AND:     aop = GEN_ATOMIC_OP_AND; break;
++        case OP_ATOMIC_OR :     aop = GEN_ATOMIC_OP_OR;  break;
++        case OP_ATOMIC_XOR:     aop = GEN_ATOMIC_OP_XOR; break;
++        case OP_ATOMIC_XCHG:    aop = GEN_ATOMIC_OP_MOV; break;
++        case OP_ATOMIC_UMIN:    aop = GEN_ATOMIC_OP_UMIN; break;
++        case OP_ATOMIC_UMAX:    aop = GEN_ATOMIC_OP_UMAX; break;
++        case OP_ATOMIC_IMIN:    aop = GEN_ATOMIC_OP_IMIN; break;
++        case OP_ATOMIC_IMAX:    aop = GEN_ATOMIC_OP_IMAX; break;
++        case OP_ATOMIC_INC:     aop = GEN_ATOMIC_OP_INC; break;
++        case OP_ATOMIC_DEC:     aop = GEN_ATOMIC_OP_DEC; break;
++        case OP_ATOMIC_CMPXCHG: aop = GEN_ATOMIC_OP_CMPWR; break;
++        default: NOT_SUPPORTED;
++      }
++      sel.ATOMIC(dst, aop, srcNum, src0, src1, src2, bti);
++      return true;
++    }
++    DECL_CTOR(AtomicInstruction, 1, 1);
++  };
++
+   /*! Select instruction pattern */
+   class SelectInstructionPattern : public SelectionPattern
+   {
+@@ -2379,6 +2439,7 @@ namespace gbe
+     this->insert<SelectInstructionPattern>();
+     this->insert<CompareInstructionPattern>();
+     this->insert<ConvertInstructionPattern>();
++    this->insert<AtomicInstructionPattern>();
+     this->insert<LabelInstructionPattern>();
+     this->insert<BranchInstructionPattern>();
+     this->insert<Int32x32MulInstructionPattern>();
+diff --git a/backend/src/backend/gen_insn_selection.hpp b/backend/src/backend/gen_insn_selection.hpp
+index 778eb1f..5ae6e42 100644
+--- a/backend/src/backend/gen_insn_selection.hpp
++++ b/backend/src/backend/gen_insn_selection.hpp
+@@ -92,9 +92,9 @@ namespace gbe
+     GenInstructionState state;
+     union {
+       struct {
+-        /*! Store bti for loads/stores and function for math and compares */
++        /*! Store bti for loads/stores and function for math, atomic and compares */
+         uint16_t function:8;
+-        /*! elemSize for byte scatters / gathers, elemNum for untyped msg */
++        /*! elemSize for byte scatters / gathers, elemNum for untyped msg, bti for atomic */
+         uint16_t elem:8;
+       };
+       struct {
+diff --git a/backend/src/backend/gen_insn_selection.hxx b/backend/src/backend/gen_insn_selection.hxx
+index cc2be08..f1a4701 100644
+--- a/backend/src/backend/gen_insn_selection.hxx
++++ b/backend/src/backend/gen_insn_selection.hxx
+@@ -20,6 +20,7 @@ DECL_SELECTION_IR(RSL, BinaryInstruction)
+ DECL_SELECTION_IR(ASR, BinaryInstruction)
+ DECL_SELECTION_IR(ADD, BinaryInstruction)
+ DECL_SELECTION_IR(MUL, BinaryInstruction)
++DECL_SELECTION_IR(ATOMIC, AtomicInstruction)
+ DECL_SELECTION_IR(MACH, BinaryInstruction)
+ DECL_SELECTION_IR(CMP, CompareInstruction)
+ DECL_SELECTION_IR(SEL_CMP, CompareInstruction)
+diff --git a/backend/src/ir/context.hpp b/backend/src/ir/context.hpp
+index c286f1d..55e76f2 100644
+--- a/backend/src/ir/context.hpp
++++ b/backend/src/ir/context.hpp
+@@ -150,6 +150,12 @@ namespace ir {
+       this->append(insn);
+     }
+ 
++    /*! For all atomic functions */
++    void ATOMIC(Opcode opcode, Register dst, AddressSpace space, Tuple src) {
++      const Instruction insn = gbe::ir::ATOMIC(opcode, dst, space, src);
++      this->append(insn);
++    }
++
+     /*! LOAD with the destinations directly specified */
+     template <typename... Args>
+     void LOAD(Type type, Register offset, AddressSpace space, bool dwAligned, Args...values)
+diff --git a/backend/src/ir/instruction.cpp b/backend/src/ir/instruction.cpp
+index 67a4c12..578f5d2 100644
+--- a/backend/src/ir/instruction.cpp
++++ b/backend/src/ir/instruction.cpp
+@@ -1,4 +1,4 @@
+-/* 
++/*
+  * Copyright © 2012 Intel Corporation
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -56,7 +56,7 @@ namespace ir {
+     };
+ 
+     /*! For regular n source instructions */
+-    template <typename T, uint32_t srcNum> 
++    template <typename T, uint32_t srcNum>
+     struct NSrcPolicy {
+       INLINE uint32_t getSrcNum(void) const { return srcNum; }
+       INLINE Register getSrc(const Function &fn, uint32_t ID) const {
+@@ -246,6 +246,37 @@ namespace ir {
+       Type srcType; //!< Type to convert from
+     };
+ 
++    class ALIGNED_INSTRUCTION AtomicInstruction :
++      public BasePolicy,
++      public TupleSrcPolicy<AtomicInstruction>,
++      public NDstPolicy<AtomicInstruction, 1>
++    {
++    public:
++      AtomicInstruction(Opcode opcode,
++                         Register dst,
++                         AddressSpace addrSpace,
++                         Tuple src)
++      {
++        this->opcode = opcode;
++        this->dst[0] = dst;
++        this->src = src;
++        this->addrSpace = addrSpace;
++        srcNum = 2;
++        if((opcode == OP_ATOMIC_INC) ||
++          (opcode == OP_ATOMIC_DEC))
++          srcNum = 1;
++        if(opcode == OP_ATOMIC_CMPXCHG)
++          srcNum = 3;
++      }
++      INLINE AddressSpace getAddressSpace(void) const { return this->addrSpace; }
++      INLINE bool wellFormed(const Function &fn, std::string &whyNot) const;
++      INLINE void out(std::ostream &out, const Function &fn) const;
++      Register dst[1];
++      Tuple src;
++      AddressSpace addrSpace; //!< Address space
++      uint8_t srcNum;         //!<Source Number
++    };
++
+     class ALIGNED_INSTRUCTION BranchInstruction :
+       public BasePolicy,
+       public NDstPolicy<BranchInstruction, 0>
+@@ -738,6 +769,20 @@ namespace ir {
+       return true;
+     }
+ 
++    // We can convert anything to anything, but types and families must match
++    INLINE bool AtomicInstruction::wellFormed(const Function &fn, std::string &whyNot) const
++    {
++      if (UNLIKELY(checkSpecialRegForWrite(dst[0], fn, whyNot) == false))
++        return false;
++      if (UNLIKELY(checkRegisterData(FAMILY_DWORD, dst[0], fn, whyNot) == false))
++        return false;
++      for (uint32_t srcID = 0; srcID < srcNum; ++srcID)
++        if (UNLIKELY(checkRegisterData(FAMILY_DWORD, getSrc(fn, srcID), fn, whyNot) == false))
++          return false;
++
++      return true;
++    }
++
+     /*! Loads and stores follow the same restrictions */
+     template <typename T>
+     INLINE bool wellFormedLoadStore(const T &insn, const Function &fn, std::string &whyNot)
+@@ -883,6 +928,15 @@ namespace ir {
+       ternaryOrSelectOut(*this, out, fn);
+     }
+ 
++    INLINE void AtomicInstruction::out(std::ostream &out, const Function &fn) const {
++      this->outOpcode(out);
++      out << "." << addrSpace;
++      out << " %" << this->getDst(fn, 0);
++      out << " {" << "%" << this->getSrc(fn, 0) << "}";
++      for (uint32_t i = 1; i < srcNum; ++i)
++        out << " %" << this->getSrc(fn, i);
++    }
++
+     INLINE void ConvertInstruction::out(std::ostream &out, const Function &fn) const {
+       this->outOpcode(out);
+       out << "." << this->getDstType()
+@@ -1009,6 +1063,10 @@ START_INTROSPECTION(ConvertInstruction)
+ #include "ir/instruction.hxx"
+ END_INTROSPECTION(ConvertInstruction)
+ 
++START_INTROSPECTION(AtomicInstruction)
++#include "ir/instruction.hxx"
++END_INTROSPECTION(AtomicInstruction)
++
+ START_INTROSPECTION(SelectInstruction)
+ #include "ir/instruction.hxx"
+ END_INTROSPECTION(SelectInstruction)
+@@ -1180,7 +1238,7 @@ END_FUNCTION(Instruction, Register)
+   }
+ 
+   bool Instruction::hasSideEffect(void) const {
+-    return opcode == OP_STORE || 
++    return opcode == OP_STORE ||
+            opcode == OP_TYPED_WRITE ||
+            opcode == OP_SYNC;
+   }
+@@ -1197,6 +1255,7 @@ DECL_MEM_FN(SelectInstruction, Type, getType(void), getType())
+ DECL_MEM_FN(CompareInstruction, Type, getType(void), getType())
+ DECL_MEM_FN(ConvertInstruction, Type, getSrcType(void), getSrcType())
+ DECL_MEM_FN(ConvertInstruction, Type, getDstType(void), getDstType())
++DECL_MEM_FN(AtomicInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
+ DECL_MEM_FN(StoreInstruction, Type, getValueType(void), getValueType())
+ DECL_MEM_FN(StoreInstruction, uint32_t, getValueNum(void), getValueNum())
+ DECL_MEM_FN(StoreInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
+@@ -1304,6 +1363,11 @@ DECL_MEM_FN(GetImageInfoInstruction, uint32_t, getInfoType(void), getInfoType())
+     return internal::ConvertInstruction(dstType, srcType, dst, src).convert();
+   }
+ 
++  // For all unary functions with given opcode
++  Instruction ATOMIC(Opcode opcode, Register dst, AddressSpace space, Tuple src) {
++    return internal::AtomicInstruction(opcode, dst, space, src).convert();
++  }
++
+   // BRA
+   Instruction BRA(LabelIndex labelIndex) {
+     return internal::BranchInstruction(OP_BRA, labelIndex).convert();
+diff --git a/backend/src/ir/instruction.hpp b/backend/src/ir/instruction.hpp
+index 0f3bd34..91d280d 100644
+--- a/backend/src/ir/instruction.hpp
++++ b/backend/src/ir/instruction.hpp
+@@ -1,4 +1,4 @@
+-/* 
++/*
+  * Copyright © 2012 Intel Corporation
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -228,6 +228,19 @@ namespace ir {
+     static bool isClassOf(const Instruction &insn);
+   };
+ 
++  /*! Atomic instruction */
++  class AtomicInstruction : public Instruction {
++  public:
++    /*! Where the address register goes */
++    static const uint32_t addressIndex = 0;
++    /*! Address space that is manipulated here */
++    AddressSpace getAddressSpace(void) const;
++    /*! Return the register that contains the addresses */
++    INLINE Register getAddress(void) const { return this->getSrc(addressIndex); }
++    /*! Return true if the given instruction is an instance of this class */
++    static bool isClassOf(const Instruction &insn);
++  };
++
+   /*! Store instruction. First source is the address. Next sources are the
+    *  values to store contiguously at the given address
+    */
+@@ -555,6 +568,34 @@ namespace ir {
+   Instruction GT(Type type, Register dst, Register src0, Register src1);
+   /*! cvt.{dstType <- srcType} dst src */
+   Instruction CVT(Type dstType, Type srcType, Register dst, Register src);
++  /*! atomic dst addr.space {src1 {src2}} */
++  Instruction ATOMIC(Opcode opcode, Register dst, AddressSpace space, Tuple src);
++  /*! atomic_add dst addr.space src1 */
++  Instruction ATOMIC_ADD(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_sub dst addr.space src1 */
++  Instruction ATOMIC_SUB(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_and dst addr.space src1 */
++  Instruction ATOMIC_AND(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_or dst addr.space src1 */
++  Instruction ATOMIC_OR(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_xor dst addr.space src1 */
++  Instruction ATOMIC_XOR(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_xchg dst addr.space src1 */
++  Instruction ATOMIC_XCHG(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_imin dst addr.space src1 */
++  Instruction ATOMIC_IMIN(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_imax dst addr.space src1 */
++  Instruction ATOMIC_IMAX(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_umin dst addr.space src1 */
++  Instruction ATOMIC_UMIN(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_umax dst addr.space src1 */
++  Instruction ATOMIC_UMAX(Register dst, Register addr, AddressSpace space, Register src1);
++  /*! atomic_inc dst addr.space */
++  Instruction ATOMIC_INC(Register dst, Register addr, AddressSpace space);
++  /*! atomic_dec dst addr.space */
++  Instruction ATOMIC_DEC(Register dst, Register addr, AddressSpace space);
++  /*! atomic_cmpxchg dst addr.space src1 src2 */
++  Instruction ATOMIC_CMPXCHG(Register dst, Register addr, AddressSpace space, Register src1, Register src2);
+   /*! bra labelIndex */
+   Instruction BRA(LabelIndex labelIndex);
+   /*! (pred) bra labelIndex */
+diff --git a/backend/src/ir/instruction.hxx b/backend/src/ir/instruction.hxx
+index acfb45a..42c1e89 100644
+--- a/backend/src/ir/instruction.hxx
++++ b/backend/src/ir/instruction.hxx
+@@ -61,6 +61,19 @@ DECL_INSN(LT, CompareInstruction)
+ DECL_INSN(GE, CompareInstruction)
+ DECL_INSN(GT, CompareInstruction)
+ DECL_INSN(CVT, ConvertInstruction)
++DECL_INSN(ATOMIC_ADD, AtomicInstruction)
++DECL_INSN(ATOMIC_SUB, AtomicInstruction)
++DECL_INSN(ATOMIC_AND, AtomicInstruction)
++DECL_INSN(ATOMIC_OR, AtomicInstruction)
++DECL_INSN(ATOMIC_XOR, AtomicInstruction)
++DECL_INSN(ATOMIC_XCHG, AtomicInstruction)
++DECL_INSN(ATOMIC_UMIN, AtomicInstruction)
++DECL_INSN(ATOMIC_UMAX, AtomicInstruction)
++DECL_INSN(ATOMIC_IMIN, AtomicInstruction)
++DECL_INSN(ATOMIC_IMAX, AtomicInstruction)
++DECL_INSN(ATOMIC_INC, AtomicInstruction)
++DECL_INSN(ATOMIC_DEC, AtomicInstruction)
++DECL_INSN(ATOMIC_CMPXCHG, AtomicInstruction)
+ DECL_INSN(BRA, BranchInstruction)
+ DECL_INSN(RET, BranchInstruction)
+ DECL_INSN(LOADI, LoadImmInstruction)
+-- 
+1.7.10.4
+

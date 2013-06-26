@@ -1,7 +1,7 @@
-From 1e18f92e0de249a403d4a50842d778d61a84d053 Mon Sep 17 00:00:00 2001
+From 8b61fc4c2644e6748577d30567e6e4bf70aef436 Mon Sep 17 00:00:00 2001
 From: Junyan He <junyan.he@linux.intel.com>
 Date: Tue, 25 Jun 2013 15:50:54 +0800
-Subject: [PATCH 5/8] Add the builtin function abs() and the according test
+Subject: [PATCH 03/11] Add the builtin function abs() and the according test
  case
 To: beignet@lists.freedesktop.org
 
@@ -19,12 +19,12 @@ Signed-off-by: Junyan He <junyan.he@linux.intel.com>
  create mode 100644 utests/compiler_abs.cpp
 
 diff --git a/backend/src/backend/gen_insn_selection.cpp b/backend/src/backend/gen_insn_selection.cpp
-index b1c6093..4f5b337 100644
+index 8fb2a80..11efcb9 100644
 --- a/backend/src/backend/gen_insn_selection.cpp
 +++ b/backend/src/backend/gen_insn_selection.cpp
-@@ -1216,7 +1216,15 @@ namespace gbe
-       const GenRegister dst = sel.selReg(insn.getDst(0));
-       const GenRegister src = sel.selReg(insn.getSrc(0));
+@@ -1224,7 +1224,15 @@ namespace gbe
+       const GenRegister dst = sel.selReg(insn.getDst(0), getType(opcode));
+       const GenRegister src = sel.selReg(insn.getSrc(0), getType(opcode));
        switch (opcode) {
 -        case ir::OP_ABS: sel.MOV(dst, GenRegister::abs(src)); break;
 +        case ir::OP_ABS:
@@ -40,10 +40,10 @@ index b1c6093..4f5b337 100644
            if (dst.isdf()) {
              ir::Register r = sel.reg(ir::RegisterFamily::FAMILY_QWORD);
 diff --git a/backend/src/llvm/llvm_gen_backend.cpp b/backend/src/llvm/llvm_gen_backend.cpp
-index b0e8c6c..71f41b4 100644
+index 08500ba..ba2192a 100644
 --- a/backend/src/llvm/llvm_gen_backend.cpp
 +++ b/backend/src/llvm/llvm_gen_backend.cpp
-@@ -1686,6 +1686,7 @@ namespace gbe
+@@ -1688,6 +1688,7 @@ namespace gbe
        case GEN_OCL_POW:
        case GEN_OCL_RCP:
        case GEN_OCL_ABS:
@@ -51,7 +51,7 @@ index b0e8c6c..71f41b4 100644
        case GEN_OCL_RNDZ:
        case GEN_OCL_RNDE:
        case GEN_OCL_RNDU:
-@@ -1842,13 +1843,20 @@ namespace gbe
+@@ -1844,6 +1845,13 @@ namespace gbe
              ctx.POW(ir::TYPE_FLOAT, dst, src0, src1);
              break;
            }
@@ -62,9 +62,10 @@ index b0e8c6c..71f41b4 100644
 +            ctx.ALU1(ir::OP_ABS, ir::TYPE_S32, dst, src);
 +            break;
 +          }
+           case GEN_OCL_FBH: this->emitUnaryCallInst(I,CS,ir::OP_FBH); break;
+           case GEN_OCL_FBL: this->emitUnaryCallInst(I,CS,ir::OP_FBL); break;
            case GEN_OCL_COS: this->emitUnaryCallInst(I,CS,ir::OP_COS); break;
-           case GEN_OCL_SIN: this->emitUnaryCallInst(I,CS,ir::OP_SIN); break;
-           case GEN_OCL_LOG: this->emitUnaryCallInst(I,CS,ir::OP_LOG); break;
+@@ -1852,7 +1860,7 @@ namespace gbe
            case GEN_OCL_SQR: this->emitUnaryCallInst(I,CS,ir::OP_SQR); break;
            case GEN_OCL_RSQ: this->emitUnaryCallInst(I,CS,ir::OP_RSQ); break;
            case GEN_OCL_RCP: this->emitUnaryCallInst(I,CS,ir::OP_RCP); break;
@@ -74,7 +75,7 @@ index b0e8c6c..71f41b4 100644
            case GEN_OCL_RNDE: this->emitUnaryCallInst(I,CS,ir::OP_RNDE); break;
            case GEN_OCL_RNDU: this->emitUnaryCallInst(I,CS,ir::OP_RNDU); break;
 diff --git a/backend/src/llvm/llvm_gen_ocl_function.hxx b/backend/src/llvm/llvm_gen_ocl_function.hxx
-index 6cd7298..9cfad78 100644
+index fe19844..89a04ea 100644
 --- a/backend/src/llvm/llvm_gen_ocl_function.hxx
 +++ b/backend/src/llvm/llvm_gen_ocl_function.hxx
 @@ -19,7 +19,8 @@ DECL_LLVM_GEN_FUNCTION(GET_GLOBAL_OFFSET2, __gen_ocl_get_global_offset2)
@@ -88,10 +89,10 @@ index 6cd7298..9cfad78 100644
  DECL_LLVM_GEN_FUNCTION(SIN, __gen_ocl_sin)
  DECL_LLVM_GEN_FUNCTION(SQR, __gen_ocl_sqrt)
 diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
-index 81a0193..eaf8f21 100644
+index 3b191ab..5ad829e 100644
 --- a/backend/src/ocl_stdlib.h
 +++ b/backend/src/ocl_stdlib.h
-@@ -4337,6 +4337,7 @@ INLINE uint get_global_id(uint dim) {
+@@ -4401,6 +4401,7 @@ INLINE uint get_global_id(uint dim) {
  /////////////////////////////////////////////////////////////////////////////
  // Math Functions (see 6.11.2 of OCL 1.1 spec)
  /////////////////////////////////////////////////////////////////////////////
@@ -99,7 +100,7 @@ index 81a0193..eaf8f21 100644
  PURE CONST float __gen_ocl_fabs(float x);
  PURE CONST float __gen_ocl_sin(float x);
  PURE CONST float __gen_ocl_cos(float x);
-@@ -4515,6 +4516,7 @@ INLINE_OVERLOADABLE float __gen_ocl_internal_erfc(float x) {
+@@ -4579,6 +4580,7 @@ INLINE_OVERLOADABLE float __gen_ocl_internal_erfc(float x) {
  // XXX work-around PTX profile
  #define sqrt native_sqrt
  INLINE_OVERLOADABLE float rsqrt(float x) { return native_rsqrt(x); }
@@ -107,7 +108,7 @@ index 81a0193..eaf8f21 100644
  INLINE_OVERLOADABLE float __gen_ocl_internal_fabs(float x)  { return __gen_ocl_fabs(x); }
  INLINE_OVERLOADABLE float __gen_ocl_internal_trunc(float x) { return __gen_ocl_rndz(x); }
  INLINE_OVERLOADABLE float __gen_ocl_internal_round(float x) { return __gen_ocl_rnde(x); }
-@@ -4860,6 +4862,7 @@ DECL_VECTOR_1OP(native_exp10, float);
+@@ -4924,6 +4926,7 @@ DECL_VECTOR_1OP(native_exp10, float);
  DECL_VECTOR_1OP(__gen_ocl_internal_expm1, float);
  DECL_VECTOR_1OP(__gen_ocl_internal_cbrt, float);
  DECL_VECTOR_1OP(__gen_ocl_internal_fabs, float);
@@ -115,7 +116,7 @@ index 81a0193..eaf8f21 100644
  DECL_VECTOR_1OP(__gen_ocl_internal_trunc, float);
  DECL_VECTOR_1OP(__gen_ocl_internal_round, float);
  DECL_VECTOR_1OP(__gen_ocl_internal_floor, float);
-@@ -4987,6 +4990,7 @@ INLINE_OVERLOADABLE float8 mix(float8 x, float8 y, float a) { return mix(x,y,(fl
+@@ -5051,6 +5054,7 @@ INLINE_OVERLOADABLE float8 mix(float8 x, float8 y, float a) { return mix(x,y,(fl
  INLINE_OVERLOADABLE float16 mix(float16 x, float16 y, float a) { return mix(x,y,(float16)(a));}
  
  // XXX workaround ptx profile
@@ -135,10 +136,10 @@ index 0000000..7030a26
 +}
 +
 diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
-index edfbda1..d63b31f 100644
+index 8a58ff4..b75f3b4 100644
 --- a/utests/CMakeLists.txt
 +++ b/utests/CMakeLists.txt
-@@ -32,6 +32,7 @@ set (utests_sources
+@@ -33,6 +33,7 @@ set (utests_sources
    compiler_double_2.cpp
    compiler_double_3.cpp
    compiler_fabs.cpp

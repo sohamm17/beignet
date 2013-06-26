@@ -1,7 +1,7 @@
-From c89dbb34332c104df22c8ea8c22bac0bcb0b5221 Mon Sep 17 00:00:00 2001
+From 1400415e754d8362ed6a628f5e77c3da2417adae Mon Sep 17 00:00:00 2001
 From: Ruiling Song <ruiling.song@intel.com>
-Date: Tue, 25 Jun 2013 15:38:49 +0800
-Subject: [PATCH 4/8] utests: Add basic arithmetic test case
+Date: Wed, 26 Jun 2013 15:52:13 +0800
+Subject: [PATCH 11/11] utests: Add basic arithmetic test case
 To: beignet@lists.freedesktop.org
 
 test case for + - * / % of data type (u)int8/16/32
@@ -9,14 +9,14 @@ remove duplicated cases.
 
 Signed-off-by: Ruiling Song <ruiling.song@intel.com>
 ---
- kernels/compiler_basic_arithmetic.cl |   73 +++++++++++++++++++
- kernels/compiler_sub_bytes.cl        |    7 --
- kernels/compiler_sub_shorts.cl       |    7 --
+ kernels/compiler_basic_arithmetic.cl |   53 ++++++++++++++++
+ kernels/compiler_sub_bytes.cl        |    7 ---
+ kernels/compiler_sub_shorts.cl       |    7 ---
  utests/CMakeLists.txt                |    3 +-
- utests/compiler_basic_arithmetic.cpp |  132 ++++++++++++++++++++++++++++++++++
- utests/compiler_sub_bytes.cpp        |   35 ---------
- utests/compiler_sub_shorts.cpp       |   36 ----------
- 7 files changed, 206 insertions(+), 87 deletions(-)
+ utests/compiler_basic_arithmetic.cpp |  112 ++++++++++++++++++++++++++++++++++
+ utests/compiler_sub_bytes.cpp        |   35 -----------
+ utests/compiler_sub_shorts.cpp       |   36 -----------
+ 7 files changed, 166 insertions(+), 87 deletions(-)
  create mode 100644 kernels/compiler_basic_arithmetic.cl
  delete mode 100644 kernels/compiler_sub_bytes.cl
  delete mode 100644 kernels/compiler_sub_shorts.cl
@@ -26,10 +26,10 @@ Signed-off-by: Ruiling Song <ruiling.song@intel.com>
 
 diff --git a/kernels/compiler_basic_arithmetic.cl b/kernels/compiler_basic_arithmetic.cl
 new file mode 100644
-index 0000000..2bc2c27
+index 0000000..3e145d8
 --- /dev/null
 +++ b/kernels/compiler_basic_arithmetic.cl
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,53 @@
 +#define DECL_KERNEL_SUB(type)\
 +__kernel void \
 +compiler_sub_##type(__global type *src0, __global type *src1, __global type *dst) \
@@ -69,40 +69,20 @@ index 0000000..2bc2c27
 +  int id = (int)get_global_id(0); \
 +  dst[id] = src0[id] % src1[id]; \
 +}
-+DECL_KERNEL_SUB(char)
-+DECL_KERNEL_SUB(uchar)
-+DECL_KERNEL_SUB(short)
-+DECL_KERNEL_SUB(ushort)
-+DECL_KERNEL_SUB(int)
-+DECL_KERNEL_SUB(uint)
 +
-+DECL_KERNEL_ADD(char)
-+DECL_KERNEL_ADD(uchar)
-+DECL_KERNEL_ADD(short)
-+DECL_KERNEL_ADD(ushort)
-+DECL_KERNEL_ADD(int)
-+DECL_KERNEL_ADD(uint)
++#define DECL_KERNEL_FOR_ALL_TYPE(op) \
++DECL_KERNEL_##op(char)               \
++DECL_KERNEL_##op(uchar)              \
++DECL_KERNEL_##op(short)              \
++DECL_KERNEL_##op(ushort)             \
++DECL_KERNEL_##op(int)                \
++DECL_KERNEL_##op(uint)
 +
-+DECL_KERNEL_MUL(char)
-+DECL_KERNEL_MUL(uchar)
-+DECL_KERNEL_MUL(short)
-+DECL_KERNEL_MUL(ushort)
-+DECL_KERNEL_MUL(int)
-+DECL_KERNEL_MUL(uint)
-+
-+DECL_KERNEL_DIV(char)
-+DECL_KERNEL_DIV(uchar)
-+DECL_KERNEL_DIV(short)
-+DECL_KERNEL_DIV(ushort)
-+DECL_KERNEL_DIV(int)
-+DECL_KERNEL_DIV(uint)
-+
-+DECL_KERNEL_REM(char)
-+DECL_KERNEL_REM(uchar)
-+DECL_KERNEL_REM(short)
-+DECL_KERNEL_REM(ushort)
-+DECL_KERNEL_REM(int)
-+DECL_KERNEL_REM(uint)
++DECL_KERNEL_FOR_ALL_TYPE(SUB)
++DECL_KERNEL_FOR_ALL_TYPE(ADD)
++DECL_KERNEL_FOR_ALL_TYPE(MUL)
++DECL_KERNEL_FOR_ALL_TYPE(DIV)
++DECL_KERNEL_FOR_ALL_TYPE(REM)
 diff --git a/kernels/compiler_sub_bytes.cl b/kernels/compiler_sub_bytes.cl
 deleted file mode 100644
 index f058561..0000000
@@ -130,7 +110,7 @@ index d26de7f..0000000
 -}
 -
 diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
-index ea23f31..edfbda1 100644
+index 3326064..3740841 100644
 --- a/utests/CMakeLists.txt
 +++ b/utests/CMakeLists.txt
 @@ -5,6 +5,7 @@ link_directories (${LLVM_LIBRARY_DIR})
@@ -141,7 +121,7 @@ index ea23f31..edfbda1 100644
    compiler_displacement_map_element.cpp
    compiler_shader_toy.cpp
    compiler_mandelbrot.cpp
-@@ -56,8 +57,6 @@ set (utests_sources
+@@ -60,8 +61,6 @@ set (utests_sources
    compiler_saturate_sub.cpp
    compiler_shift_right.cpp
    compiler_short_scatter.cpp
@@ -152,10 +132,10 @@ index ea23f31..edfbda1 100644
    compiler_uint8_copy.cpp
 diff --git a/utests/compiler_basic_arithmetic.cpp b/utests/compiler_basic_arithmetic.cpp
 new file mode 100644
-index 0000000..5ab5f44
+index 0000000..dcdd084
 --- /dev/null
 +++ b/utests/compiler_basic_arithmetic.cpp
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,112 @@
 +#include "utest_helper.hpp"
 +
 +enum eTestOP {
@@ -254,40 +234,20 @@ index 0000000..5ab5f44
 +}\
 +MAKE_UTEST_FROM_FUNCTION(compiler_rem_ ## alias)
 +
-+DECL_TEST_SUB(int8_t, char);
-+DECL_TEST_SUB(uint8_t, uchar);
-+DECL_TEST_SUB(int16_t, short);
-+DECL_TEST_SUB(uint16_t, ushort);
-+DECL_TEST_SUB(int32_t, int);
-+DECL_TEST_SUB(uint32_t, uint);
++#define DECL_TEST_FOR_ALL_TYPE(op)\
++DECL_TEST_##op(int8_t, char) \
++DECL_TEST_##op(uint8_t, uchar) \
++DECL_TEST_##op(int16_t, short) \
++DECL_TEST_##op(uint16_t, ushort) \
++DECL_TEST_##op(int32_t, int) \
++DECL_TEST_##op(uint32_t, uint)
 +
-+DECL_TEST_ADD(int8_t, char);
-+DECL_TEST_ADD(uint8_t, uchar);
-+DECL_TEST_ADD(int16_t, short);
-+DECL_TEST_ADD(uint16_t, ushort);
-+DECL_TEST_ADD(int32_t, int);
-+DECL_TEST_ADD(uint32_t, uint);
-+
-+DECL_TEST_MUL(int8_t, char);
-+DECL_TEST_MUL(uint8_t, uchar);
-+DECL_TEST_MUL(int16_t, short);
-+DECL_TEST_MUL(uint16_t, ushort);
-+DECL_TEST_MUL(int32_t, int);
-+DECL_TEST_MUL(uint32_t, uint);
-+
-+DECL_TEST_DIV(int8_t, char);
-+DECL_TEST_DIV(uint8_t, uchar);
-+DECL_TEST_DIV(int16_t, short);
-+DECL_TEST_DIV(uint16_t, ushort);
-+DECL_TEST_DIV(int32_t, int);
-+DECL_TEST_DIV(uint32_t, uint);
-+
-+DECL_TEST_REM(int8_t, char);
-+DECL_TEST_REM(uint8_t, uchar);
-+DECL_TEST_REM(int16_t, short);
-+DECL_TEST_REM(uint16_t, ushort);
-+DECL_TEST_REM(int32_t, int);
-+DECL_TEST_REM(uint32_t, uint);
++DECL_TEST_FOR_ALL_TYPE(SUB)
++DECL_TEST_FOR_ALL_TYPE(ADD)
++DECL_TEST_FOR_ALL_TYPE(MUL)
++DECL_TEST_FOR_ALL_TYPE(DIV)
++DECL_TEST_FOR_ALL_TYPE(REM)
++#undef DECL_TEST_FOR_ALL_TYPE
 diff --git a/utests/compiler_sub_bytes.cpp b/utests/compiler_sub_bytes.cpp
 deleted file mode 100644
 index 740a8fd..0000000

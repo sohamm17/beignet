@@ -1,7 +1,7 @@
-From 3d63c833d4ebcafe8e46fd498c28d08cb3046cd8 Mon Sep 17 00:00:00 2001
+From 116a8feff8b91cedcd91c087ba14214ee939fa72 Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Wed, 19 Jun 2013 11:30:36 +0200
-Subject: [PATCH 2/8] Readd OpenCL 1.2 definitions required for ICD
+Subject: [PATCH 02/11] Readd OpenCL 1.2 definitions required for ICD
 To: beignet@lists.freedesktop.org
 
 The definition for the ICD dispatch table requires a few additional
