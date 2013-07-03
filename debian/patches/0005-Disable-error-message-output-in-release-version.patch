@@ -1,0 +1,71 @@
+From 31473819a135cb8c9048617e12b0b5453104aeec Mon Sep 17 00:00:00 2001
+From: Ruiling Song <ruiling.song@intel.com>
+Date: Tue, 2 Jul 2013 16:44:43 +0800
+Subject: [PATCH 05/10] Disable error message output in release version.
+To: beignet@lists.freedesktop.org
+
+As piglit will got the error message we output to stderr and mark the case 'WARN'.
+so, we disable the message to stderr, and use release version to run piglit.
+
+also fix a minor compile fail under release version.
+
+Signed-off-by: Ruiling Song <ruiling.song@intel.com>
+---
+ backend/src/llvm/llvm_gen_backend.cpp |    3 +--
+ src/cl_utils.h                        |   24 ++++++++++++++++--------
+ 2 files changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/backend/src/llvm/llvm_gen_backend.cpp b/backend/src/llvm/llvm_gen_backend.cpp
+index db34296..c2e37fa 100644
+--- a/backend/src/llvm/llvm_gen_backend.cpp
++++ b/backend/src/llvm/llvm_gen_backend.cpp
+@@ -1824,10 +1824,9 @@ namespace gbe
+ 
+   void GenWriter::emitAtomicInst(CallInst &I, CallSite &CS, ir::AtomicOps opcode) {
+     CallSite::arg_iterator AI = CS.arg_begin();
+-#if GBE_DEBUG
+     CallSite::arg_iterator AE = CS.arg_end();
+-#endif /* GBE_DEBUG */
+     GBE_ASSERT(AI != AE);
++
+     unsigned int llvmSpace = (*AI)->getType()->getPointerAddressSpace();
+     const ir::AddressSpace addrSpace = addressSpaceLLVMToGen(llvmSpace);
+     const ir::Register dst = this->getRegister(&I);
+diff --git a/src/cl_utils.h b/src/cl_utils.h
+index dfb1369..59b7a2b 100644
+--- a/src/cl_utils.h
++++ b/src/cl_utils.h
+@@ -39,14 +39,22 @@ struct JOIN(__,JOIN(__,__LINE__)) {                                 \
+ }
+ 
+ /* Throw errors */
+-#define ERR(ERROR, ...)                                             \
+-do {                                                                \
+-  fprintf(stderr, "error in %s line %i\n", __FILE__, __LINE__);     \
+-  fprintf(stderr, __VA_ARGS__);                                     \
+-  fprintf(stderr, "\n");                                            \
+-  err = ERROR;                                                      \
+-  goto error;                                                       \
+-} while (0)
++#ifdef NDEBUG
++  #define ERR(ERROR, ...)                                             \
++  do {                                                                \
++    err = ERROR;                                                      \
++    goto error;                                                       \
++  } while (0)
++#else
++  #define ERR(ERROR, ...)                                             \
++  do {                                                                \
++    fprintf(stderr, "error in %s line %i\n", __FILE__, __LINE__);     \
++    fprintf(stderr, __VA_ARGS__);                                     \
++    fprintf(stderr, "\n");                                            \
++    err = ERROR;                                                      \
++    goto error;                                                       \
++  } while (0)
++#endif
+ 
+ #define DO_ALLOC_ERR                                                \
+ do {                                                                \
+-- 
+1.7.10.4
+

@@ -1,0 +1,95 @@
+From cddef6876d11c289a0bcfe75d5f11ffe982ba5e4 Mon Sep 17 00:00:00 2001
+From: Simon Richter <Simon.Richter@hogyros.de>
+Date: Wed, 19 Jun 2013 11:30:36 +0200
+Subject: [PATCH 10/10] Readd OpenCL 1.2 definitions required for ICD
+To: beignet@lists.freedesktop.org
+
+The definition for the ICD dispatch table requires a few additional
+definitions from OpenCL 1.2.
+---
+ include/CL/cl.h          |   15 +++++++++++++++
+ include/CL/cl_platform.h |    2 ++
+ src/cl_mem.h             |   12 ------------
+ 3 files changed, 17 insertions(+), 12 deletions(-)
+
+diff --git a/include/CL/cl.h b/include/CL/cl.h
+index 4355e74..a7f25d1 100644
+--- a/include/CL/cl.h
++++ b/include/CL/cl.h
+@@ -67,6 +67,7 @@ typedef cl_uint             cl_channel_type;
+ typedef cl_bitfield         cl_mem_flags;
+ typedef cl_uint             cl_mem_object_type;
+ typedef cl_uint             cl_mem_info;
++typedef cl_bitfield         cl_mem_migration_flags;
+ typedef cl_uint             cl_image_info;
+ typedef cl_uint             cl_buffer_create_type;
+ typedef cl_uint             cl_addressing_mode;
+@@ -75,8 +76,10 @@ typedef cl_uint             cl_sampler_info;
+ typedef cl_bitfield         cl_map_flags;
+ typedef cl_uint             cl_program_info;
+ typedef cl_uint             cl_program_build_info;
++typedef intptr_t            cl_device_partition_property;
+ typedef cl_int              cl_build_status;
+ typedef cl_uint             cl_kernel_info;
++typedef cl_uint             cl_kernel_arg_info;
+ typedef cl_uint             cl_kernel_work_group_info;
+ typedef cl_uint             cl_event_info;
+ typedef cl_uint             cl_command_type;
+@@ -87,6 +90,18 @@ typedef struct _cl_image_format {
+     cl_channel_type         image_channel_data_type;
+ } cl_image_format;
+ 
++typedef struct _cl_image_desc {
++    cl_mem_object_type      image_type;
++    size_t                  image_width;
++    size_t                  image_height;
++    size_t                  image_depth;
++    size_t                  image_array_size;
++    size_t                  image_row_pitch;
++    size_t                  image_slice_pitch;
++    cl_uint                 num_mip_levels;
++    cl_uint                 num_samples;
++    cl_mem                  buffer;
++} cl_image_desc;
+ 
+ typedef struct _cl_buffer_region {
+     size_t                  origin;
+diff --git a/include/CL/cl_platform.h b/include/CL/cl_platform.h
+index 043b048..9a2f17a 100644
+--- a/include/CL/cl_platform.h
++++ b/include/CL/cl_platform.h
+@@ -58,6 +58,8 @@ extern "C" {
+     #define CL_EXT_SUFFIX__VERSION_1_0
+     #define CL_API_SUFFIX__VERSION_1_1
+     #define CL_EXT_SUFFIX__VERSION_1_1
++    #define CL_API_SUFFIX__VERSION_1_2
++    #define CL_EXT_SUFFIX__VERSION_1_2
+     #define CL_EXT_SUFFIX__VERSION_1_0_DEPRECATED
+ #endif
+ 
+diff --git a/src/cl_mem.h b/src/cl_mem.h
+index 33ad174..66815fe 100644
+--- a/src/cl_mem.h
++++ b/src/cl_mem.h
+@@ -29,18 +29,6 @@
+ #define CL_MEM_OBJECT_IMAGE1D_ARRAY                 0x10F5
+ #define CL_MEM_OBJECT_IMAGE1D_BUFFER                0x10F6
+ #define CL_MEM_OBJECT_IMAGE2D_ARRAY                 0x10F3
+-typedef struct _cl_image_desc {
+-    cl_mem_object_type      image_type;
+-    size_t                  image_width;
+-    size_t                  image_height;
+-    size_t                  image_depth;
+-    size_t                  image_array_size;
+-    size_t                  image_row_pitch;
+-    size_t                  image_slice_pitch;
+-    cl_uint                 num_mip_levels;
+-    cl_uint                 num_samples;
+-    cl_mem                  buffer;
+-} cl_image_desc;
+ #endif
+ 
+ typedef enum cl_image_tiling {
+-- 
+1.7.10.4
+

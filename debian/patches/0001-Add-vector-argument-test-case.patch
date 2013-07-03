@@ -1,7 +1,7 @@
-From 5e262194e009622863d19e17c03cb44d0bd066cc Mon Sep 17 00:00:00 2001
+From a5bb2bdda3a0cf4105623565e0f814dda580fc48 Mon Sep 17 00:00:00 2001
 From: Yang Rong <rong.r.yang@intel.com>
 Date: Thu, 16 May 2013 12:36:35 +0800
-Subject: [PATCH 01/11] Add vector argument test case.
+Subject: [PATCH 01/10] Add vector argument test case.
 To: beignet@lists.freedesktop.org
 
 Signed-off-by: Yang Rong <rong.r.yang@intel.com>
@@ -26,10 +26,10 @@ index 0000000..0985dbd
 +  dst[id] = value.w;
 +}
 diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
-index df59feb..8a58ff4 100644
+index 3fe0065..cc99370 100644
 --- a/utests/CMakeLists.txt
 +++ b/utests/CMakeLists.txt
-@@ -39,6 +39,7 @@ set (utests_sources
+@@ -38,6 +38,7 @@ set (utests_sources
    compiler_fill_image_3d_2.cpp
    compiler_function_argument0.cpp
    compiler_function_argument1.cpp
