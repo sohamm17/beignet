@@ -3,3 +3,4 @@ flags
 khronos
 deprecated-in-utest
 private
+opencl-c-version

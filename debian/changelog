@@ -1,3 +1,9 @@
+beignet (0.2-2) unstable; urgency=low
+
+  * Patch OpenCL C version
+
+ -- Simon Richter <sjr@debian.org>  Fri, 05 Jul 2013 15:27:32 +0200
+
 beignet (0.2-1) unstable; urgency=low
 
   * New upstream release (Closes: #712903)
