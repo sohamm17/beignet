@@ -3,12 +3,3 @@ flags
 khronos
 deprecated-in-utest
 private
-0001-Add-vector-argument-test-case.patch
-0002-Fix-atomic-test-failed-in-GT1.patch
-0003-GBE-fixed-a-barrier-related-bug.patch
-0004-utests-increase-local-size-in-the-two-barrier-test-c.patch
-0005-Disable-error-message-output-in-release-version.patch
-0006-Modify-all-the-builtin-function-vect-return-to-vect_.patch
-0007-Add-the-vector3-support-for-builtin-abs-function.patch
-0008-Add-the-abs_diff-builtin-function-support.patch
-0009-Add-the-test-case-for-builtin-abs_diff-function.patch

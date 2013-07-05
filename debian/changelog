@@ -1,3 +1,9 @@
+beignet (0.2-1) unstable; urgency=low
+
+  * New upstream release (Closes: #712903)
+
+ -- Simon Richter <sjr@debian.org>  Fri, 05 Jul 2013 15:01:51 +0200
+
 beignet (0.1+git20130703+84f63e8-1) unstable; urgency=low
 
   * New upstream release
