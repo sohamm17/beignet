@@ -1,0 +1,105 @@
+From 95927c71477fc34063a33d4511b9bba5bebd6971 Mon Sep 17 00:00:00 2001
+From: Homer Hsing <homer.xing@intel.com>
+Date: Tue, 9 Jul 2013 09:41:59 +0800
+Subject: [PATCH 02/14] test function "smoothstep"
+To: beignet@lists.freedesktop.org
+
+Signed-off-by: Homer Hsing <homer.xing@intel.com>
+Signed-off-by: Simon Richter <Simon.Richter@hogyros.de>
+---
+ kernels/compiler_smoothstep.cl |    4 +++
+ utests/CMakeLists.txt          |    1 +
+ utests/compiler_smoothstep.cpp |   58 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 63 insertions(+)
+ create mode 100644 kernels/compiler_smoothstep.cl
+ create mode 100644 utests/compiler_smoothstep.cpp
+
+diff --git a/kernels/compiler_smoothstep.cl b/kernels/compiler_smoothstep.cl
+new file mode 100644
+index 0000000..d3b7da4
+--- /dev/null
++++ b/kernels/compiler_smoothstep.cl
+@@ -0,0 +1,4 @@
++kernel void compiler_smoothstep(global float *src1, global float *src2, global float *src3, global float *dst) {
++  int i = get_global_id(0);
++  dst[i] = smoothstep(src1[i], src2[i], src3[i]);
++}
+diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
+index 621acad..26c0540 100644
+--- a/utests/CMakeLists.txt
++++ b/utests/CMakeLists.txt
+@@ -67,6 +67,7 @@ set (utests_sources
+   compiler_saturate_sub.cpp
+   compiler_shift_right.cpp
+   compiler_short_scatter.cpp
++  compiler_smoothstep.cpp
+   compiler_uint2_copy.cpp
+   compiler_uint3_copy.cpp
+   compiler_uint8_copy.cpp
+diff --git a/utests/compiler_smoothstep.cpp b/utests/compiler_smoothstep.cpp
+new file mode 100644
+index 0000000..760063b
+--- /dev/null
++++ b/utests/compiler_smoothstep.cpp
+@@ -0,0 +1,58 @@
++#include <cmath>
++#include "utest_helper.hpp"
++
++float cpu(float e0, float e1, float x)
++{
++  x = (x - e0) / (e1 - e0);
++  if (x >= 1)
++    x = 1.f;
++  if (x <= 0)
++    x = 0.f;
++  return x * x * (3 - 2 * x);
++}
++
++void compiler_smoothstep(void)
++{
++  const int n = 32;
++  float src1[n], src2[n], src3[n];
++
++  // Setup kernel and buffers
++  OCL_CREATE_KERNEL("compiler_smoothstep");
++  OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[1], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[2], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[3], 0, n * sizeof(float), NULL);
++  OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
++  OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
++  OCL_SET_ARG(2, sizeof(cl_mem), &buf[2]);
++  OCL_SET_ARG(3, sizeof(cl_mem), &buf[3]);
++  globals[0] = n;
++  locals[0] = 16;
++
++  OCL_MAP_BUFFER(0);
++  OCL_MAP_BUFFER(1);
++  OCL_MAP_BUFFER(2);
++  for (int i = 0; i < n; ++i) {
++    float a = 0.1f * (rand() & 15) - 0.75f;
++    float b = a + 0.1f * (rand() & 15);
++    float c = 0.1f * (rand() & 15) - 0.75f;
++    src1[i] = ((float*)buf_data[0])[i] = a;
++    src2[i] = ((float*)buf_data[1])[i] = b;
++    src3[i] = ((float*)buf_data[2])[i] = c;
++  }
++  OCL_UNMAP_BUFFER(0);
++  OCL_UNMAP_BUFFER(1);
++  OCL_UNMAP_BUFFER(2);
++
++  OCL_NDRANGE(1);
++
++  OCL_MAP_BUFFER(3);
++  for (int i = 0; i < n; ++i) {
++    float a = ((float*)buf_data[3])[i];
++    float b = cpu(src1[i], src2[i], src3[i]);
++    OCL_ASSERT(fabsf(a - b) < 1e-4f);
++  }
++  OCL_UNMAP_BUFFER(3);
++}
++
++MAKE_UTEST_FROM_FUNCTION(compiler_smoothstep);
+-- 
+1.7.10.4
+

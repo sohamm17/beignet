@@ -3,4 +3,16 @@ flags
 khronos
 deprecated-in-utest
 private
-opencl-c-version
+0001-support-built-in-function-smoothstep.patch
+0002-test-function-smoothstep.patch
+0003-support-built-in-function-bitselect.patch
+0004-test-built-in-function-bitselect.patch
+0005-add-built-in-function-mad_sat.patch
+0006-test-function-mad_sat.patch
+0007-built-in-function-sign.patch
+0008-test-built-in-function-sign.patch
+0009-fix-vectorial-built-in-functions-min-max-clamp.patch
+0010-improve-clCreateContext-conformance.patch
+0011-Improve-the-clEnqueueMapBuffer-and-clCreateBuffer-AP.patch
+0012-support-clGetImageInfo.patch
+0013-Add-vector-argument-test-case.patch

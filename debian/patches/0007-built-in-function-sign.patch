@@ -1,0 +1,44 @@
+From c093b0644719ba8be67cf009a4e0adeb5daba8aa Mon Sep 17 00:00:00 2001
+From: Homer Hsing <homer.xing@intel.com>
+Date: Wed, 10 Jul 2013 12:42:02 +0800
+Subject: [PATCH 07/14] built-in function "sign"
+To: beignet@lists.freedesktop.org
+
+Signed-off-by: Homer Hsing <homer.xing@intel.com>
+Signed-off-by: Simon Richter <Simon.Richter@hogyros.de>
+---
+ backend/src/ocl_stdlib.h |   11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/backend/src/ocl_stdlib.h b/backend/src/ocl_stdlib.h
+index d1f963a..c806b08 100644
+--- a/backend/src/ocl_stdlib.h
++++ b/backend/src/ocl_stdlib.h
+@@ -5152,6 +5152,16 @@ INLINE_OVERLOADABLE float smoothstep(float e0, float e1, float x) {
+   return x * x * (3 - 2 * x);
+ }
+ 
++INLINE_OVERLOADABLE float sign(float x) {
++  if(x > 0)
++    return 1;
++  if(x < 0)
++    return -1;
++  if(x == -0.f)
++    return -0.f;
++  return 0.f;
++}
++
+ INLINE_OVERLOADABLE float __gen_ocl_internal_fmax(float a, float b) { return max(a,b); }
+ INLINE_OVERLOADABLE float __gen_ocl_internal_fmin(float a, float b) { return min(a,b); }
+ INLINE_OVERLOADABLE float __gen_ocl_internal_maxmag(float x, float y) {
+@@ -5357,6 +5367,7 @@ DECL_UNTYPED_RW_ALL(float)
+     dst.s89abcdef = NAME(v.s89abcdef);\
+     return dst;\
+   }
++DECL_VECTOR_1OP(sign, float);
+ DECL_VECTOR_1OP(native_cos, float);
+ DECL_VECTOR_1OP(__gen_ocl_internal_cospi, float);
+ DECL_VECTOR_1OP(__gen_ocl_internal_cosh, float);
+-- 
+1.7.10.4
+

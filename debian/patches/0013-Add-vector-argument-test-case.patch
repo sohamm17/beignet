@@ -1,0 +1,75 @@
+From 4a6741f9031cb6d105023a01401504dbac95695a Mon Sep 17 00:00:00 2001
+From: Yang Rong <rong.r.yang@intel.com>
+Date: Thu, 16 May 2013 12:36:35 +0800
+Subject: [PATCH 13/14] Add vector argument test case.
+To: beignet@lists.freedesktop.org
+
+Signed-off-by: Yang Rong <rong.r.yang@intel.com>
+Signed-off-by: Simon Richter <Simon.Richter@hogyros.de>
+---
+ kernels/compiler_function_argument2.cl |    6 ++++++
+ utests/CMakeLists.txt                  |    1 +
+ utests/compiler_function_argument2.cpp |   26 ++++++++++++++++++++++++++
+ 3 files changed, 33 insertions(+)
+ create mode 100644 kernels/compiler_function_argument2.cl
+ create mode 100644 utests/compiler_function_argument2.cpp
+
+diff --git a/kernels/compiler_function_argument2.cl b/kernels/compiler_function_argument2.cl
+new file mode 100644
+index 0000000..0985dbd
+--- /dev/null
++++ b/kernels/compiler_function_argument2.cl
+@@ -0,0 +1,6 @@
++__kernel void
++compiler_function_argument2(__global int *dst, int4 value)
++{
++  int id = (int)get_global_id(0);
++  dst[id] = value.w;
++}
+diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
+index 14ff6b1..ea034cc 100644
+--- a/utests/CMakeLists.txt
++++ b/utests/CMakeLists.txt
+@@ -41,6 +41,7 @@ set (utests_sources
+   compiler_fill_image_3d_2.cpp
+   compiler_function_argument0.cpp
+   compiler_function_argument1.cpp
++  compiler_function_argument2.cpp
+   compiler_function_argument.cpp
+   compiler_function_constant0.cpp
+   compiler_function_constant1.cpp
+diff --git a/utests/compiler_function_argument2.cpp b/utests/compiler_function_argument2.cpp
+new file mode 100644
+index 0000000..1e398a9
+--- /dev/null
++++ b/utests/compiler_function_argument2.cpp
+@@ -0,0 +1,26 @@
++#include "utest_helper.hpp"
++
++struct int4 {int x,y,z,w;};
++void compiler_function_argument2(void)
++{
++  const size_t n = 2048;
++  const int4 value = {31, 32, 33, 34};
++
++  // Setup kernel and buffers
++  OCL_CREATE_KERNEL("compiler_function_argument2");
++  OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(uint32_t), NULL);
++  OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
++  OCL_SET_ARG(1, sizeof(int4), &value);
++
++  // Run the kernel
++  globals[0] = n;
++  locals[0] = 16;
++  OCL_NDRANGE(1);
++  OCL_MAP_BUFFER(0);
++
++  // Check results
++  for (uint32_t i = 0; i < n; ++i)
++    OCL_ASSERT(((int*)buf_data[0])[i] == value.w);
++}
++
++MAKE_UTEST_FROM_FUNCTION(compiler_function_argument2);
+-- 
+1.7.10.4
+

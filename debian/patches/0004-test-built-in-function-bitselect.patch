@@ -1,0 +1,97 @@
+From bf5863c0f76601451637f5a029166a8af56a2d6a Mon Sep 17 00:00:00 2001
+From: Homer Hsing <homer.xing@intel.com>
+Date: Wed, 10 Jul 2013 09:29:42 +0800
+Subject: [PATCH 04/14] test built-in function "bitselect"
+To: beignet@lists.freedesktop.org
+
+Signed-off-by: Homer Hsing <homer.xing@intel.com>
+Signed-off-by: Simon Richter <Simon.Richter@hogyros.de>
+---
+ kernels/builtin_bitselect.cl |    4 ++++
+ utests/CMakeLists.txt        |    1 +
+ utests/builtin_bitselect.cpp |   50 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 55 insertions(+)
+ create mode 100644 kernels/builtin_bitselect.cl
+ create mode 100644 utests/builtin_bitselect.cpp
+
+diff --git a/kernels/builtin_bitselect.cl b/kernels/builtin_bitselect.cl
+new file mode 100644
+index 0000000..9b60cbe
+--- /dev/null
++++ b/kernels/builtin_bitselect.cl
+@@ -0,0 +1,4 @@
++kernel void builtin_bitselect(global float *src1, global float *src2, global float *src3, global float *dst) {
++  int i = get_global_id(0);
++  dst[i] = bitselect(src1[i], src2[i], src3[i]);
++}
+diff --git a/utests/CMakeLists.txt b/utests/CMakeLists.txt
+index 26c0540..2e18b2c 100644
+--- a/utests/CMakeLists.txt
++++ b/utests/CMakeLists.txt
+@@ -100,6 +100,7 @@ set (utests_sources
+   compiler_vector_load_store.cpp
+   compiler_cl_finish.cpp
+   get_cl_info.cpp
++  builtin_bitselect.cpp
+   buildin_work_dim.cpp
+   builtin_global_size.cpp
+   runtime_createcontext.cpp
+diff --git a/utests/builtin_bitselect.cpp b/utests/builtin_bitselect.cpp
+new file mode 100644
+index 0000000..37fb8df
+--- /dev/null
++++ b/utests/builtin_bitselect.cpp
+@@ -0,0 +1,50 @@
++#include "utest_helper.hpp"
++
++int as_int(float f) {
++  void *p = &f;
++  return *(int *)p;
++}
++
++int cpu(int a, int b, int c) {
++  return (a & ~c) | (b & c);
++}
++
++void builtin_bitselect(void)
++{
++  const int n = 32;
++  float src1[n], src2[n], src3[n];
++
++  // Setup kernel and buffers
++  OCL_CREATE_KERNEL("builtin_bitselect");
++  OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[1], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[2], 0, n * sizeof(float), NULL);
++  OCL_CREATE_BUFFER(buf[3], 0, n * sizeof(float), NULL);
++  OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
++  OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
++  OCL_SET_ARG(2, sizeof(cl_mem), &buf[2]);
++  OCL_SET_ARG(3, sizeof(cl_mem), &buf[3]);
++  globals[0] = n;
++  locals[0] = 16;
++
++  OCL_MAP_BUFFER(0);
++  OCL_MAP_BUFFER(1);
++  OCL_MAP_BUFFER(2);
++  for (int i = 0; i < n; ++i) {
++    src1[i] = ((float*)buf_data[0])[i] = rand() * 0.1f;
++    src2[i] = ((float*)buf_data[1])[i] = rand() * 0.1f;
++    src3[i] = ((float*)buf_data[2])[i] = rand() * 0.1f;
++  }
++  OCL_UNMAP_BUFFER(0);
++  OCL_UNMAP_BUFFER(1);
++  OCL_UNMAP_BUFFER(2);
++
++  OCL_NDRANGE(1);
++
++  OCL_MAP_BUFFER(3);
++  for (int i = 0; i < n; ++i)
++    OCL_ASSERT(((int*)buf_data[3])[i] == cpu(as_int(src1[i]), as_int(src2[i]), as_int(src3[i])));
++  OCL_UNMAP_BUFFER(3);
++}
++
++MAKE_UTEST_FROM_FUNCTION(builtin_bitselect);
+-- 
+1.7.10.4
+
