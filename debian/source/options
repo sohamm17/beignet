@@ -1,6 +1,7 @@
 extend-diff-ignore="(^|/)utests/.*\.bmp"
 extend-diff-ignore="(^|/)backend/src/ocl_stdlib_str.cpp"
 extend-diff-ignore="(^|/)backend/src/ocl_common_defines_str.cpp"
+extend-diff-ignore="(^|/)backend/src/ocl_vector.h"
 extend-diff-ignore="(^|/)CMakeFiles/CMakeDetermineCompilerABI_C.bin"
 extend-diff-ignore="(^|/)CMakeFiles/CMakeDetermineCompilerABI_CXX.bin"
 extend-diff-ignore="(^|/)CMakeFiles/CompilerIdCXX/a.out"

@@ -2,11 +2,11 @@ Description: Debian compliant compiler flags handling
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130619+42967d2/CMakeLists.txt
+Index: beignet-0.2+git20130730+da26376/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/CMakeLists.txt	2013-06-19 21:04:24.770667341 +0200
-+++ beignet-0.1+git20130619+42967d2/CMakeLists.txt	2013-06-19 21:04:31.958667020 +0200
-@@ -18,7 +18,6 @@
+--- beignet-0.2+git20130730+da26376.orig/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
++++ beignet-0.2+git20130730+da26376/CMakeLists.txt	2013-07-30 13:44:41.583596970 +0200
+@@ -20,7 +20,6 @@
  
  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
  
@@ -14,11 +14,11 @@ Index: beignet-0.1+git20130619+42967d2/CMakeLists.txt
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
  SET(EMULATE_IVB false CACHE BOOL "To emulate IVB")
  SET(EMULATE_SNB false CACHE BOOL "To emulate SNB")
-Index: beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt
+Index: beignet-0.2+git20130730+da26376/backend/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/backend/CMakeLists.txt	2013-06-19 21:04:24.770667341 +0200
-+++ beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt	2013-06-19 21:04:31.958667020 +0200
-@@ -45,39 +45,39 @@
+--- beignet-0.2+git20130730+da26376.orig/backend/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
++++ beignet-0.2+git20130730+da26376/backend/CMakeLists.txt	2013-07-30 13:44:41.583596970 +0200
+@@ -39,39 +39,39 @@
  if (COMPILER STREQUAL "GCC")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  ${LLVM_CFLAGS}")
@@ -77,7 +77,7 @@ Index: beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt
    set (CMAKE_AR      "/usr/bin/llvm-ar")
    set (CMAKE_LINKER  "/usr/bin/llvm-ld")
    set (CMAKE_NM      "/usr/bin/llvm-nm")
-@@ -91,10 +91,10 @@
+@@ -85,10 +85,10 @@
    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GBE_COMPILE_UTESTS_FLAG}")
    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VISIBILITY_FLAG} -Wl,-E")
    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GBE_DEBUG_MODE_FLAG}")
@@ -91,4 +91,4 @@ Index: beignet-0.1+git20130619+42967d2/backend/CMakeLists.txt
 +  set (CCMAKE_CXX_FLAGS_MINSIZEREL "-DGBE_DEBUG=0")
    set (CMAKE_EXE_LINKER_FLAGS "")
  endif ()
- 
+ include_directories (${CMAKE_CURRENT_BINARY_DIR})

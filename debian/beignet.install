@@ -1,3 +1,4 @@
-debian/intel.icd		/etc/OpenCL/vendors
-usr/lib/beignet/libcl.so	/usr/lib/beignet
-usr/lib/beignet/libgbe.so	/usr/lib/beignet
+debian/intel.icd			/etc/OpenCL/vendors
+usr/lib/beignet/ocl_stdlib.h.pch	/usr/lib/beignet
+usr/lib/beignet/libcl.so		/usr/lib/beignet
+usr/lib/beignet/libgbe.so		/usr/lib/beignet

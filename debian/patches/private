@@ -2,22 +2,29 @@ Description: Install as private library
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130619+42967d2/backend/src/CMakeLists.txt
+Index: beignet-0.2+git20130730+da26376/backend/src/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/backend/src/CMakeLists.txt	2013-06-19 21:04:23.346667404 +0200
-+++ beignet-0.1+git20130619+42967d2/backend/src/CMakeLists.txt	2013-06-19 21:04:36.470666819 +0200
-@@ -121,6 +121,6 @@
+--- beignet-0.2+git20130730+da26376.orig/backend/src/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
++++ beignet-0.2+git20130730+da26376/backend/src/CMakeLists.txt	2013-07-30 13:45:45.987594708 +0200
+@@ -154,11 +154,11 @@
                        ${CMAKE_THREAD_LIBS_INIT}
                        ${CMAKE_DL_LIBS})
  
 -install (TARGETS gbe LIBRARY DESTINATION lib)
+-install (FILES ${pch_object} DESTINATION lib)
 +install (TARGETS gbe LIBRARY DESTINATION lib/beignet)
++install (FILES ${pch_object} DESTINATION lib/beignet)
  install (FILES backend/program.h DESTINATION include/gen)
  
-Index: beignet-0.1+git20130619+42967d2/src/CMakeLists.txt
+-set (PCH_OBJECT_DIR "${pch_object};${CMAKE_INSTALL_PREFIX}/lib/ocl_stdlib.h.pch")
++set (PCH_OBJECT_DIR "${pch_object};${CMAKE_INSTALL_PREFIX}/lib/beignet/ocl_stdlib.h.pch")
+ configure_file (
+   "GBEConfig.h.in"
+   "GBEConfig.h"
+Index: beignet-0.2+git20130730+da26376/src/CMakeLists.txt
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/src/CMakeLists.txt	2013-06-19 21:04:23.346667404 +0200
-+++ beignet-0.1+git20130619+42967d2/src/CMakeLists.txt	2013-06-19 21:04:36.470666819 +0200
+--- beignet-0.2+git20130730+da26376.orig/src/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
++++ beignet-0.2+git20130730+da26376/src/CMakeLists.txt	2013-07-30 13:44:56.743596438 +0200
 @@ -47,6 +47,8 @@
  
  SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")

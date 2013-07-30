@@ -1,7 +1,7 @@
-From 9ce43445e101f8a48adb4a641d7f601f226d0362 Mon Sep 17 00:00:00 2001
+From 074355de8299078b334cc8d76ec1964da64bd68e Mon Sep 17 00:00:00 2001
 From: Simon Richter <Simon.Richter@hogyros.de>
 Date: Wed, 19 Jun 2013 11:30:36 +0200
-Subject: [PATCH 14/14] Readd OpenCL 1.2 definitions required for ICD
+Subject: [PATCH 1/2] Readd OpenCL 1.2 definitions required for ICD
 To: beignet@lists.freedesktop.org
 
 The definition for the ICD dispatch table requires a few additional
@@ -70,7 +70,7 @@ index 043b048..9a2f17a 100644
  #endif
  
 diff --git a/src/cl_mem.h b/src/cl_mem.h
-index 66518a6..d00743f 100644
+index 1b1709a..08515d0 100644
 --- a/src/cl_mem.h
 +++ b/src/cl_mem.h
 @@ -29,18 +29,6 @@
