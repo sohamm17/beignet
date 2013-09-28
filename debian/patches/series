@@ -3,3 +3,5 @@ flags
 khronos
 deprecated-in-utest
 private
+0002-Revert-GBE-disable-cl_khr_fp64.patch
+0003-ICD-dispatch-table-must-be-first.patch

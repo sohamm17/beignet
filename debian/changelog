@@ -1,3 +1,9 @@
+beignet (0.2+git20130928+187c17e-1) experimental; urgency=low
+
+  * New upstream release
+
+ -- Simon Richter <sjr@debian.org>  Sat, 28 Sep 2013 14:19:29 +1000
+
 beignet (0.2+git20130816+cc09b26-1) experimental; urgency=low
 
   * New upstream release

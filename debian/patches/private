@@ -2,13 +2,13 @@ Description: Install as private library
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.2+git20130730+da26376/backend/src/CMakeLists.txt
+Index: beignet-0.2+git20130928+187c17e/backend/src/CMakeLists.txt
 ===================================================================
---- beignet-0.2+git20130730+da26376.orig/backend/src/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
-+++ beignet-0.2+git20130730+da26376/backend/src/CMakeLists.txt	2013-07-30 13:45:45.987594708 +0200
-@@ -154,11 +154,11 @@
-                       ${CMAKE_THREAD_LIBS_INIT}
-                       ${CMAKE_DL_LIBS})
+--- beignet-0.2+git20130928+187c17e.orig/backend/src/CMakeLists.txt	2013-09-26 10:55:59.000000000 +0200
++++ beignet-0.2+git20130928+187c17e/backend/src/CMakeLists.txt	2013-09-28 06:20:45.396509466 +0200
+@@ -159,11 +159,11 @@
+ ADD_EXECUTABLE(gbe_bin_generater gbe_bin_generater.cpp)
+ TARGET_LINK_LIBRARIES(gbe_bin_generater gbe)
  
 -install (TARGETS gbe LIBRARY DESTINATION lib)
 -install (FILES ${pch_object} DESTINATION lib)
@@ -21,22 +21,22 @@ Index: beignet-0.2+git20130730+da26376/backend/src/CMakeLists.txt
  configure_file (
    "GBEConfig.h.in"
    "GBEConfig.h"
-Index: beignet-0.2+git20130730+da26376/src/CMakeLists.txt
+Index: beignet-0.2+git20130928+187c17e/src/CMakeLists.txt
 ===================================================================
---- beignet-0.2+git20130730+da26376.orig/src/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
-+++ beignet-0.2+git20130730+da26376/src/CMakeLists.txt	2013-07-30 13:44:56.743596438 +0200
+--- beignet-0.2+git20130928+187c17e.orig/src/CMakeLists.txt	2013-09-26 10:55:59.000000000 +0200
++++ beignet-0.2+git20130928+187c17e/src/CMakeLists.txt	2013-09-28 06:21:15.052511187 +0200
 @@ -47,6 +47,8 @@
  
- SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")
+ SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic,--allow-shlib-undefined")
  
 +SET(CMAKE_INSTALL_RPATH /usr/lib/beignet)
 +
  link_directories (${LLVM_LIBRARY_DIR})
  add_library(cl SHARED ${OPENCL_SRC})
  target_link_libraries(
-@@ -60,4 +62,4 @@
+@@ -59,4 +61,4 @@
+                       ${DRM_LIBRARY}
                        ${OPENGL_LIBRARIES}
-                       ${OPTIONAL_EGL_LIBRARY}
-                       ${OPTIONAL_GBM_LIBRARY})
+                       ${OPTIONAL_EGL_LIBRARY})
 -install (TARGETS cl LIBRARY DESTINATION lib)
 +install (TARGETS cl LIBRARY DESTINATION lib/beignet)
