@@ -1,1 +1,12 @@
+CMakeFiles/CMakeDetermineCompilerABI_C.bin
+CMakeFiles/CMakeDetermineCompilerABI_CXX.bin
+CMakeFiles/CompilerIdC/a.out
+CMakeFiles/CompilerIdCXX/a.out
+backend/src/ocl_common_defines_str.cpp
+backend/src/ocl_stdlib_str.cpp
+backend/src/ocl_vector.h
 kernels/compiler_ceil.bin
+src/kernels/cl_internal_copy_buf_align16_str.c
+src/kernels/cl_internal_copy_buf_align1_str.c
+src/kernels/cl_internal_copy_buf_align4_str.c
+utests/*.bmp
