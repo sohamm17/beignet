@@ -1,0 +1,16 @@
+Description: Link against terminfo
+Author: Simon Richter <sjr@debian.org>
+Last-Update: 2014-04-19
+
+--- beignet-0.8.orig/backend/src/CMakeLists.txt
++++ beignet-0.8/backend/src/CMakeLists.txt
+@@ -186,7 +186,8 @@ target_link_libraries(
+                       ${LLVM_MODULE_LIBS}
+                       ${LLVM_SYSTEM_LIBS}
+                       ${CMAKE_THREAD_LIBS_INIT}
+-                      ${CMAKE_DL_LIBS})
++                      ${CMAKE_DL_LIBS}
++                      tinfo)
+ 
+ link_directories (${LLVM_LIBRARY_DIR})
+ ADD_EXECUTABLE(gbe_bin_generater gbe_bin_generater.cpp)

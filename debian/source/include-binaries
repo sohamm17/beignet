@@ -150,3 +150,4 @@ obj-x86_64-linux-gnu/utests/CMakeFiles/utests.dir/utest_helper.cpp.o
 obj-x86_64-linux-gnu/utests/flat_address_space
 obj-x86_64-linux-gnu/utests/libutests.so
 obj-x86_64-linux-gnu/utests/utest_run
+utests/utest_generator.pyc

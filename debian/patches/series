@@ -2,4 +2,5 @@ debug
 flags
 khronos
 deprecated-in-utest
-private
+versioned-llvm-tools
+terminfo

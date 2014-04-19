@@ -2,22 +2,22 @@ Description: Debian compliant compiler flags handling
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.2+git20130730+da26376/CMakeLists.txt
+Index: beignet-0.8/CMakeLists.txt
 ===================================================================
---- beignet-0.2+git20130730+da26376.orig/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
-+++ beignet-0.2+git20130730+da26376/CMakeLists.txt	2013-07-30 13:44:41.583596970 +0200
-@@ -20,7 +20,6 @@
+--- beignet-0.8.orig/CMakeLists.txt	2014-04-19 15:52:54.463442302 +0200
++++ beignet-0.8/CMakeLists.txt	2014-04-19 15:52:54.463442302 +0200
+@@ -21,7 +21,6 @@
  
  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
  
 -SET(CMAKE_VERBOSE_MAKEFILE "false")
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
- SET(EMULATE_IVB false CACHE BOOL "To emulate IVB")
- SET(EMULATE_SNB false CACHE BOOL "To emulate SNB")
-Index: beignet-0.2+git20130730+da26376/backend/CMakeLists.txt
+ if (NOT LIB_INSTALL_DIR)
+   set (LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+Index: beignet-0.8/backend/CMakeLists.txt
 ===================================================================
---- beignet-0.2+git20130730+da26376.orig/backend/CMakeLists.txt	2013-07-30 11:12:48.000000000 +0200
-+++ beignet-0.2+git20130730+da26376/backend/CMakeLists.txt	2013-07-30 13:44:41.583596970 +0200
+--- beignet-0.8.orig/backend/CMakeLists.txt	2014-04-19 15:52:54.463442302 +0200
++++ beignet-0.8/backend/CMakeLists.txt	2014-04-19 15:52:54.463442302 +0200
 @@ -39,39 +39,39 @@
  if (COMPILER STREQUAL "GCC")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -Wstrict-aliasing=2 -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")
@@ -91,4 +91,4 @@ Index: beignet-0.2+git20130730+da26376/backend/CMakeLists.txt
 +  set (CCMAKE_CXX_FLAGS_MINSIZEREL "-DGBE_DEBUG=0")
    set (CMAKE_EXE_LINKER_FLAGS "")
  endif ()
- include_directories (${CMAKE_CURRENT_BINARY_DIR})
+ 

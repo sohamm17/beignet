@@ -4,15 +4,16 @@ Maintainer: Simon Richter <sjr@debian.org>
 Build-Depends: debhelper (>= 9), cmake, pkg-config, python-minimal,
  ocl-icd-dev, ocl-icd-opencl-dev,
  libdrm-dev, libxfixes-dev, libxext-dev,
- llvm-dev (>= 1:3.2),
- clang (>= 1:3.2) | clang (>= 3.2),
- clang (>= 1:3.2) | clang (<< 1:0),
- libclang-dev (>= 1:3.2) | libclang-dev (>= 3.2),
- libclang-dev (>= 1:3.2) | libclang-dev (<< 1:0),
+ llvm-3.4-dev | llvm-dev (>= 1:3.4),
+ clang-3.4 | clang (>= 1:3.4) | clang (>= 3.4),
+ clang-3.4 | clang (>= 1:3.4) | clang (<< 1:0),
+ libclang-3.4-dev | libclang-dev (>= 1:3.4) | libclang-dev (>= 3.4),
+ libclang-3.4-dev | libclang-dev (>= 1:3.4) | libclang-dev (<< 1:0),
  libgl1-mesa-dev (>= 9) [!kfreebsd-any],
  libegl1-mesa-dev (>= 9) [!kfreebsd-any],
- libgbm-dev (>= 9) [!kfreebsd-any]
-Standards-Version: 3.9.4
+ libgbm-dev (>= 9) [!kfreebsd-any],
+ libtinfo-dev
+Standards-Version: 3.9.5
 Section: libs
 Homepage: http://cgit.freedesktop.org/beignet/
 

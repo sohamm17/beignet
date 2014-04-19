@@ -2,10 +2,10 @@ Description: Use Khronos Group headers
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl_ext.h
+Index: beignet-0.8/include/CL/cl_ext.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl_ext.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl_ext.h	2013-06-19 21:04:33.466666953 +0200
+--- beignet-0.8.orig/include/CL/cl_ext.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl_ext.h	2014-04-19 15:53:04.427441857 +0200
 @@ -1,213 +1 @@
 -/*******************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -221,10 +221,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl_ext.h
 -
 -#endif /* __CL_EXT_H */
 +#include_next <CL/cl_ext.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/opencl.h
+Index: beignet-0.8/include/CL/opencl.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/opencl.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/opencl.h	2013-06-19 21:04:33.466666953 +0200
+--- beignet-0.8.orig/include/CL/opencl.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/opencl.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,54 +1 @@
 -/*******************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -281,10 +281,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/opencl.h
 -#endif  /* __OPENCL_H   */
 -
 +#include_next <CL/opencl.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl_d3d10.h
+Index: beignet-0.8/include/CL/cl_d3d10.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl_d3d10.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl_d3d10.h	2013-06-19 21:04:33.470666953 +0200
+--- beignet-0.8.orig/include/CL/cl_d3d10.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl_d3d10.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,126 +1 @@
 -/**********************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -413,10 +413,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl_d3d10.h
 -#endif  // __OPENCL_CL_D3D10_H
 -
 +#include_next <CL/cl_d3d10.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl.h
+Index: beignet-0.8/include/CL/cl.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl.h	2013-06-19 21:04:33.474666953 +0200
+--- beignet-0.8.orig/include/CL/cl.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,998 +1 @@
 -/*******************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -1417,10 +1417,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl.h
 -#endif  /* __OPENCL_CL_H */
 -
 +#include_next <CL/cl.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl_platform.h
+Index: beignet-0.8/include/CL/cl_platform.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl_platform.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl_platform.h	2013-06-19 21:04:33.478666953 +0200
+--- beignet-0.8.orig/include/CL/cl_platform.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl_platform.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,1198 +1 @@
 -/**********************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -2621,10 +2621,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl_platform.h
 -
 -#endif  /* __CL_PLATFORM_H  */
 +#include_next <CL/cl_platform.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl_gl.h
+Index: beignet-0.8/include/CL/cl_gl.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl_gl.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl_gl.h	2013-06-19 21:04:33.478666953 +0200
+--- beignet-0.8.orig/include/CL/cl_gl.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl_gl.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,155 +1 @@
 -/**********************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -2782,10 +2782,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl_gl.h
 -
 -#endif  /* __OPENCL_CL_GL_H  */
 +#include_next <CL/cl_gl.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl_gl_ext.h
+Index: beignet-0.8/include/CL/cl_gl_ext.h
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl_gl_ext.h	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl_gl_ext.h	2013-06-19 21:04:33.478666953 +0200
+--- beignet-0.8.orig/include/CL/cl_gl_ext.h	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl_gl_ext.h	2014-04-19 15:53:04.431441857 +0200
 @@ -1,69 +1 @@
 -/**********************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
@@ -2857,10 +2857,10 @@ Index: beignet-0.1+git20130619+42967d2/include/CL/cl_gl_ext.h
 -
 -#endif	/* __OPENCL_CL_GL_EXT_H  */
 +#include_next <CL/cl_gl_ext.h>
-Index: beignet-0.1+git20130619+42967d2/include/CL/cl.hpp
+Index: beignet-0.8/include/CL/cl.hpp
 ===================================================================
---- beignet-0.1+git20130619+42967d2.orig/include/CL/cl.hpp	2013-06-19 21:04:24.122667370 +0200
-+++ beignet-0.1+git20130619+42967d2/include/CL/cl.hpp	2013-06-19 21:04:33.482666952 +0200
+--- beignet-0.8.orig/include/CL/cl.hpp	2014-04-19 15:53:04.435441857 +0200
++++ beignet-0.8/include/CL/cl.hpp	2014-04-19 15:53:04.431441857 +0200
 @@ -1,4011 +1 @@
 -/*******************************************************************************
 - * Copyright (c) 2008-2010 The Khronos Group Inc.
