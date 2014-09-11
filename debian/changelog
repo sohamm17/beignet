@@ -1,3 +1,14 @@
+beignet (0.8-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Adjust clang Build-Depends. (Closes: #759933)
+    + Thanks to Julian Wollrath for it.
+  * Cherry pick upstream patch to fix licensing issue. (Closes: #757395)
+    + Thanks to Julian Wollrath for it.
+  * Refresh debug patch.
+
+ -- Julián Moreno Patiño <julian@debian.org>  Thu, 11 Sep 2014 10:44:01 -0500
+
 beignet (0.8-1) unstable; urgency=low
 
   * New upstream release (Closes: #739534)

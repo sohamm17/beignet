@@ -2,11 +2,9 @@ Description: Enhance debug output
 Author: Simon Richter <sjr@debian.org>
 Last-Update: 2013-05-21
 
-Index: beignet-0.1+git20130619+42967d2/src/cl_utils.h
-===================================================================
---- beignet-0.1+git20130619+42967d2.orig/src/cl_utils.h	2013-06-19 21:04:25.066667328 +0200
-+++ beignet-0.1+git20130619+42967d2/src/cl_utils.h	2013-06-19 21:04:28.066667194 +0200
-@@ -80,6 +80,7 @@
+--- a/src/cl_utils.h
++++ b/src/cl_utils.h
+@@ -88,6 +88,7 @@
  
  #define FATAL(...)                                          \
  do {                                                        \

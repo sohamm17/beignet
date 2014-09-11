@@ -4,3 +4,4 @@ khronos
 deprecated-in-utest
 versioned-llvm-tools
 terminfo
+fix_license_issue
