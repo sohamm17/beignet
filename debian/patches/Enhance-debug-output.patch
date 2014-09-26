@@ -1,10 +1,16 @@
-Description: Enhance debug output
-Author: Simon Richter <sjr@debian.org>
-Last-Update: 2013-05-21
+From: Simon Richter <sjr@debian.org>
+Date: Fri, 29 Aug 2014 16:17:22 +0200
+Subject: Enhance debug output
 
+---
+ src/cl_utils.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/cl_utils.h b/src/cl_utils.h
+index 26cf329e2627..fced17ab26c8 100644
 --- a/src/cl_utils.h
 +++ b/src/cl_utils.h
-@@ -88,6 +88,7 @@
+@@ -88,6 +88,7 @@ do {                                                        \
  
  #define FATAL(...)                                          \
  do {                                                        \

@@ -10,12 +10,23 @@ Files: backend/src/sys/intrusive_list.*
 Copyright: 2007 Maciej Sinilo
 License: MIT
 
+Files: backend/src/backend/gen75_encoder.cpp
+Copyright: 2006 Intel Corporation
+License: MIT
+
 Files: backend/src/backend/gen_register.hpp
 Copyright: 2012 Intel Corporation
 License: MIT
 
+Files: backend/src/gbe_bin_interpreter.cpp
+       src/cl_gbe_loader.cpp
+       src/cl_gbe_loader.h
+Copyright: 2014 Intel Corporation
+License: LGPL-2.0+
+
 Files: debian/*
 Copyright: 2013 Simon Richter <sjr@debian.org>
+           2014 Julian Wollrath <jwollrath@web.de>
 License: LGPL-2.0+
 
 License: LGPL-2.0+

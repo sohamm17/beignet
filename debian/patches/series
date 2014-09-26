@@ -1,7 +1,6 @@
-debug
-flags
-khronos
-deprecated-in-utest
-versioned-llvm-tools
-terminfo
-fix_license_issue
+Enhance-debug-output.patch
+Debian-compliant-compiler-flags-handling.patch
+Use-Khronos-Group-headers.patch
+Utest-requires-deprecated-function-names.patch
+Link-against-terminfo.patch
+Fix-build-failure.patch

@@ -10,7 +10,9 @@ Build-Depends: debhelper (>= 9), cmake, pkg-config, python-minimal,
  libgl1-mesa-dev (>= 9) [!kfreebsd-any],
  libegl1-mesa-dev (>= 9) [!kfreebsd-any],
  libgbm-dev (>= 9) [!kfreebsd-any],
- libtinfo-dev
+ libtinfo-dev,
+ libedit-dev,
+ zlib1g-dev
 Standards-Version: 3.9.5
 Section: libs
 Homepage: http://cgit.freedesktop.org/beignet/

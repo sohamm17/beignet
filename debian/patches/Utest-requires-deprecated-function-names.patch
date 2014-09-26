@@ -1,0 +1,21 @@
+From: Simon Richter <sjr@debian.org>
+Date: Fri, 29 Aug 2014 16:27:01 +0200
+Subject: Utest requires deprecated function names
+
+---
+ utests/utest_helper.hpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/utests/utest_helper.hpp b/utests/utest_helper.hpp
+index de4d2771b8c5..1ed6b2cb0918 100644
+--- a/utests/utest_helper.hpp
++++ b/utests/utest_helper.hpp
+@@ -25,6 +25,8 @@
+ #ifndef __UTEST_HELPER_HPP__
+ #define __UTEST_HELPER_HPP__
+ 
++#define CL_USE_DEPRECATED_OPENCL_1_1_APIS
++
+ #include "CL/cl.h"
+ #include "CL/cl_intel.h"
+ #include "utest.hpp"
