@@ -18,7 +18,7 @@ Build-Depends: debhelper (>= 9), cmake, pkg-config, python-minimal,
  libtinfo-dev,
  libedit-dev,
  zlib1g-dev
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Homepage: http://cgit.freedesktop.org/beignet/
 
 Package: beignet-dev

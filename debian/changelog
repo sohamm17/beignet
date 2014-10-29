@@ -19,6 +19,7 @@ beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
   * Simplify using system OpenCL headers.
   * Use-Khronos-Group-headers.patch: Removed.
   * d/control: Fix some issues found by lintian.
+  * Bump Standards-Version to 3.9.6 (no changes needed).
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 31 Oct 2014 21:22:59 +0100
 
