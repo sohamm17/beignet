@@ -20,6 +20,7 @@ beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
   * Use-Khronos-Group-headers.patch: Removed.
   * d/control: Fix some issues found by lintian.
   * Bump Standards-Version to 3.9.6 (no changes needed).
+  * Import debian/ packaging history into GIT. Add Vcs-* URLs.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 31 Oct 2014 21:22:59 +0100
 
