@@ -1,0 +1,33 @@
+From dd8a10b17d567274ea7a8ea0771ad2044aff682e Mon Sep 17 00:00:00 2001
+From: Andreas Beckmann <anbe@debian.org>
+Date: Fri, 31 Oct 2014 21:45:58 +0100
+Subject: [PATCH] use env to set environment variables for
+ GBE_BIN_GENERATER
+
+cmake interprets OCL_PCM_PATH=... as a command and will enclose it in
+quotes in case it contains characters requiring protection, e.g. ~
+a quoted "FOO=bar" is interpreted by /bin/sh as a command (that does not
+exist), not a variable setting for a following command
+
+use env to set the variables unambiguously
+
+Signed-off-by: Andreas Beckmann <anbe@debian.org>
+---
+ backend/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/backend/CMakeLists.txt b/backend/CMakeLists.txt
+index 6a31c68..f68ffc5 100644
+--- a/backend/CMakeLists.txt
++++ b/backend/CMakeLists.txt
+@@ -103,6 +103,6 @@ set(LOCAL_GBE_OBJECT_DIR ${LOCAL_GBE_OBJECT_DIR} PARENT_SCOPE)
+ set(LOCAL_INTERP_OBJECT_DIR ${LOCAL_INTERP_OBJECT_DIR} PARENT_SCOPE)
+ 
+ set (GBE_BIN_GENERATER
+-     OCL_PCM_PATH=${LOCAL_PCM_OBJECT_DIR} OCL_PCH_PATH=${LOCAL_PCH_OBJECT_DIR} LD_LIBRARY_PATH=${CMAKE_CURRENT_BINARY_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src/gbe_bin_generater
++     env OCL_PCM_PATH=${LOCAL_PCM_OBJECT_DIR} OCL_PCH_PATH=${LOCAL_PCH_OBJECT_DIR} LD_LIBRARY_PATH=${CMAKE_CURRENT_BINARY_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src/gbe_bin_generater
+      PARENT_SCOPE)
+ 
+-- 
+2.1.1
+

@@ -13,6 +13,8 @@ beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
   * Repack upstream tarball to remove non-distributable Len(n)a images and
     CC-BY-NC-SA licensed parts from the test suite.  (Closes: #767387)
   * 0001-fix-some-typos.patch: New.
+  * 0002-use-env-to-set-environment-variables-for-GBE_BIN_GEN.patch: New, fix
+    FTBFS of "~dfsg" versions in pbuilder etc.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 31 Oct 2014 21:22:59 +0100
 
