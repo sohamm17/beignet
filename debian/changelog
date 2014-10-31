@@ -1,8 +1,9 @@
 beignet (0.9.3-0.1) UNRELEASED; urgency=medium
 
   [ Julian Wollrath ]
-  * New upstream release (Closes: #759707):
-    + Add B-D on libedit-dev and zlib1g-dev.
+  * New upstream release.  (Closes: #759707, #745363, #745767) (LP: #1372889)
+    + Supports llvm 3.5.  (Closes: #764930) (LP: #1350773)
+  * Add B-D on libedit-dev and zlib1g-dev.
   * Add debian/watch file.
   * Update debian/copyright.
 
