@@ -1,4 +1,4 @@
-beignet (0.9.3-0.1) UNRELEASED; urgency=medium
+beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
 
   [ Julian Wollrath ]
   * New upstream release.  (Closes: #759707, #745363, #745767) (LP: #1372889)
@@ -10,8 +10,10 @@ beignet (0.9.3-0.1) UNRELEASED; urgency=medium
   [ Andreas Beckmann ]
   * Set Maintainer to "Debian OpenCL Maintainers" with Simon's permission.
   * Add Simon Richter, Rebecca N. Palmer and myself to Uploaders.
+  * Repack upstream tarball to remove non-distributable Len(n)a images and
+    CC-BY-NC-SA licensed parts from the test suite.  (Closes: #767387)
 
- -- Julian Wollrath <jwollrath@web.de>  Fri, 26 Sep 2014 12:18:47 +0200
+ -- Andreas Beckmann <anbe@debian.org>  Fri, 31 Oct 2014 21:22:59 +0100
 
 beignet (0.8-1.1) unstable; urgency=medium
 
