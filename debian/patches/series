@@ -1,6 +1,5 @@
 Enhance-debug-output.patch
 Debian-compliant-compiler-flags-handling.patch
-Use-Khronos-Group-headers.patch
 Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
 Fix-build-failure.patch
