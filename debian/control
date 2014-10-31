@@ -1,6 +1,10 @@
 Source: beignet
 Priority: extra
-Maintainer: Simon Richter <sjr@debian.org>
+Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
+Uploaders:
+ Simon Richter <sjr@debian.org>,
+ Rebecca N. Palmer <rebecca_palmer@zoho.com>,
+ Andreas Beckmann <anbe@debian.org>,
 Build-Depends: debhelper (>= 9), cmake, pkg-config, python-minimal,
  ocl-icd-dev, ocl-icd-opencl-dev,
  libdrm-dev, libxfixes-dev, libxext-dev,
