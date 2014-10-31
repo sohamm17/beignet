@@ -1,0 +1,96 @@
+Beignet Compiler
+================
+
+This code base contains the compiler part of the Beignet OpenCL stack. The
+compiler is responsible to take a OpenCL language string and to compile it into
+a binary that can be executed on Intel integrated GPUs.
+
+Limitations
+-----------
+
+Today, the compiler is far from complete. See [[here|Backend/TODO]] for a
+(incomplete) lists of things to do.
+
+Interface with the run-time
+---------------------------
+
+Even if the compiler makes a very liberal use of C++ (templates, variadic
+templates, macros), we really tried hard to make a very simple interface with
+the run-time. The interface is therefore a pure C99 interface and it is defined
+in `src/backend/program.h`.
+
+The goal is to hide the complexity of the inner data structures and to enable
+simple run-time implementation using straightforward C99.
+
+Note that the data structures are fully opaque: this allows us to use both the
+C++ simulator or the real Gen program in a relatively non-intrusive way.
+
+Various environment variables
+-----------------------------
+
+Environment variables are used all over the code. Most important ones are:
+
+- `OCL_STRICT_CONFORMANCE` `(0 or 1)`. Gen does not provide native high
+  precision math instructions compliant with OpenCL Spec. So we provide a
+  software version to meet the high precision requirement. Obviously the
+  software version's performance is not as good as native version supported by
+  GEN hardware. What's more, most graphics application don't need this high
+  precision, so we choose 0 as the default value. So OpenCL apps do not suffer
+  the performance penalty for using high precision math functions.
+
+- `OCL_SIMD_WIDTH` `(8 or 16)`. Select the number of lanes per hardware thread,
+  Normally, you don't need to set it, we will select suitable simd width for
+  a given kernel. Default value is 16.
+
+- `OCL_OUTPUT_GEN_IR` `(0 or 1)`. Output Gen IR (scalar intermediate
+  representation) code
+
+- `OCL_OUTPUT_LLVM` `(0 or 1)`. Output LLVM code after the lowering passes
+
+- `OCL_OUTPUT_LLVM_BEFORE_EXTRA_PASS` `(0 or 1)`. Output LLVM code before the
+  lowering passes
+
+- `OCL_OUTPUT_ASM` `(0 or 1)`. Output Gen ISA
+
+- `OCL_OUTPUT_REG_ALLOC` `(0 or 1)`. Output Gen register allocations, including
+  virtual register to physical register mapping, live ranges.
+
+- `OCL_OUTPUT_BUILD_LOG` `(0 or 1)`. Output error messages if there is any
+  during CL kernel compiling and linking.
+
+- `OCL_OUTPUT_CFG` `(0 or 1)`. Output control flow graph in .dot file.
+
+- `OCL_OUTPUT_CFG_ONLY` `(0 or 1)`. Output control flow graph in .dot file,
+  but without instructions in each BasicBlock.
+
+- `OCL_PRE_ALLOC_INSN_SCHEDULE` `(0 or 1)`. The instruction scheduler in
+  beignet are currently splitted into two passes: before and after register
+  allocation. The pre-alloc scheduler tend to decrease register pressure.
+  This variable is used to disable/enable pre-alloc scheduler. This pass is
+  disabled now for some bugs.
+
+- `OCL_POST_ALLOC_INSN_SCHEDULE` `(0 or 1)`. Disable/enable post-alloc
+  instruction scheduler. The post-alloc scheduler tend to reduce instruction
+  latency. By default, this is enabled now.
+
+- `OCL_SIMD16_SPILL_THRESHOLD` `(0 to 256)`. Tune how much registers can be
+  spilled under SIMD16. Default value is 16. We find spill too much register
+  under SIMD16 is not as good as fall back to SIMD8 mode. So we set the
+  variable to control spilled register number under SIMD16.
+
+- `OCL_USE_PCH` `(0 or 1)`. The default value is 1. If it is enabled, we use
+  a pre compiled header file which include all basic ocl headers. This would
+  reduce the compile time.
+
+Implementation details
+----------------------
+
+Several key decisions may use the hardware in an usual way. See the following
+documents for the technical details about the compiler implementation:
+
+- [[Mixed buffer pointer)|mixed_buffer_pointer]] 
+- [[Unstructured branches|unstructured_branches]]
+- [[Scalar intermediate representation|gen_ir]]
+- [[Clean backend implementation|compiler_backend]]
+
+Ben Segovia.
