@@ -15,6 +15,7 @@ beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
   * 0001-fix-some-typos.patch: New.
   * 0002-use-env-to-set-environment-variables-for-GBE_BIN_GEN.patch: New, fix
     FTBFS of "~dfsg" versions in pbuilder etc.
+  * Skip-deleted-tests.patch: New. Thanks to Rebecca N. Palmer.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 31 Oct 2014 21:22:59 +0100
 
