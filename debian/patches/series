@@ -4,3 +4,4 @@ Use-Khronos-Group-headers.patch
 Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
 Fix-build-failure.patch
+0001-fix-some-typos.patch
