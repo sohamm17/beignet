@@ -15,6 +15,8 @@ beignet (0.9.3~dfsg-1) UNRELEASED; urgency=medium
   * 0001-fix-some-typos.patch: New.
   * 0002-use-env-to-set-environment-variables-for-GBE_BIN_GEN.patch: New, fix
     FTBFS of "~dfsg" versions in pbuilder etc.
+  * 0003-GBE-fix-one-compilation-warning.patch: New. Cherry-picked from
+    upstream 0.9.x branch.
   * Skip-deleted-tests.patch: New. Thanks to Rebecca N. Palmer.
   * Simplify using system OpenCL headers.
   * Use-Khronos-Group-headers.patch: Removed.

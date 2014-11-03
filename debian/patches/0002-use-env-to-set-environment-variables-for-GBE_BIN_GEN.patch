@@ -1,7 +1,7 @@
-From dd8a10b17d567274ea7a8ea0771ad2044aff682e Mon Sep 17 00:00:00 2001
+From 90e33de8f585ceaa5c7181f9c9675997c4ec1dc8 Mon Sep 17 00:00:00 2001
 From: Andreas Beckmann <anbe@debian.org>
 Date: Fri, 31 Oct 2014 21:45:58 +0100
-Subject: [PATCH] use env to set environment variables for
+Subject: [PATCH 2/3] use env to set environment variables for
  GBE_BIN_GENERATER
 
 cmake interprets OCL_PCM_PATH=... as a command and will enclose it in
@@ -12,6 +12,7 @@ exist), not a variable setting for a following command
 use env to set the variables unambiguously
 
 Signed-off-by: Andreas Beckmann <anbe@debian.org>
+Reviewed-by: Zhigang Gong <zhigang.gong@intel.com>
 ---
  backend/CMakeLists.txt | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
