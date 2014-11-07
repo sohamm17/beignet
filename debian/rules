@@ -4,6 +4,8 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
+export DEB_CPPFLAGS_MAINT_APPEND = -DGBE_DEBUG=1
+
 %:
 	dh $@ --buildsystem cmake --parallel
 
