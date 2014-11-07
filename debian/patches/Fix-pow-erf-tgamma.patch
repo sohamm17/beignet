@@ -1,0 +1,692 @@
+Description: Replace broken pow(n), erf(c) and tgamma with working ones
+
+Don't ignore the first argument's sign in pow/pown.
+Use a proper erf/erfc implementation, instead of a power series that
+diverges above about 2.
+Make tgamma actually be tgamma instead of lgamma=log(fabs(tgamma)).
+Re-enable the pow and erf/erfc tests, and make the tgamma test check
+against tgammaf rather than gammaf=lgamma.
+
+Author: Rebecca Palmer <rebecca_palmer@zoho.com>, Zhigang Gong <zhigang.gong@intel.com>; contains erf(c) code from glibc http://sources.debian.net/src/glibc/2.19-12/sysdeps/ieee754/flt-32/s_erff.c/
+Bug-Debian: https://bugs.debian.org/768090
+
+diff --git a/backend/src/builtin_vector_proto.def b/backend/src/builtin_vector_proto.def
+index 18d23ca..811ab6c 100644
+--- a/backend/src/builtin_vector_proto.def
++++ b/backend/src/builtin_vector_proto.def
+@@ -94,8 +94,7 @@ floatn pown (floatn x, intn y)
+ float pown (float x, int y)
+ doublen pown (doublen x, intn y)
+ double pown (double x, int y)
+-#XXX we define powr as pow
+-#gentype powr (gentype x, gentype y)
++gentype powr (gentype x, gentype y)
+ gentype remainder (gentype x, gentype y)
+ floatn remquo (floatn x, floatn y, __global intn *quo)
+ floatn remquo (floatn x, floatn y, __local intn *quo)
+diff --git a/backend/src/ocl_stdlib.tmpl.h b/backend/src/ocl_stdlib.tmpl.h
+index f648a8c..d6900ee 100755
+--- a/backend/src/ocl_stdlib.tmpl.h
++++ b/backend/src/ocl_stdlib.tmpl.h
+@@ -1565,188 +1565,6 @@ INLINE_OVERLOADABLE float native_log2(float x) { return __gen_ocl_log(x); }
+ INLINE_OVERLOADABLE float native_log(float x) {
+   return native_log2(x) * 0.6931472002f;
+ }
+-INLINE_OVERLOADABLE float tgamma(float x) {
+-/*
+- * ====================================================
+- * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+- *
+- * Developed at SunPro, a Sun Microsystems, Inc. business.
+- * Permission to use, copy, modify, and distribute this
+- * software is freely granted, provided that this notice
+- * is preserved.
+- * ====================================================
+- */
+-  float pi = 3.1415927410e+00,
+-    a0 = 7.7215664089e-02,
+-    a1 = 3.2246702909e-01,
+-    a2 = 6.7352302372e-02,
+-    a3 = 2.0580807701e-02,
+-    a4 = 7.3855509982e-03,
+-    a5 = 2.8905137442e-03,
+-    a6 = 1.1927076848e-03,
+-    a7 = 5.1006977446e-04,
+-    a8 = 2.2086278477e-04,
+-    a9 = 1.0801156895e-04,
+-    a10 = 2.5214456400e-05,
+-    a11 = 4.4864096708e-05,
+-    tc = 1.4616321325e+00,
+-    tf = -1.2148628384e-01,
+-    tt = 6.6971006518e-09,
+-    t0 = 4.8383611441e-01,
+-    t1 = -1.4758771658e-01,
+-    t2 = 6.4624942839e-02,
+-    t3 = -3.2788541168e-02,
+-    t4 = 1.7970675603e-02,
+-    t5 = -1.0314224288e-02,
+-    t6 = 6.1005386524e-03,
+-    t7 = -3.6845202558e-03,
+-    t8 = 2.2596477065e-03,
+-    t9 = -1.4034647029e-03,
+-    t10 = 8.8108185446e-04,
+-    t11 = -5.3859531181e-04,
+-    t12 = 3.1563205994e-04,
+-    t13 = -3.1275415677e-04,
+-    t14 = 3.3552918467e-04,
+-    u0 = -7.7215664089e-02,
+-    u1 = 6.3282704353e-01,
+-    u2 = 1.4549225569e+00,
+-    u3 = 9.7771751881e-01,
+-    u4 = 2.2896373272e-01,
+-    u5 = 1.3381091878e-02,
+-    v1 = 2.4559779167e+00,
+-    v2 = 2.1284897327e+00,
+-    v3 = 7.6928514242e-01,
+-    v4 = 1.0422264785e-01,
+-    v5 = 3.2170924824e-03,
+-    s0 = -7.7215664089e-02,
+-    s1 = 2.1498242021e-01,
+-    s2 = 3.2577878237e-01,
+-    s3 = 1.4635047317e-01,
+-    s4 = 2.6642270386e-02,
+-    s5 = 1.8402845599e-03,
+-    s6 = 3.1947532989e-05,
+-    r1 = 1.3920053244e+00,
+-    r2 = 7.2193557024e-01,
+-    r3 = 1.7193385959e-01,
+-    r4 = 1.8645919859e-02,
+-    r5 = 7.7794247773e-04,
+-    r6 = 7.3266842264e-06,
+-    w0 = 4.1893854737e-01,
+-    w1 = 8.3333335817e-02,
+-    w2 = -2.7777778450e-03,
+-    w3 = 7.9365057172e-04,
+-    w4 = -5.9518753551e-04,
+-    w5 = 8.3633989561e-04,
+-    w6 = -1.6309292987e-03;
+-  float t, y, z, nadj, p, p1, p2, p3, q, r, w;
+-  int i, hx, ix;
+-  nadj = 0;
+-  hx = *(int *) (&x);
+-  ix = hx & 0x7fffffff;
+-  if (ix >= 0x7f800000)
+-    return x * x;
+-  if (ix == 0)
+-    return INFINITY;
+-  if (ix < 0x1c800000) {
+-    if (hx < 0) {
+-      return - native_log(-x);
+-    } else
+-      return - native_log(x);
+-  }
+-  if (hx < 0) {
+-    if (ix >= 0x4b000000)
+-      return INFINITY;
+-    t = __gen_ocl_internal_sinpi(x);
+-    if (__gen_ocl_fabs(t) < 1e-8f)
+-      return INFINITY;
+-    nadj = native_log(M_PI_F / __gen_ocl_fabs(t * x));
+-    x = -x;
+-  }
+-
+-  if (ix == 0x3f800000 || ix == 0x40000000)
+-    r = 0;
+-  else if (ix < 0x40000000) {
+-    if (ix <= 0x3f666666) {
+-      r = - native_log(x);
+-      if (ix >= 0x3f3b4a20) {
+-        y = 1 - x;
+-        i = 0;
+-      } else if (ix >= 0x3e6d3308) {
+-        y = x - (tc - 1);
+-        i = 1;
+-      } else {
+-        y = x;
+-        i = 2;
+-      }
+-    } else {
+-      r = 0;
+-      if (ix >= 0x3fdda618) {
+-        y = 2 - x;
+-        i = 0;
+-      } else if (ix >= 0x3F9da620) {
+-        y = x - tc;
+-        i = 1;
+-      } else {
+-        y = x - 1;
+-        i = 2;
+-      }
+-    }
+-    switch (i) {
+-    case 0:
+-      z = y * y;
+-      p1 = a0 + z * (a2 + z * (a4 + z * (a6 + z * (a8 + z * a10))));
+-      p2 = z * (a1 + z * (a3 + z * (a5 + z * (a7 + z * (a9 + z * a11)))));
+-      p = y * p1 + p2;
+-      r += (p - .5f * y);
+-      break;
+-    case 1:
+-      z = y * y;
+-      w = z * y;
+-      p1 = t0 + w * (t3 + w * (t6 + w * (t9 + w * t12)));
+-      p2 = t1 + w * (t4 + w * (t7 + w * (t10 + w * t13)));
+-      p3 = t2 + w * (t5 + w * (t8 + w * (t11 + w * t14)));
+-      p = z * p1 - (tt - w * (p2 + y * p3));
+-      r += (tf + p);
+-      break;
+-    case 2:
+-      p1 = y * (u0 + y * (u1 + y * (u2 + y * (u3 + y * (u4 + y * u5)))));
+-      p2 = 1 + y * (v1 + y * (v2 + y * (v3 + y * (v4 + y * v5))));
+-      r += (-.5f * y + p1 / p2);
+-    }
+-  } else if (ix < 0x41000000) {
+-    i = x;
+-    t = 0;
+-    y = x - i;
+-    p = y*(s0+y*(s1+y*(s2+y*(s3+y*(s4+y*(s5+y*s6))))));
+-    q = 1 + y * (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))));
+-    r = .5f * y + p / q;
+-    z = 1;
+-    switch (i) {
+-    case 7:
+-      z *= (y + 6.f);
+-    case 6:
+-      z *= (y + 5.f);
+-    case 5:
+-      z *= (y + 4.f);
+-    case 4:
+-      z *= (y + 3.f);
+-    case 3:
+-      z *= (y + 2.f);
+-      r += native_log(z);
+-      break;
+-    }
+-  } else if (ix < 0x5c800000) {
+-    t = native_log(x);
+-    z = 1 / x;
+-    y = z * z;
+-    w = w0 + z * (w1 + y * (w2 + y * (w3 + y * (w4 + y * (w5 + y * w6)))));
+-    r = (x - .5f) * (t - 1) + w;
+-  } else
+-    r = x * (native_log(x) - 1);
+-  if (hx < 0)
+-    r = nadj - r;
+-  return r;
+-}
+ 
+ INLINE_OVERLOADABLE float lgamma(float x) {
+ /*
+@@ -2501,12 +2501,6 @@ INLINE_OVERLOADABLE float __gen_ocl_internal_atan(float x) {
+ INLINE_OVERLOADABLE float __gen_ocl_internal_atanpi(float x) {
+   return __gen_ocl_internal_atan(x) / M_PI_F;
+ }
+-INLINE_OVERLOADABLE float __gen_ocl_internal_erf(float x) {
+-  return M_2_SQRTPI_F * (x - __gen_ocl_pow(x, 3) / 3 + __gen_ocl_pow(x, 5) / 10 - __gen_ocl_pow(x, 7) / 42 + __gen_ocl_pow(x, 9) / 216);
+-}
+-INLINE_OVERLOADABLE float __gen_ocl_internal_erfc(float x) {
+-  return 1 - __gen_ocl_internal_erf(x);
+-}
+ 
+ // XXX work-around PTX profile
+ #define sqrt native_sqrt
+@@ -2726,6 +2720,295 @@ INLINE_OVERLOADABLE float __gen_ocl_internal_exp(float x) {
+     return y*twom100;
+   }
+ }
++
++INLINE_OVERLOADABLE float tgamma(float x) {
++  float y;
++  int s;
++  y=lgamma_r(x,&s);
++  return __gen_ocl_internal_exp(y)*s;
++}
++
++/* erf,erfc from glibc s_erff.c -- float version of s_erf.c.
++ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian at cygnus.com.
++ */
++
++/*
++ * ====================================================
++ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
++ *
++ * Developed at SunPro, a Sun Microsystems, Inc. business.
++ * Permission to use, copy, modify, and distribute this
++ * software is freely granted, provided that this notice
++ * is preserved.
++ * ====================================================
++ */
++
++INLINE_OVERLOADABLE float __gen_ocl_internal_erf(float x) {
++/*...*/
++const float
++tiny = 1.0e-30,
++half_val=  5.0000000000e-01, /* 0x3F000000 */
++one =  1.0000000000e+00, /* 0x3F800000 */
++two =  2.0000000000e+00, /* 0x40000000 */
++	/* c = (subfloat)0.84506291151 */
++erx =  8.4506291151e-01, /* 0x3f58560b */
++/*
++ * Coefficients for approximation to  erf on [0,0.84375]
++ */
++efx =  1.2837916613e-01, /* 0x3e0375d4 */
++efx8=  1.0270333290e+00, /* 0x3f8375d4 */
++pp0  =  1.2837916613e-01, /* 0x3e0375d4 */
++pp1  = -3.2504209876e-01, /* 0xbea66beb */
++pp2  = -2.8481749818e-02, /* 0xbce9528f */
++pp3  = -5.7702702470e-03, /* 0xbbbd1489 */
++pp4  = -2.3763017452e-05, /* 0xb7c756b1 */
++qq1  =  3.9791721106e-01, /* 0x3ecbbbce */
++qq2  =  6.5022252500e-02, /* 0x3d852a63 */
++qq3  =  5.0813062117e-03, /* 0x3ba68116 */
++qq4  =  1.3249473704e-04, /* 0x390aee49 */
++qq5  = -3.9602282413e-06, /* 0xb684e21a */
++/*
++ * Coefficients for approximation to  erf  in [0.84375,1.25]
++ */
++pa0  = -2.3621185683e-03, /* 0xbb1acdc6 */
++pa1  =  4.1485610604e-01, /* 0x3ed46805 */
++pa2  = -3.7220788002e-01, /* 0xbebe9208 */
++pa3  =  3.1834661961e-01, /* 0x3ea2fe54 */
++pa4  = -1.1089469492e-01, /* 0xbde31cc2 */
++pa5  =  3.5478305072e-02, /* 0x3d1151b3 */
++pa6  = -2.1663755178e-03, /* 0xbb0df9c0 */
++qa1  =  1.0642088205e-01, /* 0x3dd9f331 */
++qa2  =  5.4039794207e-01, /* 0x3f0a5785 */
++qa3  =  7.1828655899e-02, /* 0x3d931ae7 */
++qa4  =  1.2617121637e-01, /* 0x3e013307 */
++qa5  =  1.3637083583e-02, /* 0x3c5f6e13 */
++qa6  =  1.1984500103e-02, /* 0x3c445aa3 */
++ /*
++ * Coefficients for approximation to  erfc in [1.25,1/0.35]
++ */ra0  = -9.8649440333e-03, /* 0xbc21a093 */
++ra1  = -6.9385856390e-01, /* 0xbf31a0b7 */
++ra2  = -1.0558626175e+01, /* 0xc128f022 */
++ra3  = -6.2375331879e+01, /* 0xc2798057 */
++ra4  = -1.6239666748e+02, /* 0xc322658c */
++ra5  = -1.8460508728e+02, /* 0xc3389ae7 */
++ra6  = -8.1287437439e+01, /* 0xc2a2932b */
++ra7  = -9.8143291473e+00, /* 0xc11d077e */
++sa1  =  1.9651271820e+01, /* 0x419d35ce */
++sa2  =  1.3765776062e+02, /* 0x4309a863 */
++sa3  =  4.3456588745e+02, /* 0x43d9486f */
++sa4  =  6.4538726807e+02, /* 0x442158c9 */
++sa5  =  4.2900814819e+02, /* 0x43d6810b */
++sa6  =  1.0863500214e+02, /* 0x42d9451f */
++sa7  =  6.5702495575e+00, /* 0x40d23f7c */
++sa8  = -6.0424413532e-02, /* 0xbd777f97 */
++/*
++ * Coefficients for approximation to  erfc in [1/.35,28]
++ */
++rb0  = -9.8649431020e-03, /* 0xbc21a092 */
++rb1  = -7.9928326607e-01, /* 0xbf4c9dd4 */
++rb2  = -1.7757955551e+01, /* 0xc18e104b */
++rb3  = -1.6063638306e+02, /* 0xc320a2ea */
++rb4  = -6.3756646729e+02, /* 0xc41f6441 */
++rb5  = -1.0250950928e+03, /* 0xc480230b */
++rb6  = -4.8351919556e+02, /* 0xc3f1c275 */
++sb1  =  3.0338060379e+01, /* 0x41f2b459 */
++sb2  =  3.2579251099e+02, /* 0x43a2e571 */
++sb3  =  1.5367296143e+03, /* 0x44c01759 */
++sb4  =  3.1998581543e+03, /* 0x4547fdbb */
++sb5  =  2.5530502930e+03, /* 0x451f90ce */
++sb6  =  4.7452853394e+02, /* 0x43ed43a7 */
++sb7  = -2.2440952301e+01; /* 0xc1b38712 */
++
++	int hx,ix,i;
++	float R,S,P,Q,s,y,z,r;
++	GEN_OCL_GET_FLOAT_WORD(hx,x);
++	ix = hx&0x7fffffff;
++	if(ix>=0x7f800000) {		/* erf(nan)=nan */
++	    i = ((unsigned int)hx>>31)<<1;
++	    return (float)(1-i)+one/x;	/* erf(+-inf)=+-1 */
++	}
++
++	if(ix < 0x3f580000) {		/* |x|<0.84375 */
++	    if(ix < 0x31800000) { 	/* |x|<2**-28 */
++	        if (ix < 0x04000000)
++		    /*avoid underflow */
++		    return (float)0.125*((float)8.0*x+efx8*x);
++		return x + efx*x;
++	    }
++	    z = x*x;
++	    r = pp0+z*(pp1+z*(pp2+z*(pp3+z*pp4)));
++	    s = one+z*(qq1+z*(qq2+z*(qq3+z*(qq4+z*qq5))));
++	    y = r/s;
++	    return x + x*y;
++	}
++	if(ix < 0x3fa00000) {		/* 0.84375 <= |x| < 1.25 */
++	    s = __gen_ocl_internal_fabs(x)-one;
++	    P = pa0+s*(pa1+s*(pa2+s*(pa3+s*(pa4+s*(pa5+s*pa6)))));
++	    Q = one+s*(qa1+s*(qa2+s*(qa3+s*(qa4+s*(qa5+s*qa6)))));
++	    if(hx>=0) return erx + P/Q; else return -erx - P/Q;
++	}
++	if (ix >= 0x40c00000) {		/* inf>|x|>=6 */
++	    if(hx>=0) return one-tiny; else return tiny-one;
++	}
++	x = __gen_ocl_internal_fabs(x);
++    s = one/(x*x);
++	if(ix< 0x4036DB6E) {	/* |x| < 1/0.35 */
++	    R=ra0+s*(ra1+s*(ra2+s*(ra3+s*(ra4+s*(
++				ra5+s*(ra6+s*ra7))))));
++	    S=one+s*(sa1+s*(sa2+s*(sa3+s*(sa4+s*(
++				sa5+s*(sa6+s*(sa7+s*sa8)))))));
++	} else {	/* |x| >= 1/0.35 */
++	    R=rb0+s*(rb1+s*(rb2+s*(rb3+s*(rb4+s*(
++				rb5+s*rb6)))));
++	    S=one+s*(sb1+s*(sb2+s*(sb3+s*(sb4+s*(
++				sb5+s*(sb6+s*sb7))))));
++	}
++	GEN_OCL_GET_FLOAT_WORD(ix,x);
++	GEN_OCL_SET_FLOAT_WORD(z,ix&0xfffff000);
++	r  =  __gen_ocl_internal_exp(-z*z-(float)0.5625)*__gen_ocl_internal_exp((z-x)*(z+x)+R/S);
++	if(hx>=0) return one-r/x; else return  r/x-one;
++}
++INLINE_OVERLOADABLE float __gen_ocl_internal_erfc(float x) {
++/*...*/
++const float
++tiny = 1.0e-30,
++half_val=  5.0000000000e-01, /* 0x3F000000 */
++one =  1.0000000000e+00, /* 0x3F800000 */
++two =  2.0000000000e+00, /* 0x40000000 */
++	/* c = (subfloat)0.84506291151 */
++erx =  8.4506291151e-01, /* 0x3f58560b */
++/*
++ * Coefficients for approximation to  erf on [0,0.84375]
++ */
++efx =  1.2837916613e-01, /* 0x3e0375d4 */
++efx8=  1.0270333290e+00, /* 0x3f8375d4 */
++pp0  =  1.2837916613e-01, /* 0x3e0375d4 */
++pp1  = -3.2504209876e-01, /* 0xbea66beb */
++pp2  = -2.8481749818e-02, /* 0xbce9528f */
++pp3  = -5.7702702470e-03, /* 0xbbbd1489 */
++pp4  = -2.3763017452e-05, /* 0xb7c756b1 */
++qq1  =  3.9791721106e-01, /* 0x3ecbbbce */
++qq2  =  6.5022252500e-02, /* 0x3d852a63 */
++qq3  =  5.0813062117e-03, /* 0x3ba68116 */
++qq4  =  1.3249473704e-04, /* 0x390aee49 */
++qq5  = -3.9602282413e-06, /* 0xb684e21a */
++/*
++ * Coefficients for approximation to  erf  in [0.84375,1.25]
++ */
++pa0  = -2.3621185683e-03, /* 0xbb1acdc6 */
++pa1  =  4.1485610604e-01, /* 0x3ed46805 */
++pa2  = -3.7220788002e-01, /* 0xbebe9208 */
++pa3  =  3.1834661961e-01, /* 0x3ea2fe54 */
++pa4  = -1.1089469492e-01, /* 0xbde31cc2 */
++pa5  =  3.5478305072e-02, /* 0x3d1151b3 */
++pa6  = -2.1663755178e-03, /* 0xbb0df9c0 */
++qa1  =  1.0642088205e-01, /* 0x3dd9f331 */
++qa2  =  5.4039794207e-01, /* 0x3f0a5785 */
++qa3  =  7.1828655899e-02, /* 0x3d931ae7 */
++qa4  =  1.2617121637e-01, /* 0x3e013307 */
++qa5  =  1.3637083583e-02, /* 0x3c5f6e13 */
++qa6  =  1.1984500103e-02, /* 0x3c445aa3 */
++ /*
++ * Coefficients for approximation to  erfc in [1.25,1/0.35]
++ */ra0  = -9.8649440333e-03, /* 0xbc21a093 */
++ra1  = -6.9385856390e-01, /* 0xbf31a0b7 */
++ra2  = -1.0558626175e+01, /* 0xc128f022 */
++ra3  = -6.2375331879e+01, /* 0xc2798057 */
++ra4  = -1.6239666748e+02, /* 0xc322658c */
++ra5  = -1.8460508728e+02, /* 0xc3389ae7 */
++ra6  = -8.1287437439e+01, /* 0xc2a2932b */
++ra7  = -9.8143291473e+00, /* 0xc11d077e */
++sa1  =  1.9651271820e+01, /* 0x419d35ce */
++sa2  =  1.3765776062e+02, /* 0x4309a863 */
++sa3  =  4.3456588745e+02, /* 0x43d9486f */
++sa4  =  6.4538726807e+02, /* 0x442158c9 */
++sa5  =  4.2900814819e+02, /* 0x43d6810b */
++sa6  =  1.0863500214e+02, /* 0x42d9451f */
++sa7  =  6.5702495575e+00, /* 0x40d23f7c */
++sa8  = -6.0424413532e-02, /* 0xbd777f97 */
++/*
++ * Coefficients for approximation to  erfc in [1/.35,28]
++ */
++rb0  = -9.8649431020e-03, /* 0xbc21a092 */
++rb1  = -7.9928326607e-01, /* 0xbf4c9dd4 */
++rb2  = -1.7757955551e+01, /* 0xc18e104b */
++rb3  = -1.6063638306e+02, /* 0xc320a2ea */
++rb4  = -6.3756646729e+02, /* 0xc41f6441 */
++rb5  = -1.0250950928e+03, /* 0xc480230b */
++rb6  = -4.8351919556e+02, /* 0xc3f1c275 */
++sb1  =  3.0338060379e+01, /* 0x41f2b459 */
++sb2  =  3.2579251099e+02, /* 0x43a2e571 */
++sb3  =  1.5367296143e+03, /* 0x44c01759 */
++sb4  =  3.1998581543e+03, /* 0x4547fdbb */
++sb5  =  2.5530502930e+03, /* 0x451f90ce */
++sb6  =  4.7452853394e+02, /* 0x43ed43a7 */
++sb7  = -2.2440952301e+01; /* 0xc1b38712 */
++	int hx,ix;
++	float R,S,P,Q,s,y,z,r;
++	GEN_OCL_GET_FLOAT_WORD(hx,x);
++	ix = hx&0x7fffffff;
++	if(ix>=0x7f800000) {			/* erfc(nan)=nan */
++						/* erfc(+-inf)=0,2 */
++	    return (float)(((unsigned int)hx>>31)<<1)+one/x;
++	}
++
++	if(ix < 0x3f580000) {		/* |x|<0.84375 */
++	    if(ix < 0x23800000)  	/* |x|<2**-56 */
++		return one-x;
++	    z = x*x;
++	    r = pp0+z*(pp1+z*(pp2+z*(pp3+z*pp4)));
++	    s = one+z*(qq1+z*(qq2+z*(qq3+z*(qq4+z*qq5))));
++	    y = r/s;
++	    if(hx < 0x3e800000) {  	/* x<1/4 */
++		return one-(x+x*y);
++	    } else {
++		r = x*y;
++		r += (x-half_val);
++	        return half_val - r ;
++	    }
++	}
++	if(ix < 0x3fa00000) {		/* 0.84375 <= |x| < 1.25 */
++	    s = __gen_ocl_internal_fabs(x)-one;
++	    P = pa0+s*(pa1+s*(pa2+s*(pa3+s*(pa4+s*(pa5+s*pa6)))));
++	    Q = one+s*(qa1+s*(qa2+s*(qa3+s*(qa4+s*(qa5+s*qa6)))));
++	    if(hx>=0) {
++	        z  = one-erx; return z - P/Q;
++	    } else {
++		z = erx+P/Q; return one+z;
++	    }
++	}
++	if (ix < 0x41e00000) {		/* |x|<28 */
++	    x = __gen_ocl_internal_fabs(x);
++        s = one/(x*x);
++	    if(ix< 0x4036DB6D) {	/* |x| < 1/.35 ~ 2.857143*/
++	        R=ra0+s*(ra1+s*(ra2+s*(ra3+s*(ra4+s*(
++				ra5+s*(ra6+s*ra7))))));
++	        S=one+s*(sa1+s*(sa2+s*(sa3+s*(sa4+s*(
++				sa5+s*(sa6+s*(sa7+s*sa8)))))));
++	    } else {			/* |x| >= 1/.35 ~ 2.857143 */
++		if(hx<0&&ix>=0x40c00000) return two-tiny;/* x < -6 */
++	        R=rb0+s*(rb1+s*(rb2+s*(rb3+s*(rb4+s*(
++				rb5+s*rb6)))));
++	        S=one+s*(sb1+s*(sb2+s*(sb3+s*(sb4+s*(
++				sb5+s*(sb6+s*sb7))))));
++	    }
++	    GEN_OCL_GET_FLOAT_WORD(ix,x);
++	    GEN_OCL_SET_FLOAT_WORD(z,ix&0xffffe000);
++	    r  =  __gen_ocl_internal_exp(-z*z-(float)0.5625)*
++			__gen_ocl_internal_exp((z-x)*(z+x)+R/S);
++	    if(hx>0) {
++		float ret = r/x;
++		return ret;
++	    } else
++		return two-r/x;
++	} else {
++	    if(hx>0) {
++		return tiny*tiny;
++	    } else
++		return two-tiny;
++	}
++}
++
+ INLINE_OVERLOADABLE float __gen_ocl_internal_fmod (float x, float y) {
+   //return x-y*__gen_ocl_rndz(x/y);
+   float one = 1.0;
+@@ -3190,7 +3190,6 @@ INLINE_OVERLOADABLE float __gen_ocl_internal_exp10(float x){
+ #define atan2pi __gen_ocl_internal_atan2pi
+ #define atanpi __gen_ocl_internal_atanpi
+ #define atanh __gen_ocl_internal_atanh
+-#define pow powr
+ #define cbrt __gen_ocl_internal_cbrt
+ #define rint __gen_ocl_internal_rint
+ #define copysign __gen_ocl_internal_copysign
+@@ -3729,11 +3728,25 @@ INLINE_OVERLOADABLE float remquo(float x, float y, private int *quo) { BODY; }
+ #undef BODY
+ INLINE_OVERLOADABLE float native_divide(float x, float y) { return x/y; }
+ INLINE_OVERLOADABLE float pown(float x, int n) {
+-  if (x == 0 && n == 0)
+-    return 1;
++  if (x == 0.f && n == 0)
++    return 1.f;
++  if (x < 0.f && (n&1) )
++    return -powr(-x, n);
+   return powr(x, n);
+ }
+ 
++INLINE_OVERLOADABLE float pow(float x, float y) {
++  int n;
++  if (x == 0.f && y == 0.f)
++    return 1.f;
++  if (x >= 0.f)
++    return powr(x, y);
++  n = y;
++  if ((float)n == y)//is exact integer
++    return pown(x, n);
++  return NAN;
++}
++
+ INLINE_OVERLOADABLE float internal_rootn(float x, int n, const bool isFastpath)
+ {
+   float ax,re;
+diff --git a/utests/utest_math_gen.py b/utests/utest_math_gen.py
+index 30a9b24..69b42a1 100755
+--- a/utests/utest_math_gen.py
++++ b/utests/utest_math_gen.py
+@@ -217,16 +217,16 @@ static float atanpi(float x){
+   cospiUtests = func('cospi','cospi',[cospi_input_type],cospi_output_type,[cospi_input_values],'2 * FLT_ULP',cospi_cpu_func)
+   
+ #  ##### gentype erf(gentype)
+-#  erf_input_values = base_input_values
+-#  erf_input_type = ['float','float2','float4','float8','float16']
+-#  erf_output_type = ['float','float2','float4','float8','float16']
+-#  erfUtests = func('erf','erf',[erf_input_type],erf_output_type,[erf_input_values],'16 * FLT_ULP')
++  erf_input_values = base_input_values
++  erf_input_type = ['float','float2','float4','float8','float16']
++  erf_output_type = ['float','float2','float4','float8','float16']
++  erfUtests = func('erf','erf',[erf_input_type],erf_output_type,[erf_input_values],'16 * FLT_ULP')
+ 
+ #  ##### gentype erfc(gentype)
+-#  erfc_input_values = base_input_values
+-#  erfc_input_type = ['float','float2','float4','float8','float16']
+-#  erfc_output_type = ['float','float2','float4','float8','float16']
+-#  erfcUtests = func('erfc','erfc',[erfc_input_type],erfc_output_type,[erfc_input_values],'16 * FLT_ULP')
++  erfc_input_values = base_input_values
++  erfc_input_type = ['float','float2','float4','float8','float16']
++  erfc_output_type = ['float','float2','float4','float8','float16']
++  erfcUtests = func('erfc','erfc',[erfc_input_type],erfc_output_type,[erfc_input_values],'16 * FLT_ULP')
+   
+   ##### gentype exp(gentype x)
+   exp_input_values = base_input_values
+diff --git a/utests/builtin_pow.cpp b/utests/builtin_pow.cpp
+index 8ed17ed..93863a5 100644
+--- a/utests/builtin_pow.cpp
++++ b/utests/builtin_pow.cpp
+@@ -1,6 +1,7 @@
+ #include "utest_helper.hpp"
+ #include <cmath>
+ #include <algorithm>
++#include <string.h>
+ 
+ #define udebug 1
+ #define printf_c(...) \
+@@ -16,12 +17,12 @@ const int count_input = count_input_ori * count_input_ori;
+ 
+ float input_data1[count_input];
+ float input_data2[count_input];
+-const int max_function = 1;
++const int max_function = 2; // builtin_pow.cl has 2 outputs: pow(src1,src2) and src1
+ 
+ static void cpu_compiler_math(const float *src1, const float *src2, float *dst)
+ {
+   dst[0] = powf(src1[0], src2[0]);
+-//  dst[1] = src1[0];
++  dst[1] = src1[0];
+ }
+ 
+ static void builtin_pow(void)
+@@ -38,6 +39,11 @@ static void builtin_pow(void)
+       input_data2[i*count_input_ori+k] = ori_data[k];
+     }
+ 
++  const char* env_strict = getenv("OCL_STRICT_CONFORMANCE");
++  float ULPSIZE_FACTOR = 1.0;
++  if (env_strict == NULL || strcmp(env_strict, "0") == 0)
++    ULPSIZE_FACTOR = 10000.;
++
+   OCL_CREATE_KERNEL("builtin_pow");
+ 
+   OCL_CREATE_BUFFER(buf[0], CL_MEM_READ_WRITE, count_input * max_function * sizeof(float), NULL);
+@@ -71,7 +77,7 @@ static void builtin_pow(void)
+ #if udebug
+       if ( (isinf(cpu_data[index_cur]) && !isinf(gpu_data[index_cur])) ||
+            (isnan(cpu_data[index_cur]) && !isnan(gpu_data[index_cur])) ||
+-           (fabs(gpu_data[index_cur] - cpu_data[index_cur]) > 1e-5f)   )
++           (fabs(gpu_data[index_cur] - cpu_data[index_cur]) > cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR)   )
+       {
+         printf_c("%d/%d: x:%f, y:%f -> gpu:%f  cpu:%f\n", k, i, input_data1[k], input_data2[k], gpu_data[index_cur], cpu_data[index_cur]);
+       }
+@@ -84,12 +90,12 @@ static void builtin_pow(void)
+        OCL_ASSERT(isnan(gpu_data[index_cur]));
+      else
+      {
+-       OCL_ASSERT(fabs(gpu_data[index_cur] - cpu_data[index_cur]) < 1e-3f);
++       OCL_ASSERT(fabs(gpu_data[index_cur] - cpu_data[index_cur]) < cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR);
+      }
+ #endif
+     }
+   }
+   OCL_ASSERT(status == 0);
+ }
+ 
+-MAKE_UTEST_FROM_FUNCTION_WITH_ISSUE(builtin_pow)
++MAKE_UTEST_FROM_FUNCTION(builtin_pow)
+diff --git a/utests/builtin_tgamma.cpp b/utests/builtin_tgamma.cpp
+index 4c824d0..16dac97 100644
+--- a/utests/builtin_tgamma.cpp
++++ b/utests/builtin_tgamma.cpp
+@@ -1,5 +1,6 @@
+ #include <cmath>
+ #include "utest_helper.hpp"
++#include <string.h>
+ 
+ void builtin_tgamma(void)
+ {
+@@ -14,6 +15,10 @@ void builtin_tgamma(void)
+   OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
+   globals[0] = n;
+   locals[0] = 16;
++  const char* env_strict = getenv("OCL_STRICT_CONFORMANCE");
++  float ULPSIZE_FACTOR = 1.0;
++  if (env_strict == NULL || strcmp(env_strict, "0") == 0)
++    ULPSIZE_FACTOR = 10000.;
+ 
+   for (int j = 0; j < 1024; j ++) {
+     OCL_MAP_BUFFER(0);
+@@ -27,10 +32,10 @@ void builtin_tgamma(void)
+     OCL_MAP_BUFFER(1);
+     float *dst = (float*)buf_data[1];
+     for (int i = 0; i < n; ++i) {
+-      float cpu = gammaf(src[i]);
++      float cpu = tgammaf(src[i]);
+       if (isinf(cpu)) {
+         OCL_ASSERT(isinf(dst[i]));
+-      } else if (fabsf(cpu - dst[i]) >= 1e-3) {
++      } else if (fabsf(cpu - dst[i]) >= cl_FLT_ULP(cpu) * ULPSIZE_FACTOR) {
+         printf("%f %f %f\n", src[i], cpu, dst[i]);
+         OCL_ASSERT(0);
+       }
+

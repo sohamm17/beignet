@@ -1,5 +1,6 @@
 beignet (0.9.3~dfsg-2) UNRELEASED; urgency=medium
 
+  * Fix tgamma, pow, pown, erf, erfc (Closes: #768090)
   * Re-enable GBE_DEBUG (lost when debhelper switched to 
     None build type)
   * Run tests (as non-fatal as they will fail on unsupported
