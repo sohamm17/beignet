@@ -1,0 +1,234 @@
+Description: Enable extra output from tests
+
+Turn on udebug so tests print their full output, and mark failures
+by "failed:" instead of invisible-in-logs colour.
+
+For convenience, turn the test setup script (utests/setenv.sh) into a
+test running script (it isn't included in the final package, so
+does not need to stay compatible).
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+
+--- beignet-0.9.3~dfsg.orig/utests/builtin_acos_asin.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_acos_asin.cpp
+@@ -2,12 +2,12 @@
+ #include <cmath>
+ #include <algorithm>
+ 
+-#define udebug 0
++#define udebug 1
+ #define printf_c(...) \
+ {\
+-  printf("\033[1m\033[40;31m");\
++  printf("failed:");\
+   printf( __VA_ARGS__ );\
+-  printf("\033[0m");\
++  status = 1;\
+ }
+ 
+ const float input_data[] = {-30, -1, -0.92, -0.5, -0.09, 0, 0.09, 0.5, 0.92, 1, 30};
+@@ -29,6 +29,7 @@ static void builtin_acos_asin(void)
+ {
+   // Setup kernel and buffers
+   int k, i, index_cur;
++  int status = 0;
+   float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
+ 
+   OCL_CREATE_KERNEL("builtin_acos_asin");
+@@ -82,6 +83,7 @@ static void builtin_acos_asin(void)
+ #endif
+     }
+   }
++  OCL_ASSERT(status == 0);
+ }
+ 
+ MAKE_UTEST_FROM_FUNCTION(builtin_acos_asin)
+--- beignet-0.9.3~dfsg.orig/utests/builtin_exp.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_exp.cpp
+@@ -2,7 +2,7 @@
+ #include <cmath>
+ #include <algorithm>
+ 
+-#define udebug 0
++#define udebug 1
+ 
+ #define FLT_MAX 0x1.fffffep127f
+ #define FLT_MIN 0x1.0p-126f
+@@ -10,9 +10,9 @@
+ 
+ #define printf_c(...) \
+ {\
+-  printf("\033[1m\033[40;31m");\
++  printf("failed:");\
+   printf( __VA_ARGS__ );\
+-  printf("\033[0m");\
++  status = 1;\
+ }
+ 
+ const float input_data[] = {FLT_MAX, -FLT_MAX, FLT_MIN, -FLT_MIN, 80, -80, 3.14, -3.14, -0.5, 0.5, 1, -1, 0.0 };
+@@ -34,6 +34,7 @@ static void builtin_exp(void)
+ {
+   // Setup kernel and buffers
+   int k, i, index_cur;
++  int status = 0;
+   float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
+   float diff;
+   char log[256] = {0};
+@@ -72,19 +73,19 @@ static void builtin_exp(void)
+ 
+ #if udebug
+       if (isinf(cpu_data[index_cur]) && isinf(gpu_data[index_cur])){
+-        printf(log);
++        printf("%s",log);
+       }
+       else if (isnan(cpu_data[index_cur]) && isnan(gpu_data[index_cur])){
+-        printf(log);
++        printf("%s",log);
+       }
+       else if( diff / cpu_data[index_cur] < 3 * FLT_ULP \
+         && ( gpu_data[index_cur] > FLT_ULP  || cpu_data[index_cur] > FLT_ULP )){
+-        printf(log);
++        printf("%s",log);
+       }
+       else if ( gpu_data[index_cur] < FLT_ULP && gpu_data[index_cur] < FLT_ULP)
+-        printf(log);
++        printf("%s",log);
+       else
+-        printf_c(log);
++        printf_c("%s",log);
+ #else
+       if (isinf(cpu_data[index_cur]))
+         OCL_ASSERTM(isinf(gpu_data[index_cur]), log);
+@@ -97,6 +98,7 @@ static void builtin_exp(void)
+ #endif
+     }
+   }
++  OCL_ASSERT(status == 0);
+ }
+ 
+ MAKE_UTEST_FROM_FUNCTION(builtin_exp)
+--- beignet-0.9.3~dfsg.orig/utests/builtin_global_id.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_global_id.cpp
+@@ -22,7 +22,7 @@ dimension:3
+  9 10 11   21 22 23   33 34 35   45 46 47   57 58 59
+ */
+ 
+-#define udebug 0
++#define udebug 1
+ #include "utest_helper.hpp"
+ static void builtin_global_id(void)
+ {
+--- beignet-0.9.3~dfsg.orig/utests/builtin_local_id.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_local_id.cpp
+@@ -26,7 +26,7 @@ dimension:3
+ 429 430 431 432 433 434 ... 571 572 573 574 575
+ */
+ 
+-#define udebug 0
++#define udebug 1
+ #include "utest_helper.hpp"
+ static void builtin_local_id(void)
+ {
+--- beignet-0.9.3~dfsg.orig/utests/builtin_local_size.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_local_size.cpp
+@@ -28,7 +28,7 @@ get_local_size(4) = 1 (dimension:3)
+ 
+ */
+ #include "utest_helper.hpp"
+-#define udebug 0
++#define udebug 1
+ 
+ static void builtin_local_size(void)
+ {
+--- beignet-0.9.3~dfsg.orig/utests/builtin_num_groups.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_num_groups.cpp
+@@ -25,7 +25,7 @@ get_num_groups(2) = 3 (dimension:3)
+ get_num_groups(3) = 1 (dimension:3)
+ */
+ 
+-#define udebug 0
++#define udebug 1
+ #include "utest_helper.hpp"
+ static void builtin_num_groups(void)
+ {
+--- beignet-0.9.3~dfsg.orig/utests/builtin_pow.cpp
++++ beignet-0.9.3~dfsg/utests/builtin_pow.cpp
+@@ -2,12 +2,12 @@
+ #include <cmath>
+ #include <algorithm>
+ 
+-#define udebug 0
++#define udebug 1
+ #define printf_c(...) \
+ {\
+-  printf("\033[1m\033[40;31m");\
++  printf("failed:");\
+   printf( __VA_ARGS__ );\
+-  printf("\033[0m");\
++  status = 1;\
+ }
+ const float ori_data[] = {-20.5, -1, -0.9, -0.01, 0, 0.01, 0.9, 1.0, 20.5};
+ const int count_input_ori = sizeof(ori_data) / sizeof(ori_data[0]);
+@@ -27,6 +27,7 @@ static void builtin_pow(void)
+ {
+   // Setup kernel and buffers
+   int k, i, index_cur;
++  int status = 0;
+   float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
+ 
+   for(i=0; i<count_input_ori;i++)
+@@ -87,6 +88,7 @@ static void builtin_pow(void)
+ #endif
+     }
+   }
++  OCL_ASSERT(status == 0);
+ }
+ 
+ MAKE_UTEST_FROM_FUNCTION_WITH_ISSUE(builtin_pow)
+--- beignet-0.9.3~dfsg.orig/utests/setenv.sh.in
++++ beignet-0.9.3~dfsg/utests/setenv.sh.in
+@@ -5,3 +5,6 @@ export OCL_PCH_PATH=@LOCAL_PCH_OBJECT_DI
+ export OCL_KERNEL_PATH=@CMAKE_CURRENT_SOURCE_DIR@/../kernels
+ export OCL_GBE_PATH=@LOCAL_GBE_OBJECT_DIR@
+ export OCL_INTERP_PATH=@LOCAL_INTERP_OBJECT_DIR@
++obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
++export OCL_STRICT_CONFORMANCE=1
++obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
+--- beignet-0.9.3~dfsg.orig/utests/utest_generator.py
++++ beignet-0.9.3~dfsg/utests/utest_generator.py
+@@ -73,6 +73,7 @@ def udebug(ulpSize,returnType):
+       }
+ #endif
+   }
++  OCL_ASSERTM(status == 0, log);
+ }\n'''%(returnType,\
+         ulpUnit(ulpSize),ulpNum(ulpSize),\
+         ulpNum(ulpSize), ulpNum(ulpSize),\
+@@ -139,16 +140,16 @@ which can print more values and informat
+ #include <algorithm>
+ #include <string.h>
+ 
+-#define udebug 0
++#define udebug 1
+ #define FLT_MAX 0x1.fffffep127f
+ #define FLT_MIN 0x1.0p-126f
+ #define INT_ULP 0
+ 
+ #define printf_c(...) \\
+ {\\
+-  printf("\\033[1m\\033[40;31m");\\
++  printf("failed:");\\
+   printf( __VA_ARGS__ );\\
+-  printf("\\033[0m");\\
++  status = 1;\\
+ }
+ '''
+     #########Execute class itself
+@@ -248,6 +249,7 @@ which can print more values and informat
+ static void %s_%s(void)
+ {
+   int index;
++  int status = 0;
+   %s gpu_data[count_input] = {0}, cpu_data[count_input] = {0}, diff=0.0;
+   char log[1024] = {0};
+ 

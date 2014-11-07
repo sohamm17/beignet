@@ -13,3 +13,6 @@ SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platf
 override_dh_auto_configure:
 	$(RM) $(patsubst %,include/CL/%,$(SUPERFLUOUS))
 	dh_auto_configure --buildsystem cmake
+override_dh_auto_test:
+	chmod +x obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/setenv.sh obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run
+	obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/setenv.sh || true

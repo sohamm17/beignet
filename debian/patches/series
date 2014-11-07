@@ -7,3 +7,4 @@ Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
 Fix-build-failure.patch
 Skip-deleted-tests.patch
+Enable-test-debug.patch

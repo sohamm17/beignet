@@ -2,6 +2,8 @@ beignet (0.9.3~dfsg-2) UNRELEASED; urgency=medium
 
   * Re-enable GBE_DEBUG (lost when debhelper switched to 
     None build type)
+  * Run tests (as non-fatal as they will fail on unsupported
+    hardware) with extra debug output
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 03 Nov 2014 22:07:05 +0000
 
