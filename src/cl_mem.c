@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define FIELD_SIZE(CASE,TYPE)               \
   case JOIN(CL_,CASE):                      \
@@ -223,6 +224,7 @@ cl_mem_allocate(enum cl_mem_type type,
                 cl_mem_flags flags,
                 size_t sz,
                 cl_int is_tiled,
+                void *host_ptr,
                 cl_int *errcode)
 {
   cl_buffer_mgr bufmgr = NULL;
@@ -251,6 +253,7 @@ cl_mem_allocate(enum cl_mem_type type,
   mem->ref_n = 1;
   mem->magic = CL_MAGIC_MEM_HEADER;
   mem->flags = flags;
+  mem->is_userptr = 0;
 
   if (sz != 0) {
     /* Pinning will require stricter alignment rules */
@@ -260,7 +263,28 @@ cl_mem_allocate(enum cl_mem_type type,
     /* Allocate space in memory */
     bufmgr = cl_context_get_bufmgr(ctx);
     assert(bufmgr);
+
+#ifdef HAS_USERPTR
+    if (ctx->device->host_unified_memory) {
+      /* currently only cl buf is supported, will add cl image support later */
+      if ((flags & CL_MEM_USE_HOST_PTR) && host_ptr != NULL) {
+        /* userptr not support tiling */
+        if (!is_tiled) {
+          int page_size = getpagesize();
+          if ((((unsigned long)host_ptr | sz) & (page_size - 1)) == 0) {
+            mem->is_userptr = 1;
+            mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", host_ptr, sz, 0);
+          }
+        }
+      }
+    }
+
+    if (!mem->is_userptr)
+      mem->bo = cl_buffer_alloc(bufmgr, "CL memory object", sz, alignment);
+#else
     mem->bo = cl_buffer_alloc(bufmgr, "CL memory object", sz, alignment);
+#endif
+
     if (UNLIKELY(mem->bo == NULL)) {
       err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
       goto error;
@@ -387,12 +411,15 @@ cl_mem_new_buffer(cl_context ctx,
   sz = ALIGN(sz, 4);
 
   /* Create the buffer in video memory */
-  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, flags, sz, CL_FALSE, &err);
+  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, flags, sz, CL_FALSE, data, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
   /* Copy the data if required */
-  if (flags & CL_MEM_COPY_HOST_PTR || flags & CL_MEM_USE_HOST_PTR)
+  if (flags & CL_MEM_COPY_HOST_PTR)
+    cl_buffer_subdata(mem->bo, 0, sz, data);
+
+  if ((flags & CL_MEM_USE_HOST_PTR) && !mem->is_userptr)
     cl_buffer_subdata(mem->bo, 0, sz, data);
 
   if (flags & CL_MEM_USE_HOST_PTR || flags & CL_MEM_COPY_HOST_PTR)
@@ -571,8 +598,8 @@ void
 cl_mem_copy_image_to_image(const size_t *dst_origin,const size_t *src_origin, const size_t *region,
                            const struct _cl_mem_image *dst_image, const struct _cl_mem_image *src_image)
 {
-  char* dst= cl_mem_map_auto((cl_mem)dst_image);
-  char* src= cl_mem_map_auto((cl_mem)src_image);
+  char* dst= cl_mem_map_auto((cl_mem)dst_image, 1);
+  char* src= cl_mem_map_auto((cl_mem)src_image, 0);
   size_t dst_offset = dst_image->bpp * dst_origin[0] + dst_image->row_pitch * dst_origin[1] + dst_image->slice_pitch * dst_origin[2];
   size_t src_offset = src_image->bpp * src_origin[0] + src_image->row_pitch * src_origin[1] + src_image->slice_pitch * src_origin[2];
   dst= (char*)dst+ dst_offset;
@@ -601,7 +628,7 @@ cl_mem_copy_image(struct _cl_mem_image *image,
 		  size_t slice_pitch,
 		  void* host_ptr)
 {
-  char* dst_ptr = cl_mem_map_auto((cl_mem)image);
+  char* dst_ptr = cl_mem_map_auto((cl_mem)image, 1);
   size_t origin[3] = {0, 0, 0};
   size_t region[3] = {image->w, image->h, image->depth};
 
@@ -609,13 +636,6 @@ cl_mem_copy_image(struct _cl_mem_image *image,
                            host_ptr, row_pitch, slice_pitch, image, CL_FALSE, CL_FALSE); //offset is 0
   cl_mem_unmap_auto((cl_mem)image);
 }
-
-static const uint32_t tile_sz = 4096; /* 4KB per tile */
-static const uint32_t tilex_w = 512;  /* tileX width in bytes */
-static const uint32_t tilex_h = 8;    /* tileX height in number of rows */
-static const uint32_t tiley_w = 128;  /* tileY width in bytes */
-static const uint32_t tiley_h = 32;   /* tileY height in number of rows */
-static const uint32_t valign = 2;     /* vertical alignment is 2. */
 
 cl_image_tiling_t cl_get_default_tiling(void)
 {
@@ -749,13 +769,13 @@ _cl_mem_new_image(cl_context ctx,
   /* Tiling requires to align both pitch and height */
   if (tiling == CL_NO_TILE) {
     aligned_pitch = w * bpp;
-    aligned_h  = ALIGN(h, valign);
+    aligned_h  = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
   } else if (tiling == CL_TILE_X) {
-    aligned_pitch = ALIGN(w * bpp, tilex_w);
-    aligned_h     = ALIGN(h, tilex_h);
+    aligned_pitch = ALIGN(w * bpp, cl_buffer_get_tiling_align(ctx, CL_TILE_X, 0));
+    aligned_h     = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_TILE_X, 1));
   } else if (tiling == CL_TILE_Y) {
-    aligned_pitch = ALIGN(w * bpp, tiley_w);
-    aligned_h     = ALIGN(h, tiley_h);
+    aligned_pitch = ALIGN(w * bpp, cl_buffer_get_tiling_align(ctx, CL_TILE_Y, 0));
+    aligned_h     = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_TILE_Y, 1));
   }
 
   sz = aligned_pitch * aligned_h * depth;
@@ -769,7 +789,7 @@ _cl_mem_new_image(cl_context ctx,
     sz = aligned_pitch * aligned_h * depth;
   }
 
-  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, &err);
+  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
@@ -779,7 +799,7 @@ _cl_mem_new_image(cl_context ctx,
       image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
     aligned_slice_pitch = 0;
   else
-    aligned_slice_pitch = aligned_pitch * ALIGN(h, 2);
+    aligned_slice_pitch = aligned_pitch * ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
 
   cl_mem_image_init(cl_mem_image(mem), w, h, image_type, depth, *fmt,
                     intel_fmt, bpp, aligned_pitch, aligned_slice_pitch, tiling,
@@ -914,8 +934,8 @@ _cl_mem_new_image_from_buffer(cl_context ctx,
                     mem_buffer->base.size / bpp, 0, 0, 0, 0, NULL, errcode_ret);
   if (image == NULL)
     return NULL;
-  void *src = cl_mem_map(buffer);
-  void *dst = cl_mem_map(image);
+  void *src = cl_mem_map(buffer, 0);
+  void *dst = cl_mem_map(image, 1);
   //
   // FIXME, we could use copy buffer to image to do this on GPU latter.
   // currently the copy buffer to image function doesn't support 1D image.
@@ -1414,6 +1434,16 @@ cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
   size_t global_off[] = {0,0,0};
   size_t global_sz[] = {1,1,1};
   size_t local_sz[] = {LOCAL_SZ_0,LOCAL_SZ_1,LOCAL_SZ_1};
+  // the src and dst mem rect is continuous, the copy is degraded to buf copy
+  if((region[0] == dst_row_pitch) && (region[0] == src_row_pitch) &&
+  (region[1] * src_row_pitch == src_slice_pitch) && (region[1] * dst_row_pitch == dst_slice_pitch)){
+    cl_int src_offset = src_origin[2]*src_slice_pitch + src_origin[1]*src_row_pitch + src_origin[0];
+    cl_int dst_offset = dst_origin[2]*dst_slice_pitch + dst_origin[1]*dst_row_pitch + dst_origin[0];
+    cl_int size = region[0]*region[1]*region[2];
+    ret = cl_mem_copy(queue, src_buf, dst_buf,src_offset, dst_offset, size);
+    return ret;
+  }
+
   if(region[1] == 1) local_sz[1] = 1;
   if(region[2] == 1) local_sz[2] = 1;
   global_sz[0] = ((region[0] + local_sz[0] - 1) / local_sz[0]) * local_sz[0];
@@ -1426,18 +1456,33 @@ cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
   assert(src_buf->ctx == dst_buf->ctx);
 
   /* setup the kernel and run. */
-  extern char cl_internal_copy_buf_rect_str[];
-  extern size_t cl_internal_copy_buf_rect_str_size;
-
-  ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_RECT,
-      cl_internal_copy_buf_rect_str, (size_t)cl_internal_copy_buf_rect_str_size, NULL);
+  size_t region0 = region[0];
+  if( (src_offset % 4== 0) && (dst_offset % 4== 0) && (src_row_pitch % 4== 0) && (dst_row_pitch % 4== 0)
+  && (src_slice_pitch % 4== 0) && (dst_slice_pitch % 4== 0) && (region0 % 4 == 0) ){
+    extern char cl_internal_copy_buf_rect_align4_str[];
+    extern size_t cl_internal_copy_buf_rect_align4_str_size;
+    region0 /= 4;
+    src_offset /= 4;
+    dst_offset /= 4;
+    src_row_pitch /= 4;
+    dst_row_pitch /= 4;
+    src_slice_pitch /= 4;
+    dst_slice_pitch /= 4;
+    ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_RECT_ALIGN4,
+    cl_internal_copy_buf_rect_align4_str, (size_t)cl_internal_copy_buf_rect_align4_str_size, NULL);
+  }else{
+    extern char cl_internal_copy_buf_rect_str[];
+    extern size_t cl_internal_copy_buf_rect_str_size;
+    ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_RECT,
+    cl_internal_copy_buf_rect_str, (size_t)cl_internal_copy_buf_rect_str_size, NULL);
+  }
 
   if (!ker)
     return CL_OUT_OF_RESOURCES;
 
   cl_kernel_set_arg(ker, 0, sizeof(cl_mem), &src_buf);
   cl_kernel_set_arg(ker, 1, sizeof(cl_mem), &dst_buf);
-  cl_kernel_set_arg(ker, 2, sizeof(cl_int), &region[0]);
+  cl_kernel_set_arg(ker, 2, sizeof(cl_int), &region0);
   cl_kernel_set_arg(ker, 3, sizeof(cl_int), &region[1]);
   cl_kernel_set_arg(ker, 4, sizeof(cl_int), &region[2]);
   cl_kernel_set_arg(ker, 5, sizeof(cl_int), &src_offset);
@@ -1730,9 +1775,9 @@ cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_me
 
 
 LOCAL void*
-cl_mem_map(cl_mem mem)
+cl_mem_map(cl_mem mem, int write)
 {
-  cl_buffer_map(mem->bo, 1);
+  cl_buffer_map(mem->bo, write);
   assert(cl_buffer_get_virtual(mem->bo));
   return cl_buffer_get_virtual(mem->bo);
 }
@@ -1769,12 +1814,12 @@ cl_mem_unmap_gtt(cl_mem mem)
 }
 
 LOCAL void*
-cl_mem_map_auto(cl_mem mem)
+cl_mem_map_auto(cl_mem mem, int write)
 {
   if (IS_IMAGE(mem) && cl_mem_image(mem)->tiling != CL_NO_TILE)
     return cl_mem_map_gtt(mem);
   else
-    return cl_mem_map(mem);
+    return cl_mem_map(mem, write);
 }
 
 LOCAL cl_int
@@ -1816,7 +1861,7 @@ LOCAL cl_mem cl_mem_new_libva_buffer(cl_context ctx,
   cl_int err = CL_SUCCESS;
   cl_mem mem = NULL;
 
-  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, 0, 0, CL_FALSE, &err);
+  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, 0, 0, CL_FALSE, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
@@ -1857,7 +1902,7 @@ LOCAL cl_mem cl_mem_new_libva_image(cl_context ctx,
     goto error;
   }
 
-  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, 0, 0, 0, &err);
+  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, 0, 0, 0, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS) {
     err = CL_OUT_OF_HOST_MEMORY;
     goto error;

@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -249,6 +249,14 @@ cl_program_create_from_binary(cl_context             ctx,
     program->source_type = FROM_LLVM;
   }
   else if (*program->binary == 0) {
+    program->opaque = interp_program_new_from_binary(program->ctx->device->vendor_id, program->binary, program->binary_sz);
+    if (UNLIKELY(program->opaque == NULL)) {
+      err = CL_INVALID_PROGRAM;
+      goto error;
+    }
+
+    /* Create all the kernels */
+    TRY (cl_program_load_gen_program, program);
     program->binary_type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
   }
 
@@ -739,7 +747,11 @@ cl_program_compile(cl_program            p,
     /* Create all the kernels */
     p->source_type = FROM_LLVM;
     p->binary_type = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
+  }else if(p->source_type == FROM_BINARY){
+    err = CL_INVALID_OPERATION;
+    return err;
   }
+
   p->is_built = 1;
   p->build_status = CL_BUILD_SUCCESS;
   return CL_SUCCESS;

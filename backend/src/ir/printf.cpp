@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -106,8 +106,9 @@ namespace gbe
       if (!vec_i)                                                       \
         pf_str = pf_str + std::string(#conv);                           \
       printf(pf_str.c_str(),                                            \
-             ((target_ty *)((char *)buf_addr + slot.state->out_buf_sizeof_offset * \
-                            global_wk_sz0 * global_wk_sz1 * global_wk_sz2)) \
+             ((target_ty *)((char *)buf_addr + sizeOfSize * global_wk_sz0 * global_wk_sz1 * global_wk_sz2 * n \
+                                              + slot.state->out_buf_sizeof_offset * \
+                                                         global_wk_sz0 * global_wk_sz1 * global_wk_sz2)) \
              [(k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i) * vec_num + vec_i]);\
     } while (0)
 
@@ -124,10 +125,9 @@ namespace gbe
         for (i = 0; i < global_wk_sz0; i++) {
           for (j = 0; j < global_wk_sz1; j++) {
             for (k = 0; k < global_wk_sz2; k++) {
-
-              int flag = ((int *)index_addr)[stmt*global_wk_sz0*global_wk_sz1*global_wk_sz2
-                                             + k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i];
-              if (flag) {
+              int loop_num = ((int *)index_addr)[stmt*global_wk_sz0*global_wk_sz1*global_wk_sz2
+                                                 + k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i];
+              for (int n = 0; n < loop_num; n++) {
                 for (auto &slot : pf) {
                   pf_str = "";
                   int vec_num;
@@ -149,20 +149,35 @@ namespace gbe
                     switch (slot.state->conversion_specifier) {
                       case PRINTF_CONVERSION_D:
                       case PRINTF_CONVERSION_I:
-                        PRINT_SOMETHING(int, d);
+                        if (slot.state->length_modifier == PRINTF_LM_L)
+                          PRINT_SOMETHING(uint64_t, d);
+                        else
+                          PRINT_SOMETHING(int, d);
                         break;
 
                       case PRINTF_CONVERSION_O:
-                        PRINT_SOMETHING(int, o);
+                        if (slot.state->length_modifier == PRINTF_LM_L)
+                          PRINT_SOMETHING(uint64_t, o);
+                        else
+                          PRINT_SOMETHING(int, o);
                         break;
                       case PRINTF_CONVERSION_U:
-                        PRINT_SOMETHING(int, u);
+                        if (slot.state->length_modifier == PRINTF_LM_L)
+                          PRINT_SOMETHING(uint64_t, u);
+                        else
+                          PRINT_SOMETHING(int, u);
                         break;
                       case PRINTF_CONVERSION_X:
-                        PRINT_SOMETHING(int, X);
+                        if (slot.state->length_modifier == PRINTF_LM_L)
+                          PRINT_SOMETHING(uint64_t, X);
+                        else
+                          PRINT_SOMETHING(int, X);
                         break;
                       case PRINTF_CONVERSION_x:
-                        PRINT_SOMETHING(int, x);
+                        if (slot.state->length_modifier == PRINTF_LM_L)
+                          PRINT_SOMETHING(uint64_t, x);
+                        else
+                          PRINT_SOMETHING(int, x);
                         break;
 
                       case PRINTF_CONVERSION_C:
@@ -210,6 +225,7 @@ namespace gbe
 
                   pf_str = "";
                 }
+
               }
             }
           }

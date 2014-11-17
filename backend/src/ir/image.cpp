@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -76,8 +76,7 @@ namespace ir {
       imageInfo->channelOrderSlot = -1;
     }
   }
-
-  const int32_t ImageSet::getInfoOffset(ImageInfoKey key) const
+  int32_t ImageSet::getInfoOffset(ImageInfoKey key) const
   {
     auto it = indexMap.find(key.index);
     if (it == indexMap.end())
@@ -86,7 +85,7 @@ namespace ir {
     return getInfoOffset4Type(imageInfo, key.type);
   }
 
-  const uint32_t ImageSet::getIdx(const Register imageReg) const
+  uint32_t ImageSet::getIdx(const Register imageReg) const
   {
     auto it = regMap.find(imageReg);
     GBE_ASSERT(it != regMap.end());

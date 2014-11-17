@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -80,6 +80,22 @@ typedef enum cl_llccc_cache_control {
   llccc_ec       = 0x2<<1,
   llccc_ucllc    = 0x3<<1
 } cl_llccc_cache_control;
+
+/* Target Cache control options for gen8 */
+typedef enum cl_target_cache_control {
+  tcc_ec_only    = 0x0<<3,
+  tcc_llc_only   = 0x1<<3,
+  tcc_llc_ec     = 0x2<<3,
+  tcc_llc_ec_l3  = 0x3<<3
+} cl_target_cache_control;
+
+/* Memory type LLC/ELLC Cache control options for gen8 */
+typedef enum cl_mtllc_cache_control {
+  mtllc_pte      = 0x0<<5,
+  mtllc_none     = 0x1<<5,
+  mtllc_wt       = 0x2<<5,
+  mtllc_wb       = 0x3<<5
+} cl_mtllc_cache_control;
 
 typedef enum gpu_command_status {
   command_queued    = 3,
@@ -269,13 +285,15 @@ extern cl_gpgpu_walker_cb *cl_gpgpu_walker;
 typedef cl_buffer (cl_buffer_alloc_cb)(cl_buffer_mgr, const char*, size_t, size_t);
 extern cl_buffer_alloc_cb *cl_buffer_alloc;
 
+typedef cl_buffer (cl_buffer_alloc_userptr_cb)(cl_buffer_mgr, const char*, void *, size_t, unsigned long);
+extern cl_buffer_alloc_userptr_cb *cl_buffer_alloc_userptr;
+
 /* Set a buffer's tiling mode */
 typedef cl_buffer (cl_buffer_set_tiling_cb)(cl_buffer, int tiling, size_t stride);
 extern cl_buffer_set_tiling_cb *cl_buffer_set_tiling;
 
 #include "cl_context.h"
 #include "cl_mem.h"
-typedef struct _cl_context *cl_context;
 
 typedef cl_buffer (cl_buffer_alloc_from_texture_cb)(cl_context, unsigned int, int, unsigned int,
                                                     struct _cl_mem_image *gl_image);
@@ -338,12 +356,19 @@ extern cl_buffer_unpin_cb *cl_buffer_unpin;
 typedef int (cl_buffer_subdata_cb)(cl_buffer, unsigned long, unsigned long, const void*);
 extern cl_buffer_subdata_cb *cl_buffer_subdata;
 
+/* Get data from buffer */
+typedef int (cl_buffer_get_subdata_cb)(cl_buffer, unsigned long, unsigned long, void*);
+extern cl_buffer_get_subdata_cb *cl_buffer_get_subdata;
+
 /* Wait for all pending rendering for this buffer to complete */
 typedef int (cl_buffer_wait_rendering_cb) (cl_buffer);
 extern cl_buffer_wait_rendering_cb *cl_buffer_wait_rendering;
 
 typedef int (cl_buffer_get_fd_cb)(cl_buffer, int *fd);
 extern cl_buffer_get_fd_cb *cl_buffer_get_fd;
+
+typedef int (cl_buffer_get_tiling_align_cb)(cl_context ctx, uint32_t tiling_mode, uint32_t dim);
+extern cl_buffer_get_tiling_align_cb *cl_buffer_get_tiling_align;
 
 /* Get the device id */
 typedef int (cl_driver_get_device_id_cb)(void);

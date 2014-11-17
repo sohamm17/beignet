@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -118,8 +118,9 @@ intel_batchbuffer_flush(intel_batchbuffer_t *batch)
 
   *(uint32_t*)batch->ptr = MI_BATCH_BUFFER_END;
   batch->ptr += 4;
-  dri_bo_unmap(batch->buffer);
   used = batch->ptr - batch->map;
+  dri_bo_unmap(batch->buffer);
+  batch->ptr = batch->map = NULL;
 
   if (!is_locked)
     intel_driver_lock_hardware(batch->intel);
@@ -135,8 +136,9 @@ intel_batchbuffer_flush(intel_batchbuffer_t *batch)
   if (!is_locked)
     intel_driver_unlock_hardware(batch->intel);
 
-  // Release the buffer
-  intel_batchbuffer_terminate(batch);
+  // Can't release buffer here. gpgpu only can be delete only when the batch buffer is complete.
+  // Remain the buffer for gpgpu delete check.
+  //intel_batchbuffer_terminate(batch);
 }
 
 LOCAL void 

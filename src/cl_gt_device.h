@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -54,14 +54,17 @@
 .max_samplers = 16,
 .mem_base_addr_align = sizeof(cl_long) * 16 * 8,
 .min_data_type_align_size = sizeof(cl_long) * 16,
-.single_fp_config = 0, /* XXX */
 .double_fp_config = 0,
 .global_mem_cache_type = CL_READ_WRITE_CACHE,
 .global_mem_size = 1024 * 1024 * 1024,
 .max_constant_buffer_size = 512 << 10,
 .max_constant_args = 8,
 .error_correction_support = CL_FALSE,
+#ifdef HAS_USERPTR
+.host_unified_memory = CL_TRUE,
+#else
 .host_unified_memory = CL_FALSE,
+#endif
 .profiling_timer_resolution = 80, /* ns */
 .endian_little = CL_TRUE,
 .available = CL_TRUE,

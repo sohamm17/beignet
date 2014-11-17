@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -29,6 +29,7 @@ LOCAL cl_driver_get_device_id_cb *cl_driver_get_device_id = NULL;
 
 /* Buffer */
 LOCAL cl_buffer_alloc_cb *cl_buffer_alloc = NULL;
+LOCAL cl_buffer_alloc_userptr_cb *cl_buffer_alloc_userptr = NULL;
 LOCAL cl_buffer_set_tiling_cb *cl_buffer_set_tiling = NULL;
 LOCAL cl_buffer_alloc_from_texture_cb *cl_buffer_alloc_from_texture = NULL;
 LOCAL cl_buffer_release_from_texture_cb *cl_buffer_release_from_texture = NULL;
@@ -44,10 +45,12 @@ LOCAL cl_buffer_get_size_cb *cl_buffer_get_size = NULL;
 LOCAL cl_buffer_pin_cb *cl_buffer_pin = NULL;
 LOCAL cl_buffer_unpin_cb *cl_buffer_unpin = NULL;
 LOCAL cl_buffer_subdata_cb *cl_buffer_subdata = NULL;
+LOCAL cl_buffer_get_subdata_cb *cl_buffer_get_subdata = NULL;
 LOCAL cl_buffer_wait_rendering_cb *cl_buffer_wait_rendering = NULL;
 LOCAL cl_buffer_get_buffer_from_libva_cb *cl_buffer_get_buffer_from_libva = NULL;
 LOCAL cl_buffer_get_image_from_libva_cb *cl_buffer_get_image_from_libva = NULL;
 LOCAL cl_buffer_get_fd_cb *cl_buffer_get_fd = NULL;
+LOCAL cl_buffer_get_tiling_align_cb *cl_buffer_get_tiling_align = NULL;
 
 /* cl_khr_gl_sharing */
 LOCAL cl_gl_acquire_texture_cb *cl_gl_acquire_texture = NULL;

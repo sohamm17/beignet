@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -109,7 +109,11 @@ cl_upload_constant_buffer(cl_command_queue queue, cl_kernel ker)
   gbe_program prog = ker->program->opaque;
   const int32_t arg_n = interp_kernel_get_arg_num(ker->opaque);
   size_t global_const_size = interp_program_get_global_constant_size(prog);
-  aligned_size = raw_size = global_const_size;
+  raw_size = global_const_size;
+  // Surface state need 4 byte alignment, and Constant argument's buffer size
+  // have align to 4 byte when alloc, so align global constant size to 4 can
+  // ensure the finally aligned_size align to 4.
+  aligned_size =  ALIGN(raw_size, 4);
   /* Reserve 8 bytes to get rid of 0 address */
   if(global_const_size == 0) aligned_size = 8;
 
@@ -271,6 +275,14 @@ cl_bind_printf(cl_gpgpu gpgpu, cl_kernel ker, void* printf_info, int printf_num,
   value = GBE_CURBE_PRINTF_BUF_POINTER;
   offset = interp_kernel_get_curbe_offset(ker->opaque, value, 0);
   buf_size = interp_get_printf_sizeof_size(printf_info) * global_sz;
+  /* because of the printf may exist in a loop, which loop number can not be gotten by
+     static analysis. So we set the data buffer as big as we can. Out of bound printf
+     info will be discarded. */
+  if (buf_size < 1*1024)
+    buf_size = 1*1024*1024;
+  else
+    buf_size = 4*1024*1024; //at most.
+
   if (offset > 0) {
     if (cl_gpgpu_set_printf_buffer(gpgpu, 1, buf_size, offset, interp_get_printf_buf_bti(printf_info)) != 0)
       return -1;
@@ -309,7 +321,10 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   kernel.use_slm = interp_kernel_use_slm(ker->opaque);
 
   /* Compute the number of HW threads we need */
-  TRY (cl_kernel_work_group_sz, ker, local_wk_sz, 3, &local_sz);
+  if(UNLIKELY(err = cl_kernel_work_group_sz(ker, local_wk_sz, 3, &local_sz) != CL_SUCCESS)) {
+    fprintf(stderr, "Beignet: Work group size exceed Kerne's work group size.\n");
+    return err;
+  }
   kernel.thread_n = thread_n = (local_sz + simd_sz - 1) / simd_sz;
   kernel.curbe_sz = cst_sz;
 
@@ -387,8 +402,7 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   return CL_SUCCESS;
 
 error:
-  fprintf(stderr, "error occured. \n");
-  exit(-1);
+  /* only some command/buffer internal error reach here, so return error code OOR */
   return CL_OUT_OF_RESOURCES;
 }
 

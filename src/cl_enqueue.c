@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -35,19 +35,13 @@ cl_int cl_enqueue_read_buffer(enqueue_data* data)
   cl_mem mem = data->mem_obj;
   assert(mem->type == CL_MEM_BUFFER_TYPE ||
          mem->type == CL_MEM_SUBBUFFER_TYPE);
-  void* src_ptr;
   struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
-
-  if (!(src_ptr = cl_mem_map_auto(data->mem_obj))) {
-    err = CL_MAP_FAILURE;
-    goto error;
-  }
-
-  memcpy(data->ptr, (char*)src_ptr + data->offset + buffer->sub_offset, data->size);
-
-  err = cl_mem_unmap_auto(data->mem_obj);
-
-error:
+  if (!mem->is_userptr) {
+    if (cl_buffer_get_subdata(mem->bo, data->offset + buffer->sub_offset,
+			       data->size, data->ptr) != 0)
+      err = CL_MAP_FAILURE;
+  } else
+    memcpy(data->ptr, (char*)mem->host_ptr + data->offset + buffer->sub_offset, data->size);
   return err;
 }
 
@@ -66,7 +60,7 @@ cl_int cl_enqueue_read_buffer_rect(enqueue_data* data)
          mem->type == CL_MEM_SUBBUFFER_TYPE);
   struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
 
-  if (!(src_ptr = cl_mem_map_auto(mem))) {
+  if (!(src_ptr = cl_mem_map_auto(mem, 0))) {
     err = CL_MAP_FAILURE;
     goto error;
   }
@@ -105,24 +99,13 @@ error:
 
 cl_int cl_enqueue_write_buffer(enqueue_data *data)
 {
-  cl_int err = CL_SUCCESS;
   cl_mem mem = data->mem_obj;
   assert(mem->type == CL_MEM_BUFFER_TYPE ||
          mem->type == CL_MEM_SUBBUFFER_TYPE);
   struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
-  void* dst_ptr;
 
-  if (!(dst_ptr = cl_mem_map_auto(data->mem_obj))) {
-    err = CL_MAP_FAILURE;
-    goto error;
-  }
-
-  memcpy((char*)dst_ptr + data->offset + buffer->sub_offset, data->const_ptr, data->size);
-
-  err = cl_mem_unmap_auto(data->mem_obj);
-
-error:
-  return err;
+  return cl_buffer_subdata(mem->bo, data->offset + buffer->sub_offset,
+			   data->size, data->const_ptr);
 }
 
 cl_int cl_enqueue_write_buffer_rect(enqueue_data *data)
@@ -140,7 +123,7 @@ cl_int cl_enqueue_write_buffer_rect(enqueue_data *data)
          mem->type == CL_MEM_SUBBUFFER_TYPE);
   struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
 
-  if (!(dst_ptr = cl_mem_map_auto(mem))) {
+  if (!(dst_ptr = cl_mem_map_auto(mem, 1))) {
     err = CL_MAP_FAILURE;
     goto error;
   }
@@ -188,7 +171,7 @@ cl_int cl_enqueue_read_image(enqueue_data *data)
   const size_t* origin = data->origin;
   const size_t* region = data->region;
 
-  if (!(src_ptr = cl_mem_map_auto(mem))) {
+  if (!(src_ptr = cl_mem_map_auto(mem, 0))) {
     err = CL_MAP_FAILURE;
     goto error;
   }
@@ -231,7 +214,7 @@ cl_int cl_enqueue_write_image(enqueue_data *data)
   cl_mem mem = data->mem_obj;
   CHECK_IMAGE(mem, image);
 
-  if (!(dst_ptr = cl_mem_map_auto(mem))) {
+  if (!(dst_ptr = cl_mem_map_auto(mem, 1))) {
     err = CL_MAP_FAILURE;
     goto error;
   }
@@ -256,11 +239,15 @@ cl_int cl_enqueue_map_buffer(enqueue_data *data)
          mem->type == CL_MEM_SUBBUFFER_TYPE);
   struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
 
-  if(data->unsync_map == 1)
-    //because using unsync map in clEnqueueMapBuffer, so force use map_gtt here
-    ptr = cl_mem_map_gtt(mem);
-  else
-    ptr = cl_mem_map_auto(mem);
+  if (mem->is_userptr)
+    ptr = mem->host_ptr;
+  else {
+    if(data->unsync_map == 1)
+      //because using unsync map in clEnqueueMapBuffer, so force use map_gtt here
+      ptr = cl_mem_map_gtt(mem);
+    else
+      ptr = cl_mem_map_auto(mem, data->write_map ? 1 : 0);
+  }
 
   if (ptr == NULL) {
     err = CL_MAP_FAILURE;
@@ -268,7 +255,7 @@ cl_int cl_enqueue_map_buffer(enqueue_data *data)
   }
   data->ptr = ptr;
 
-  if(mem->flags & CL_MEM_USE_HOST_PTR) {
+  if((mem->flags & CL_MEM_USE_HOST_PTR) && !mem->is_userptr) {
     assert(mem->host_ptr);
     ptr = (char*)ptr + data->offset + buffer->sub_offset;
     memcpy(mem->host_ptr + data->offset + buffer->sub_offset, ptr, data->size);
@@ -290,7 +277,7 @@ cl_int cl_enqueue_map_image(enqueue_data *data)
     //because using unsync map in clEnqueueMapBuffer, so force use map_gtt here
     ptr = cl_mem_map_gtt(mem);
   else
-    ptr = cl_mem_map_auto(mem);
+    ptr = cl_mem_map_auto(mem, data->write_map ? 1 : 0);
 
   if (ptr == NULL) {
     err = CL_MAP_FAILURE;
@@ -353,7 +340,8 @@ cl_int cl_enqueue_unmap_mem_object(enqueue_data *data)
       assert(mapped_ptr >= memobj->host_ptr &&
         mapped_ptr + mapped_size <= memobj->host_ptr + memobj->size);
       /* Sync the data. */
-      memcpy(v_ptr, mapped_ptr, mapped_size);
+      if (!memobj->is_userptr)
+        memcpy(v_ptr, mapped_ptr, mapped_size);
     } else {
       CHECK_IMAGE(memobj, image);
 
@@ -412,7 +400,7 @@ cl_int cl_enqueue_native_kernel(enqueue_data *data)
       const cl_mem buffer = mem_list[i];
       CHECK_MEM(buffer);
 
-      *((void **)args_mem_loc[i]) = cl_mem_map_auto(buffer);
+      *((void **)args_mem_loc[i]) = cl_mem_map_auto(buffer, 0);
   }
   data->user_func(data->ptr);
 

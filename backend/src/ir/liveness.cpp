@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -41,7 +41,11 @@ namespace ir {
       }
     });
     // Now with iterative analysis, we compute liveout and livein sets
-    this->computeLiveInOut();
+    while (unvisitBlocks.size()) {
+      if (workSet.size() == 0)
+        workSet.insert(--unvisitBlocks.end(), unvisitBlocks.end());
+      this->computeLiveInOut();
+    }
     // extend register (def in loop, use out-of-loop) liveness to the whole loop
     set<Register> extentRegs;
     this->computeExtraLiveInOut(extentRegs);
@@ -79,6 +83,7 @@ namespace ir {
               opCode != ir::OP_MUL_HI &&
               opCode != ir::OP_HADD &&
               opCode != ir::OP_RHADD &&
+              opCode != ir::OP_READ_ARF &&
               opCode != ir::OP_ADDSAT &&
               (dstNum == 1 || insn.getOpcode() != ir::OP_LOAD) &&
               !extentRegs->contains(reg)
@@ -97,6 +102,9 @@ namespace ir {
       this->initInstruction(*info, insn);
     });
     liveness[&bb] = info;
+    unvisitBlocks.insert(info);
+    if(!bb.liveout.empty())
+      info->liveOut.insert(bb.liveout.begin(), bb.liveout.end());
   }
 
   void Liveness::initInstruction(BlockInfo &info, const Instruction &insn) {
@@ -121,12 +129,16 @@ namespace ir {
     while(!workSet.empty()) {
       auto currInfo = *workSet.begin();
       workSet.erase(currInfo);
+      if (unvisitBlocks.find(currInfo) != unvisitBlocks.end())
+        unvisitBlocks.erase(currInfo);
       for (auto currOutVar : currInfo->liveOut)
         if (!currInfo->varKill.contains(currOutVar))
           currInfo->upwardUsed.insert(currOutVar);
       bool isChanged = false;
       for (auto prev : currInfo->bb.getPredecessorSet()) {
         BlockInfo *prevInfo = liveness[prev];
+        if (unvisitBlocks.find(currInfo) != unvisitBlocks.end())
+          unvisitBlocks.erase(currInfo);
         for (auto currInVar : currInfo->upwardUsed) {
           if (!prevInfo->bb.undefPhiRegs.contains(currInVar)) {
             auto changed = prevInfo->liveOut.insert(currInVar);

@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -87,6 +87,7 @@
 
 #define PIPELINE_SELECT_3D              0
 #define PIPELINE_SELECT_MEDIA           1
+#define PIPELINE_SELECT_GPGPU           2
 
 #define UF0_CS_REALLOC                  (1 << 13)
 #define UF0_VFE_REALLOC                 (1 << 12)
@@ -288,6 +289,11 @@
 #define I965_TILEWALK_XMAJOR                 0
 #define I965_TILEWALK_YMAJOR                 1
 
+#define GEN8_TILEMODE_LINEAR                 0
+#define GEN8_TILEMODE_WMAJOR                 1
+#define GEN8_TILEMODE_XMAJOR                 2
+#define GEN8_TILEMODE_YMAJOR                 3
+
 #define I965_SURCHAN_SELECT_ZERO             0
 #define I965_SURCHAN_SELECT_ONE              1
 #define I965_SURCHAN_SELECT_RED              4
@@ -302,6 +308,8 @@
 #define GEN7_L3_SQC_REG1_ADDRESS_OFFSET          (0XB010)
 #define GEN7_L3_CNTL_REG2_ADDRESS_OFFSET         (0xB020)
 #define GEN7_L3_CNTL_REG3_ADDRESS_OFFSET         (0xB024)
+
+#define GEN8_L3_CNTL_REG_ADDRESS_OFFSET          (0x7034)
 
 // To issue pipe controls (reset L3 / SLM or stall)
 #define GEN7_PIPE_CONTROL_MEDIA 0x2

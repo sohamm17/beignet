@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -126,13 +126,18 @@ namespace gbe {
                 Type *IntPtr = TD.getIntPtrType(Context);
                 Value *Size = Builder.CreateIntCast(CI->getArgOperand(2), IntPtr,
                                                     /* isSigned */ false);
+                Value *align = Builder.CreateIntCast(CI->getArgOperand(3), IntPtr,
+                                                    /* isSigned */ false);
+                ConstantInt *ci = dyn_cast<ConstantInt>(align);
                 Value *Ops[3];
                 Ops[0] = CI->getArgOperand(0);
                 Ops[1] = CI->getArgOperand(1);
                 Ops[2] = Size;
-                char name[16] = "__gen_memcpy_xx";
+                char name[24] = "__gen_memcpy_xx";
                 name[13] = convertSpaceToName(Ops[0]);
                 name[14] = convertSpaceToName(Ops[1]);
+                if(ci && (ci->getZExtValue() % 4 == 0)) //alignment is constant and 4 byte align
+                  strcat(name, "_align");
                 replaceCallWith(name, CI, Ops, Ops+3, Type::getVoidTy(Context));
                 break;
               }
@@ -143,13 +148,18 @@ namespace gbe {
                 Type *IntPtr = TD.getIntPtrType(Op0->getType());
                 Value *Size = Builder.CreateIntCast(CI->getArgOperand(2), IntPtr,
                                                     /* isSigned */ false);
+                Value *align = Builder.CreateIntCast(CI->getArgOperand(3), IntPtr,
+                                                    /* isSigned */ false);
+                ConstantInt *ci = dyn_cast<ConstantInt>(align);
                 Value *Ops[3];
                 Ops[0] = Op0;
                 // Extend the amount to i32.
                 Ops[1] = val;
                 Ops[2] = Size;
-                char name[16] = "__gen_memset_x";
+                char name[24] = "__gen_memset_x";
                 name[13] = convertSpaceToName(Ops[0]);
+                if(ci && (ci->getZExtValue() % 4 == 0)) //alignment is constant and 4 byte align
+                  strcat(name, "_align");
                 replaceCallWith(name, CI, Ops, Ops+3, Type::getVoidTy(Context));
                 break;
               }

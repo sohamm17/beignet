@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -211,12 +211,6 @@ typedef gbe_program (gbe_program_new_from_llvm_cb)(uint32_t deviceID,
                                                    size_t *err_size,
                                                    int optLevel);
 extern gbe_program_new_from_llvm_cb *gbe_program_new_from_llvm;
-
-/*! create s new genprogram for link. */
-typedef gbe_program (gbe_program_new_gen_program_cb)(uint32_t deviceID,
-                                                   const void *module,
-                                                   const void *act);
-extern gbe_program_new_gen_program_cb *gbe_program_new_gen_program;
 
 /*! link the programs from llvm level. */
 typedef void (gbe_program_link_from_llvm_cb)(gbe_program dst_program,

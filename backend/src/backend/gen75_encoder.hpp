@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -23,12 +23,14 @@
 #define __GBE_GEN75_ENCODER_HPP__
 
 #include "backend/gen_encoder.hpp"
+#include "backend/gen7_encoder.hpp"
+
 
 namespace gbe
 {
   /* This class is used to implement the HSW
      specific logic for encoder. */
-  class Gen75Encoder : public GenEncoder
+  class Gen75Encoder : public Gen7Encoder
   {
   public:
     /*! exec width of the double data type */    
@@ -36,12 +38,12 @@ namespace gbe
     virtual ~Gen75Encoder(void) { }
 
     Gen75Encoder(uint32_t simdWidth, uint32_t gen, uint32_t deviceID)
-         : GenEncoder(simdWidth, gen, deviceID) { }
+         : Gen7Encoder(simdWidth, gen, deviceID) { }
 
     /*! Jump indexed instruction */
     virtual void JMPI(GenRegister src, bool longjmp = false);
     /*! Patch JMPI/BRC/BRD (located at index insnID) with the given jump distance */
-    virtual void patchJMPI(uint32_t insnID, int32_t jumpDistance);
+    virtual void patchJMPI(uint32_t insnID, int32_t jip, int32_t uip);
     /*! Get double/long exec width */
     virtual int getDoubleExecWidth(void) { return GEN75_DOUBLE_EXEC_WIDTH; }
     virtual void MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp = GenRegister::null());

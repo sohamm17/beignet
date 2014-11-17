@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -80,7 +80,7 @@ namespace gbe {
     /*! Return the instruction stream (to be implemented) */
     virtual const char *getCode(void) const = 0;
     /*! Set the instruction stream.*/
-    virtual const void setCode(const char *, size_t size) = 0;
+    virtual void setCode(const char *, size_t size) = 0;
     /*! Return the instruction stream size (to be implemented) */
     virtual size_t getCodeSize(void) const = 0;
     /*! Get the kernel name */

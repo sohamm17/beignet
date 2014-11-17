@@ -3,7 +3,7 @@
  *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
+ * Free Software Foundation; either version 2.1 of the License, or (at your
  * option) any later version.
  *
  * This library is distributed in the hope that it will be useful, but WITHOUT
@@ -173,6 +173,10 @@ void program_build_instance::serialize_program(void) throw(int)
     }else if(IS_HASWELL(gen_pci_id)){
         src_hw_info[0]='H';
         src_hw_info[1]='S';
+        src_hw_info[2]='W';
+    }else if(IS_BROADWELL(gen_pci_id)){
+        src_hw_info[0]='B';
+        src_hw_info[1]='D';
         src_hw_info[2]='W';
     }
 

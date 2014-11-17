@@ -38,27 +38,28 @@ static const uint32_t untypedRWMask[] = {
 namespace gbe
 {
   void Gen75Encoder::setHeader(GenNativeInstruction *insn) {
+    Gen7NativeInstruction *gen7_insn = &insn->gen7_insn;
     if (this->curr.execWidth == 8)
-      insn->header.execution_size = GEN_WIDTH_8;
+      gen7_insn->header.execution_size = GEN_WIDTH_8;
     else if (this->curr.execWidth == 16)
-      insn->header.execution_size = GEN_WIDTH_16;
+      gen7_insn->header.execution_size = GEN_WIDTH_16;
     else if (this->curr.execWidth == 1)
-      insn->header.execution_size = GEN_WIDTH_1;
+      gen7_insn->header.execution_size = GEN_WIDTH_1;
     else if (this->curr.execWidth == 4)
-      insn->header.execution_size = GEN_WIDTH_4;
+      gen7_insn->header.execution_size = GEN_WIDTH_4;
     else
       NOT_IMPLEMENTED;
-    insn->header.acc_wr_control = this->curr.accWrEnable;
-    insn->header.quarter_control = this->curr.quarterControl;
-    insn->bits1.ia1.nib_ctrl = this->curr.nibControl;
-    insn->header.mask_control = this->curr.noMask;
-    insn->bits2.ia1.flag_reg_nr = this->curr.flag;
-    insn->bits2.ia1.flag_sub_reg_nr = this->curr.subFlag;
+    gen7_insn->header.acc_wr_control = this->curr.accWrEnable;
+    gen7_insn->header.quarter_control = this->curr.quarterControl;
+    gen7_insn->bits1.ia1.nib_ctrl = this->curr.nibControl;
+    gen7_insn->header.mask_control = this->curr.noMask;
+    gen7_insn->bits2.ia1.flag_reg_nr = this->curr.flag;
+    gen7_insn->bits2.ia1.flag_sub_reg_nr = this->curr.subFlag;
     if (this->curr.predicate != GEN_PREDICATE_NONE) {
-      insn->header.predicate_control = this->curr.predicate;
-      insn->header.predicate_inverse = this->curr.inversePredicate;
+      gen7_insn->header.predicate_control = this->curr.predicate;
+      gen7_insn->header.predicate_inverse = this->curr.inversePredicate;
     }
-    insn->header.saturate = this->curr.saturate;
+    gen7_insn->header.saturate = this->curr.saturate;
   }
 
   void Gen75Encoder::setDPUntypedRW(GenNativeInstruction *insn,
@@ -68,15 +69,16 @@ namespace gbe
                                     uint32_t msg_length,
                                     uint32_t response_length)
   {
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA_CACHE;
+    Gen7NativeInstruction *gen7_insn = &insn->gen7_insn;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
-    insn->bits3.gen7_untyped_rw.msg_type = msg_type;
-    insn->bits3.gen7_untyped_rw.bti = bti;
-    insn->bits3.gen7_untyped_rw.rgba = rgba;
+    gen7_insn->bits3.gen7_untyped_rw.msg_type = msg_type;
+    gen7_insn->bits3.gen7_untyped_rw.bti = bti;
+    gen7_insn->bits3.gen7_untyped_rw.rgba = rgba;
     if (curr.execWidth == 8)
-      insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD8;
+      gen7_insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD8;
     else if (curr.execWidth == 16)
-      insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD16;
+      gen7_insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD16;
     else
       NOT_SUPPORTED;
   }
@@ -84,17 +86,19 @@ namespace gbe
   void Gen75Encoder::setTypedWriteMessage(GenNativeInstruction *insn, unsigned char bti,
                                           unsigned char msg_type, uint32_t msg_length, bool header_present)
   {
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA_CACHE;
+    Gen7NativeInstruction *gen7_insn = &insn->gen7_insn;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
     setMessageDescriptor(insn, sfid, msg_length, 0, header_present);
-    insn->bits3.gen7_typed_rw.bti = bti;
-    insn->bits3.gen7_typed_rw.msg_type = msg_type;
+    gen7_insn->bits3.gen7_typed_rw.bti = bti;
+    gen7_insn->bits3.gen7_typed_rw.msg_type = msg_type;
 
     /* Always using the low 8 slots here. */
-    insn->bits3.gen7_typed_rw.slot = 1;
+    gen7_insn->bits3.gen7_typed_rw.slot = 1;
   }
 
   void Gen75Encoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, uint32_t bti, uint32_t srcNum) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    Gen7NativeInstruction *gen7_insn = &insn->gen7_insn;
     uint32_t msg_length = 0;
     uint32_t response_length = 0;
 
@@ -112,17 +116,17 @@ namespace gbe
     this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
     this->setSrc1(insn, GenRegister::immud(0));
 
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
-    insn->bits3.gen7_atomic_op.msg_type = GEN75_P1_UNTYPED_ATOMIC_OP;
-    insn->bits3.gen7_atomic_op.bti = bti;
-    insn->bits3.gen7_atomic_op.return_data = 1;
-    insn->bits3.gen7_atomic_op.aop_type = function;
+    gen7_insn->bits3.gen7_atomic_op.msg_type = GEN75_P1_UNTYPED_ATOMIC_OP;
+    gen7_insn->bits3.gen7_atomic_op.bti = bti;
+    gen7_insn->bits3.gen7_atomic_op.return_data = 1;
+    gen7_insn->bits3.gen7_atomic_op.aop_type = function;
 
     if (this->curr.execWidth == 8)
-      insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD8;
+      gen7_insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD8;
     else if (this->curr.execWidth == 16)
-      insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD16;
+      gen7_insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD16;
     else
       NOT_SUPPORTED;
   }
@@ -207,8 +211,9 @@ namespace gbe
     pop();
   }
 
-  void Gen75Encoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister r) {
+  void Gen75Encoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp) {
     GBE_ASSERT((src0.type == GEN_TYPE_F && dest.isdf()) || (src0.isdf() && dest.type == GEN_TYPE_F));
+    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_F);
     int w = curr.execWidth;
     GenRegister r0;
     r0 = GenRegister::h2(r);
@@ -246,24 +251,33 @@ namespace gbe
     alu2(this, GEN_OPCODE_JMPI, GenRegister::ip(), GenRegister::ip(), src);
   }
 
-  void Gen75Encoder::patchJMPI(uint32_t insnID, int32_t jumpDistance) {
+  void Gen75Encoder::patchJMPI(uint32_t insnID, int32_t jip, int32_t uip) {
     GenNativeInstruction &insn = *(GenNativeInstruction *)&this->store[insnID];
     GBE_ASSERT(insnID < this->store.size());
     GBE_ASSERT(insn.header.opcode == GEN_OPCODE_JMPI ||
                insn.header.opcode == GEN_OPCODE_BRD  ||
                insn.header.opcode == GEN_OPCODE_ENDIF ||
                insn.header.opcode == GEN_OPCODE_IF ||
-               insn.header.opcode == GEN_OPCODE_BRC);
+               insn.header.opcode == GEN_OPCODE_BRC ||
+               insn.header.opcode == GEN_OPCODE_WHILE ||
+               insn.header.opcode == GEN_OPCODE_ELSE);
 
-    if (insn.header.opcode == GEN_OPCODE_IF) {
-      this->setSrc1(&insn, GenRegister::immd(jumpDistance));
-      return;
+    if( insn.header.opcode == GEN_OPCODE_WHILE ){
+      // if this WHILE instruction jump back to an ELSE instruction,
+      // need add distance to go to the next instruction.
+      GenNativeInstruction & insn_else = *(GenNativeInstruction *)&this->store[insnID+jip];
+      if(insn_else.header.opcode == GEN_OPCODE_ELSE){
+        jip += 2;
+      }
     }
+
+    if (insn.header.opcode != GEN_OPCODE_JMPI)
+      this->setSrc1(&insn, GenRegister::immd((jip & 0xffff) | (uip<<16)));
     else if (insn.header.opcode == GEN_OPCODE_JMPI) {
-      //jumpDistance'unit is Qword, and the HSW's offset of jmpi is in byte, so multi 8
-      jumpDistance = (jumpDistance - 2) * 8;
+      //jumpDistance'unit is Qword, and the HSW's JMPI offset of jmpi is in byte, so multi 8
+      jip = (jip - 2) * 8;
+      this->setSrc1(&insn, GenRegister::immd(jip));
     }
-
-    this->setSrc1(&insn, GenRegister::immd(jumpDistance));
+    return;
   }
 } /* End of the name space. */

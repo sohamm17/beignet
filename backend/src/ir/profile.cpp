@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -48,11 +48,11 @@ namespace ir {
 
 #if GBE_DEBUG
 #define DECL_NEW_REG(FAMILY, REG, UNIFORM) \
-   r = fn.newRegister(FAMILY_DWORD, UNIFORM); \
+   r = fn.newRegister(FAMILY, UNIFORM); \
    GBE_ASSERT(r == REG);
 #else
 #define DECL_NEW_REG(FAMILY, REG, UNIFORM) \
-   fn.newRegister(FAMILY_DWORD, UNIFORM);
+   fn.newRegister(FAMILY, UNIFORM);
 #endif /* GBE_DEBUG */
     static void init(Function &fn) {
       IF_DEBUG(Register r);
@@ -75,7 +75,7 @@ namespace ir {
       DECL_NEW_REG(FAMILY_DWORD, goffset1, 1);
       DECL_NEW_REG(FAMILY_DWORD, goffset2, 1);
       DECL_NEW_REG(FAMILY_DWORD, stackptr, 0);
-      DECL_NEW_REG(FAMILY_DWORD, stackbuffer, 1);
+      DECL_NEW_REG(FAMILY_QWORD, stackbuffer, 1);
       DECL_NEW_REG(FAMILY_WORD,  blockip, 0);
       DECL_NEW_REG(FAMILY_DWORD, barrierid, 1);
       DECL_NEW_REG(FAMILY_DWORD, threadn, 1);
@@ -83,7 +83,7 @@ namespace ir {
       DECL_NEW_REG(FAMILY_DWORD, zero, 1);
       DECL_NEW_REG(FAMILY_DWORD, one, 1);
       DECL_NEW_REG(FAMILY_WORD, retVal, 1);
-      DECL_NEW_REG(FAMILY_WORD, slmoffset, 1);
+      DECL_NEW_REG(FAMILY_DWORD, slmoffset, 1);
       DECL_NEW_REG(FAMILY_DWORD, printfbptr, 1);
       DECL_NEW_REG(FAMILY_DWORD, printfiptr, 1);
       DECL_NEW_REG(FAMILY_DWORD, invalid, 1);

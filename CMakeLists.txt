@@ -1,9 +1,23 @@
+# compiler choose,now support ICC,GCC CLANG compiler
+set (COMPILER "GCC" CACHE INT "Compiler to choose on Linux (GCC,ICC,CLANG)")
+if (COMPILER STREQUAL "GCC")
+elseif (COMPILER STREQUAL "CLANG")
+  set (CMAKE_C_COMPILER   "clang")
+  set (CMAKE_CXX_COMPILER "clang++")
+  find_program(CMAKE_AR NAMES llvm-ar)
+  find_program(CMAKE_LINKER NAMES llvm-ld)
+elseif (COMPILER STREQUAL "ICC")
+  find_program(CMAKE_C_COMPILER NAMES icc)
+  find_program(CMAKE_CXX_COMPILER NAMES icpc)
+  find_program(CMAKE_AR NAMES xiar)
+  find_program(CMAKE_LINKER NAMES xild)
+endif ()
 
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6.0)
 PROJECT(OCL)
-set (LIBCL_DRIVER_VERSION_MAJOR 0)
-set (LIBCL_DRIVER_VERSION_MINOR 9)
-set (LIBCL_DRIVER_VERSION_PATCH 3)
+set (LIBCL_DRIVER_VERSION_MAJOR 1)
+set (LIBCL_DRIVER_VERSION_MINOR 0)
+set (LIBCL_DRIVER_VERSION_PATCH 0)
 set (LIBCL_C_VERSION_MAJOR 1)
 set (LIBCL_C_VERSION_MINOR 2)
 
@@ -36,9 +50,6 @@ endif (NOT CMAKE_BUILD_TYPE)
 set (CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE} CACHE STRING "assure config" FORCE)
 message(STATUS "Building mode: " ${CMAKE_BUILD_TYPE})
 
-SET(CMAKE_CXX_FLAGS_DEBUGO0 "-O0 -g")
-SET(CMAKE_C_FLAGS_DEBUGO0 "-O0 -g")
-
 IF (EMULATE_HSW)
   SET (USE_FULSIM "true")
   ADD_DEFINITIONS(-DEMULATE_GEN=75)
@@ -62,12 +73,30 @@ ELSE (USE_FULSIM)
   ADD_DEFINITIONS(-DUSE_FULSIM=0)
 ENDIF (USE_FULSIM)
 
-SET(CMAKE_CXX_FLAGS "-Wall -Wno-invalid-offsetof -mfpmath=sse -fno-rtti -Wcast-align -std=c++0x -msse2 -msse3 -mssse3 -msse4.1 ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-Wall -mfpmath=sse -msse2 -Wcast-align -msse2 -msse3 -mssse3 -msse4.1 ${CMAKE_C_FLAGS}")
+# compiler flag setting
+if (COMPILER STREQUAL "GCC")
+  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall -mfpmath=sse -Wcast-align -Wl,-E")
+elseif (COMPILER STREQUAL "CLANG")
+  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")
+elseif (COMPILER STREQUAL "ICC")
+  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -wd2928 -Wall -fPIC -fstrict-aliasing -fp-model fast -msse4.1 -Wl,-E")
+endif ()
+set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -fno-rtti")
+set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
+set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
+set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
+set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
+set (CMAKE_CXX_FLAGS_RELEASE        "-O2 -DNDEBUG -DGBE_DEBUG=0")
+set (CMAKE_C_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
+set (CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
+set (CMAKE_C_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
+set (CMAKE_C_FLAGS_RELEASE        "-O2 -DNDEBUG -DGBE_DEBUG=0")
 
 # Front end stuff we need
 #INCLUDE(CMake/FindLLVM.cmake)
 Find_Package(LLVM 3.3)
+
+set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${LLVM_LDFLAGS}")
 
 # XLib
 Find_Package(X11)
@@ -80,19 +109,27 @@ ENDIF(X11_FOUND)
 # DRM
 pkg_check_modules(DRM REQUIRED libdrm)
 IF(DRM_FOUND)
-  MESSAGE(STATUS "Looking for DRM - found at ${DRM_PREFIX}")
+  MESSAGE(STATUS "Looking for DRM - found at ${DRM_PREFIX} ${DRM_VERSION}")
   INCLUDE_DIRECTORIES(${DRM_INCLUDE_DIRS})
 ELSE(DRM_FOUND)
   MESSAGE(STATUS "Looking for DRM - not found")
 ENDIF(DRM_FOUND)
 
 # DRM Intel
-pkg_check_modules(DRM_INTEL REQUIRED libdrm_intel)
+pkg_check_modules(DRM_INTEL libdrm_intel>=2.4.52)
 IF(DRM_INTEL_FOUND)
   INCLUDE_DIRECTORIES(${DRM_INTEL_INCLUDE_DIRS})
-  MESSAGE(STATUS "Looking for DRM Intel - found at ${DRM_INTEL_PREFIX}")
+  MESSAGE(STATUS "Looking for DRM Intel - found at ${DRM_INTEL_PREFIX} ${DRM_INTEL_VERSION}")
+  #userptr support starts from 2.4.57, but 2.4.58 is the actual stable release
+  #FIXME userptr has randome fail for some cases, need further investigating.
+  #IF(DRM_INTEL_VERSION VERSION_GREATER 2.4.57)
+  #  MESSAGE(STATUS "Enable userptr support")
+  #  SET(DRM_INTEL_USERPTR "enable")
+  #ELSE(DRM_INTEL_VERSION VERSION_GREATER 2.4.57)
+  #  MESSAGE(STATUS "Disable userptr support")
+  #ENDIF(DRM_INTEL_VERSION VERSION_GREATER 2.4.57)
 ELSE(DRM_INTEL_FOUND)
-  MESSAGE(STATUS "Looking for DRM Intel - not found")
+  MESSAGE(FATAL_ERROR "Looking for DRM Intel (>= 2.4.52) - not found")
 ENDIF(DRM_INTEL_FOUND)
 
 # Threads

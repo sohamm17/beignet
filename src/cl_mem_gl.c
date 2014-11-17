@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -63,7 +63,7 @@ cl_mem_new_gl_texture(cl_context ctx,
     goto error;
   }
 
-  mem = cl_mem_allocate(CL_MEM_GL_IMAGE_TYPE, ctx, flags, 0, 0, &err);
+  mem = cl_mem_allocate(CL_MEM_GL_IMAGE_TYPE, ctx, flags, 0, 0, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 

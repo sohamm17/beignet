@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -262,9 +262,10 @@ cl_kernel_init(const char *file_name, const char *kernel_name, int format, const
       goto error;
     }
     prevFileName = file_name;
+
+    /* OCL requires to build the program even if it is created from a binary */
+    OCL_CALL (clBuildProgram, program, 1, &device, build_opt, NULL, NULL);
   }
-  /* OCL requires to build the program even if it is created from a binary */
-  OCL_CALL (clBuildProgram, program, 1, &device, build_opt, NULL, NULL);
 
   /* Create a kernel from the program */
   if (kernel)
@@ -537,12 +538,19 @@ int *cl_read_bmp(const char *filename, int *width, int *height)
   char magic[2];
   int ret;
   ret = fread(&magic[0], 1, 2, fp);
-  ret = ret;
-  assert(2 == ret);
+  if(2 != ret){
+    fclose(fp);
+    free(bmppath);
+    return NULL;
+  }
   assert(magic[0] == 'B' && magic[1] == 'M');
 
   ret = fread(&hdr, sizeof(hdr), 1, fp);
-  assert(1 == ret);
+  if(1 != ret){
+    fclose(fp);
+    free(bmppath);
+    return NULL;
+  }
 
   assert(hdr.width > 0 && hdr.height > 0 && hdr.nplanes == 1 && hdr.compression == 0);
 
@@ -655,7 +663,7 @@ int cl_check_image(const int *img, int w, int h, const char *bmp)
   return (float(discrepancy) / float(n) > max_error_ratio) ? 0 : 1;
 }
 
-const float cl_FLT_ULP(float float_number)
+float cl_FLT_ULP(float float_number)
 {
   SF floatBin, ulpBin, ulpBinBase;
   floatBin.f = float_number;
@@ -668,7 +676,7 @@ const float cl_FLT_ULP(float float_number)
   return ulpBin.f - ulpBinBase.f;
 }
 
-const int cl_INT_ULP(int int_number)
+int cl_INT_ULP(int int_number)
 {
   return 0;
 }

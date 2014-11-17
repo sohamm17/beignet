@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -70,8 +70,6 @@ namespace gbe
     virtual ~GenEncoder(void) { }
     /*! Size of the stack (should be large enough) */
     enum { MAX_STATE_NUM = 16 };
-    /*! gen7 exec width of the double data type */
-    #define GEN7_DOUBLE_EXEC_WIDTH  8
     /*! Push the current instruction state */
     void push(void);
     /*! Pop the latest pushed state */
@@ -101,15 +99,12 @@ namespace gbe
     ALU1(MOV)
     ALU1(FBH)
     ALU1(FBL)
+    ALU1(CBIT)
     ALU2(SUBB)
-    ALU2(UPSAMPLE_SHORT)
-    ALU2(UPSAMPLE_INT)
     ALU1(RNDZ)
     ALU1(RNDE)
     ALU1(RNDD)
     ALU1(RNDU)
-    ALU1(F16TO32)
-    ALU1(F32TO16)
     ALU2(SEL)
     ALU1(NOT)
     ALU2_MOD(AND)
@@ -137,8 +132,11 @@ namespace gbe
 #undef ALU2
 #undef ALU2_MOD
 #undef ALU3
+
+    virtual void F16TO32(GenRegister dest, GenRegister src0);
+    virtual void F32TO16(GenRegister dest, GenRegister src0);
     /*! Get double/long exec width */
-    virtual int getDoubleExecWidth(void) { return GEN7_DOUBLE_EXEC_WIDTH; }
+    virtual int getDoubleExecWidth(void) = 0;
     virtual void MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp = GenRegister::null());
     virtual void LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value);
     void LOAD_INT64_IMM(GenRegister dest, int64_t value);
@@ -150,8 +148,12 @@ namespace gbe
     virtual void JMPI(GenRegister src, bool longjmp = false);
     /*! IF indexed instruction */
     void IF(GenRegister src);
+    /*! ELSE indexed instruction */
+    void ELSE(GenRegister src);
     /*! ENDIF indexed instruction */
     void ENDIF(GenRegister src);
+    /*! WHILE indexed instruction */
+    void WHILE(GenRegister src);
     /*! BRC indexed instruction */
     void BRC(GenRegister src);
     /*! BRD indexed instruction */
@@ -205,12 +207,11 @@ namespace gbe
     void MATH(GenRegister dst, uint32_t function, GenRegister src);
 
     /*! Patch JMPI/BRC/BRD (located at index insnID) with the given jump distance */
-    virtual void patchJMPI(uint32_t insnID, int32_t jumpDistance);
+    virtual void patchJMPI(uint32_t insnID, int32_t jip, int32_t uip);
 
     ////////////////////////////////////////////////////////////////////////
     // Helper functions to encode
     ////////////////////////////////////////////////////////////////////////
-    virtual void setHeader(GenNativeInstruction *insn);
     virtual void setDPUntypedRW(GenNativeInstruction *insn, uint32_t bti, uint32_t rgba,
                                 uint32_t msg_type, uint32_t msg_length,
                                 uint32_t response_length);
@@ -220,13 +221,18 @@ namespace gbe
     void setMessageDescriptor(GenNativeInstruction *inst, enum GenMessageTarget sfid,
                               unsigned msg_length, unsigned response_length,
                               bool header_present = false, bool end_of_thread = false);
-    void setDst(GenNativeInstruction *insn, GenRegister dest);
-    void setSrc0(GenNativeInstruction *insn, GenRegister reg);
-    void setSrc1(GenNativeInstruction *insn, GenRegister reg);
+    virtual void setHeader(GenNativeInstruction *insn) = 0;
+    virtual void setDst(GenNativeInstruction *insn, GenRegister dest) = 0;
+    virtual void setSrc0(GenNativeInstruction *insn, GenRegister reg) = 0;
+    virtual void setSrc1(GenNativeInstruction *insn, GenRegister reg) = 0;
     GenCompactInstruction *nextCompact(uint32_t opcode);
+    virtual bool disableCompact() { return false; }
     GenNativeInstruction *next(uint32_t opcode);
     uint32_t n_instruction(void) const { return store.size(); }
     GBE_CLASS(GenEncoder); //!< Use custom allocators
+
+    virtual void alu3(uint32_t opcode, GenRegister dst,
+                       GenRegister src0, GenRegister src1, GenRegister src2) = 0;
   };
 
   void alu1(GenEncoder *p, uint32_t opcode, GenRegister dst,

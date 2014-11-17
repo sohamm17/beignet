@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #ifndef CL_VERSION_1_2
 #define CL_DEVICE_BUILT_IN_KERNELS 0x103F
@@ -40,6 +41,7 @@ static struct _cl_device_id intel_ivb_gt2_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 16,
   .max_thread_per_unit = 8,
+  .sub_slice_count = 2,
   .max_work_item_sizes = {1024, 1024, 1024},
   .max_work_group_size = 1024,
   .max_clock_frequency = 1000,
@@ -50,6 +52,7 @@ static struct _cl_device_id intel_ivb_gt1_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 6,
   .max_thread_per_unit = 6,
+  .sub_slice_count = 1,
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
@@ -60,6 +63,7 @@ static struct _cl_device_id intel_baytrail_t_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 4,
   .max_thread_per_unit = 8,
+  .sub_slice_count = 1,
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
@@ -71,6 +75,7 @@ static struct _cl_device_id intel_hsw_gt1_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 10,
   .max_thread_per_unit = 7,
+  .sub_slice_count = 1,
   .max_work_item_sizes = {1024, 1024, 1024},
   .max_work_group_size = 1024,
   .max_clock_frequency = 1000,
@@ -81,6 +86,7 @@ static struct _cl_device_id intel_hsw_gt2_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 20,
   .max_thread_per_unit = 7,
+  .sub_slice_count = 2,
   .max_work_item_sizes = {1024, 1024, 1024},
   .max_work_group_size = 1024,
   .max_clock_frequency = 1000,
@@ -91,11 +97,47 @@ static struct _cl_device_id intel_hsw_gt3_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 40,
   .max_thread_per_unit = 7,
+  .sub_slice_count = 4,
   .max_work_item_sizes = {1024, 1024, 1024},
   .max_work_group_size = 1024,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
 };
+
+/* XXX we clone IVB for HSW now */
+static struct _cl_device_id intel_brw_gt1_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 12,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 2,
+  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen75_device.h"
+};
+
+static struct _cl_device_id intel_brw_gt2_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 24,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 3,
+  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen75_device.h"
+};
+
+static struct _cl_device_id intel_brw_gt3_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 48,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 6,
+  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen75_device.h"
+};
+
 
 LOCAL cl_device_id
 cl_get_gt_device(void)
@@ -286,6 +328,54 @@ baytrail_t_device_break:
       ret = &intel_baytrail_t_device;
       break;
 
+    case PCI_CHIP_BROADWLL_M_GT1:
+      DECL_INFO_STRING(brw_gt1_break, intel_brw_gt1_device, name, "Intel(R) HD Graphics BroadWell Mobile GT1");
+    case PCI_CHIP_BROADWLL_D_GT1:
+      DECL_INFO_STRING(brw_gt1_break, intel_brw_gt1_device, name, "Intel(R) HD Graphics BroadWell U-Processor GT1");
+    case PCI_CHIP_BROADWLL_S_GT1:
+      DECL_INFO_STRING(brw_gt1_break, intel_brw_gt1_device, name, "Intel(R) HD Graphics BroadWell Server GT1");
+    case PCI_CHIP_BROADWLL_W_GT1:
+      DECL_INFO_STRING(brw_gt1_break, intel_brw_gt1_device, name, "Intel(R) HD Graphics BroadWell Workstation GT1");
+    case PCI_CHIP_BROADWLL_U_GT1:
+      DECL_INFO_STRING(brw_gt1_break, intel_brw_gt1_device, name, "Intel(R) HD Graphics BroadWell ULX GT1");
+brw_gt1_break:
+      intel_brw_gt1_device.vendor_id = device_id;
+      intel_brw_gt1_device.platform = intel_platform;
+      ret = &intel_brw_gt1_device;
+      break;
+
+    case PCI_CHIP_BROADWLL_M_GT2:
+      DECL_INFO_STRING(brw_gt2_break, intel_brw_gt2_device, name, "Intel(R) HD Graphics BroadWell Mobile GT2");
+    case PCI_CHIP_BROADWLL_D_GT2:
+      DECL_INFO_STRING(brw_gt2_break, intel_brw_gt2_device, name, "Intel(R) HD Graphics BroadWell U-Processor GT2");
+    case PCI_CHIP_BROADWLL_S_GT2:
+      DECL_INFO_STRING(brw_gt2_break, intel_brw_gt2_device, name, "Intel(R) HD Graphics BroadWell Server GT2");
+    case PCI_CHIP_BROADWLL_W_GT2:
+      DECL_INFO_STRING(brw_gt2_break, intel_brw_gt2_device, name, "Intel(R) HD Graphics BroadWell Workstation GT2");
+    case PCI_CHIP_BROADWLL_U_GT2:
+      DECL_INFO_STRING(brw_gt2_break, intel_brw_gt2_device, name, "Intel(R) HD Graphics BroadWell ULX GT2");
+brw_gt2_break:
+      intel_brw_gt2_device.vendor_id = device_id;
+      intel_brw_gt2_device.platform = intel_platform;
+      ret = &intel_brw_gt2_device;
+      break;
+
+    case PCI_CHIP_BROADWLL_M_GT3:
+      DECL_INFO_STRING(brw_gt3_break, intel_brw_gt3_device, name, "Intel(R) HD Graphics BroadWell Mobile GT2");
+    case PCI_CHIP_BROADWLL_D_GT3:
+      DECL_INFO_STRING(brw_gt3_break, intel_brw_gt3_device, name, "Intel(R) HD Graphics BroadWell U-Processor GT2");
+    case PCI_CHIP_BROADWLL_S_GT3:
+      DECL_INFO_STRING(brw_gt3_break, intel_brw_gt3_device, name, "Intel(R) HD Graphics BroadWell Server GT2");
+    case PCI_CHIP_BROADWLL_W_GT3:
+      DECL_INFO_STRING(brw_gt3_break, intel_brw_gt3_device, name, "Intel(R) HD Graphics BroadWell Workstation GT2");
+    case PCI_CHIP_BROADWLL_U_GT3:
+      DECL_INFO_STRING(brw_gt3_break, intel_brw_gt3_device, name, "Intel(R) HD Graphics BroadWell ULX GT2");
+brw_gt3_break:
+      intel_brw_gt3_device.vendor_id = device_id;
+      intel_brw_gt3_device.platform = intel_platform;
+      ret = &intel_brw_gt3_device;
+      break;
+
     case PCI_CHIP_SANDYBRIDGE_BRIDGE:
     case PCI_CHIP_SANDYBRIDGE_GT1:
     case PCI_CHIP_SANDYBRIDGE_GT2:
@@ -311,6 +401,26 @@ baytrail_t_device_break:
       ret->profile_sz = strlen(ret->profile) + 1;
     }
   }
+
+#ifdef HAS_USERPTR
+  cl_driver dummy = cl_driver_new(NULL);
+  cl_buffer_mgr bufmgr = cl_driver_get_bufmgr(dummy);
+
+  const size_t sz = 4096;
+  void* host_ptr = NULL;
+  int err = posix_memalign(&host_ptr, 4096, sz);
+  if (err == 0) {
+    cl_buffer bo = cl_buffer_alloc_userptr(bufmgr, "CL memory object", host_ptr, sz, 0);
+    if (bo == NULL)
+      ret->host_unified_memory = CL_FALSE;
+    else
+      cl_buffer_unreference(bo);
+    free(host_ptr);
+  }
+  else
+    ret->host_unified_memory = CL_FALSE;
+  cl_driver_delete(dummy);
+#endif
 
   return ret;
 }
@@ -380,7 +490,10 @@ cl_get_device_info(cl_device_id     device,
                device != &intel_baytrail_t_device &&
                device != &intel_hsw_gt1_device &&
                device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device
+               device != &intel_hsw_gt3_device &&
+               device != &intel_brw_gt1_device &&
+               device != &intel_brw_gt2_device &&
+               device != &intel_brw_gt3_device
                ))
     return CL_INVALID_DEVICE;
 
@@ -482,7 +595,10 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
                device != &intel_baytrail_t_device &&
                device != &intel_hsw_gt1_device &&
                device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device))
+               device != &intel_hsw_gt3_device &&
+               device != &intel_brw_gt1_device &&
+               device != &intel_brw_gt2_device &&
+               device != &intel_brw_gt3_device))
     return CL_INVALID_DEVICE;
   if (ver == NULL)
     return CL_SUCCESS;
@@ -493,6 +609,9 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
   } else if (device == &intel_hsw_gt1_device || device == &intel_hsw_gt2_device
         || device == &intel_hsw_gt3_device) {
     *ver = 75;
+  } else if (device == &intel_brw_gt1_device || device == &intel_brw_gt2_device
+        || device == &intel_brw_gt3_device) {
+    *ver = 8;
   } else
     return CL_INVALID_VALUE;
 
@@ -535,7 +654,7 @@ cl_check_builtin_kernel_dimension(cl_kernel kernel, cl_device_id device)
 LOCAL size_t
 cl_get_kernel_max_wg_sz(cl_kernel kernel)
 {
-  size_t work_group_size;
+  size_t work_group_size, thread_cnt;
   int simd_width = interp_kernel_get_simd_width(kernel->opaque);
   int vendor_id = kernel->program->ctx->device->vendor_id;
   if (!interp_kernel_use_slm(kernel->opaque)) {
@@ -544,9 +663,15 @@ cl_get_kernel_max_wg_sz(cl_kernel kernel)
     else
       work_group_size = kernel->program->ctx->device->max_compute_unit *
                         kernel->program->ctx->device->max_thread_per_unit * simd_width;
-  } else
-    work_group_size = kernel->program->ctx->device->max_work_group_size /
-                      (16 / simd_width);
+  } else {
+    thread_cnt = kernel->program->ctx->device->max_compute_unit *
+                 kernel->program->ctx->device->max_thread_per_unit / kernel->program->ctx->device->sub_slice_count;
+    if(thread_cnt > 64)
+      thread_cnt = 64;
+    work_group_size = thread_cnt * simd_width;
+    if(work_group_size > kernel->program->ctx->device->max_work_group_size)
+      work_group_size = kernel->program->ctx->device->max_work_group_size;
+  }
   return work_group_size;
 }
 
@@ -565,7 +690,10 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
                device != &intel_baytrail_t_device &&
                device != &intel_hsw_gt1_device &&
                device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device))
+               device != &intel_hsw_gt3_device &&
+               device != &intel_brw_gt1_device &&
+               device != &intel_brw_gt2_device &&
+               device != &intel_brw_gt3_device))
     return CL_INVALID_DEVICE;
 
   CHECK_KERNEL(kernel);
@@ -607,6 +735,7 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
 
         return CL_SUCCESS;
       }
+      return CL_SUCCESS;
     default:
       return CL_INVALID_VALUE;
   };

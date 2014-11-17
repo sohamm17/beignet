@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -44,7 +44,7 @@ namespace gbe
     /*! Implements base class */
     virtual const char *getCode(void) const;
     /*! Set the instruction stream (to be implemented) */
-    virtual const void setCode(const char *, size_t size);
+    virtual void setCode(const char *, size_t size);
     /*! Implements get the code size */
     virtual size_t getCodeSize(void) const;
     /*! Implements printStatus*/
@@ -79,7 +79,7 @@ namespace gbe
     GBE_CLASS(GenProgram);
   };
   /*! decompact GEN ASM if it is in compacted format */
-  extern void decompactInstruction(union GenCompactInstruction *p, union GenNativeInstruction *pOut);
+  extern void decompactInstruction(union GenCompactInstruction *p, void *insn);
 } /* namespace gbe */
 
 #endif /* __GBE_GEN_PROGRAM_HPP__ */

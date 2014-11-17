@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -50,6 +50,7 @@ namespace gbe
     this->sel = NULL;
     this->ra = NULL;
     this->ifEndifFix = false;
+    this->regSpillTick = 0;
   }
 
   GenContext::~GenContext(void) {
@@ -72,6 +73,7 @@ namespace gbe
     this->branchPos3.clear();
     this->labelPos.clear();
     this->errCode = NO_ERROR;
+    this->regSpillTick = 0;
   }
 
   void GenContext::newSelection(void) {
@@ -113,7 +115,7 @@ namespace gbe
       const LabelIndex label = pair.first;
       const int32_t insnID = pair.second;
       const int32_t targetID = labelPos.find(label)->second;
-      p->patchJMPI(insnID, (targetID - insnID));
+      p->patchJMPI(insnID, (targetID - insnID), 0);
     }
     for (auto pair : branchPos3) {
       const LabelPair labelPair = pair.first;
@@ -126,7 +128,7 @@ namespace gbe
         errCode = OUT_OF_RANGE_IF_ENDIF; 
         return false;
       }
-      p->patchJMPI(insnID, (((uip - insnID)) << 16) | ((jip - insnID)));
+      p->patchJMPI(insnID, jip - insnID, uip - insnID);
     }
     return true;
   }
@@ -200,8 +202,10 @@ namespace gbe
     const GenRegister src = ra->genReg(insn.src(0));
     switch (insn.opcode) {
       case SEL_OP_MOV: p->MOV(dst, src, insn.extra.function); break;
+      case SEL_OP_READ_ARF: p->MOV(dst, src); break;
       case SEL_OP_FBH: p->FBH(dst, src); break;
       case SEL_OP_FBL: p->FBL(dst, src); break;
+      case SEL_OP_CBIT: p->CBIT(dst, src); break;
       case SEL_OP_NOT: p->NOT(dst, src); break;
       case SEL_OP_RNDD: p->RNDD(dst, src); break;
       case SEL_OP_RNDU: p->RNDU(dst, src); break;
@@ -239,6 +243,27 @@ namespace gbe
           const GenRegister src = ra->genReg(insn.src(0));
           this->branchPos3.push_back(std::make_pair(labelPair, p->store.size()));
           p->IF(src);
+        }
+        break;
+      case SEL_OP_ELSE:
+        {
+          insertJumpPos(insn);
+          /*
+          const ir::LabelIndex label(insn.index), label1(insn.index);
+          const LabelPair labelPair(label, label1);
+          const GenRegister src = ra->genReg(insn.src(0));
+          this->branchPos3.push_back(std::make_pair(labelPair, p->store.size()));*/
+          p->ELSE(src);
+        }
+        break;
+      case SEL_OP_WHILE:
+        {
+          /*const ir::LabelIndex label0(insn.index), label1(insn.index1);
+          const LabelPair labelPair(label0, label1);
+          const GenRegister src = ra->genReg(insn.src(0));
+          this->branchPos3.push_back(std::make_pair(labelPair, p->store.size()));*/
+          insertJumpPos(insn);
+          p->WHILE(src);
         }
         break;
       default: NOT_IMPLEMENTED;
@@ -322,7 +347,8 @@ namespace gbe
           p->push();
           p->curr.predicate = GEN_PREDICATE_NONE;
           p->curr.noMask = 1;
-          p->MUL(GenRegister::retype(GenRegister::acc(), GEN_TYPE_UD), src0, src1);
+          p->MUL(GenRegister::retype(GenRegister::acc(), GEN_TYPE_UD), src0,
+                     GenRegister::h2(GenRegister::retype(src1, GEN_TYPE_UW)));
           p->curr.accWrEnable = 1;
           p->MACH(tmp, src0, src1);
           p->pop();
@@ -416,8 +442,6 @@ namespace gbe
       case SEL_OP_ADD:  p->ADD(dst, src0, src1); break;
       case SEL_OP_MUL:  p->MUL(dst, src0, src1); break;
       case SEL_OP_MACH: p->MACH(dst, src0, src1); break;
-      case SEL_OP_UPSAMPLE_SHORT: p->UPSAMPLE_SHORT(dst, src0, src1); break;
-      case SEL_OP_UPSAMPLE_INT: p->UPSAMPLE_INT(dst, src0, src1); break;
       case SEL_OP_UPSAMPLE_LONG:
         {
           GenRegister xdst = GenRegister::retype(dst, GEN_TYPE_UL),
@@ -739,14 +763,14 @@ namespace gbe
         p->SHL(c, e, a);
         p->SHL(d, f, a);
         p->OR(e, d, b);
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
         p->SEL(d, d, e);
         p->curr.predicate = GEN_PREDICATE_NONE;
         p->AND(a, a, GenRegister::immud(32));
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
@@ -767,14 +791,14 @@ namespace gbe
         p->SHR(c, f, a);
         p->SHR(d, e, a);
         p->OR(e, d, b);
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
         p->SEL(d, d, e);
         p->curr.predicate = GEN_PREDICATE_NONE;
         p->AND(a, a, GenRegister::immud(32));
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
@@ -796,7 +820,7 @@ namespace gbe
         p->ASR(c, f, a);
         p->SHR(d, e, a);
         p->OR(e, d, b);
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
@@ -804,7 +828,7 @@ namespace gbe
         p->curr.predicate = GEN_PREDICATE_NONE;
         p->AND(a, a, GenRegister::immud(32));
         p->ASR(f, f, GenRegister::immd(31));
-        p->MOV(flagReg, GenRegister::immuw(0xFFFF));
+        setFlag(flagReg, GenRegister::immuw(0xFFFF));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
         p->CMP(GEN_CONDITIONAL_Z, a, zero);
@@ -817,6 +841,14 @@ namespace gbe
       default:
         NOT_IMPLEMENTED;
     }
+  }
+  void GenContext::setFlag(GenRegister flagReg, GenRegister src) {
+    p->push();
+    p->curr.noMask = 1;
+    p->curr.execWidth = 1;
+    p->curr.predicate = GEN_PREDICATE_NONE;
+    p->MOV(flagReg, src);
+    p->pop();
   }
 
   void GenContext::saveFlag(GenRegister dest, int flag, int subFlag) {
@@ -904,7 +936,7 @@ namespace gbe
       p->SHL(high, low, tmp);
       p->MOV(low, GenRegister::immud(0));
 
-      p->patchJMPI(jip1, (p->n_instruction() - jip1) );
+      p->patchJMPI(jip1, (p->n_instruction() - jip1), 0);
       p->curr.predicate = GEN_PREDICATE_NONE;
       p->CMP(GEN_CONDITIONAL_LE, exp, GenRegister::immud(31));  //update dst where high != 0
       p->curr.predicate = GEN_PREDICATE_NORMAL;
@@ -918,7 +950,7 @@ namespace gbe
       p->CMP(GEN_CONDITIONAL_EQ, high, GenRegister::immud(0x80000000));
       p->CMP(GEN_CONDITIONAL_EQ, low, GenRegister::immud(0x0));
       p->AND(dst_ud, dst_ud, GenRegister::immud(0xfffffffe));
-      p->patchJMPI(jip0, (p->n_instruction() - jip0));
+      p->patchJMPI(jip0, (p->n_instruction() - jip0), 0);
 
     p->pop();
 
@@ -1238,7 +1270,7 @@ namespace gbe
     p->push();
     p->curr.execWidth = 8;
     for(int i = 0; i < execWidth; i += 8) {
-      p->MUL(acc, src0, src1);
+      p->MUL(acc, src0, GenRegister::h2(GenRegister::retype(src1, GEN_TYPE_UW)));
       p->curr.accWrEnable = 1;
       p->MACH(high, src0, src1);
       p->curr.accWrEnable = 0;
@@ -1403,7 +1435,7 @@ namespace gbe
       p->curr.noMask = 1;
       jip0 = p->n_instruction();
       p->JMPI(zero);
-      p->patchJMPI(jip0, distance);
+      p->patchJMPI(jip0, distance, 0);
       p->pop();
       // end of loop
     }
@@ -1680,7 +1712,7 @@ namespace gbe
   void GenContext::emitUnpackByteInstruction(const SelectionInstruction &insn) {
     const GenRegister src = ra->genReg(insn.src(0));
     for(uint32_t i = 0; i < insn.dstNum; i++) {
-      p->MOV(ra->genReg(insn.dst(i)), GenRegister::splitReg(src, insn.dstNum, i));
+      p->MOV(ra->genReg(insn.dst(i)), GenRegister::splitReg(src, insn.extra.elem, i));
     }
   }
 
@@ -1689,12 +1721,12 @@ namespace gbe
     p->push();
     if(simdWidth == 8) {
       for(uint32_t i = 0; i < insn.srcNum; i++)
-        p->MOV(GenRegister::splitReg(dst, insn.srcNum, i), ra->genReg(insn.src(i)));
+        p->MOV(GenRegister::splitReg(dst, insn.extra.elem, i), ra->genReg(insn.src(i)));
     } else {
       // when destination expands two registers, the source must span two registers.
       p->curr.execWidth = 8;
       for(uint32_t i = 0; i < insn.srcNum; i++) {
-        GenRegister dsti = GenRegister::splitReg(dst, insn.srcNum, i);
+        GenRegister dsti = GenRegister::splitReg(dst, insn.extra.elem, i);
         GenRegister src = ra->genReg(insn.src(i));
 
         p->curr.quarterControl = 0;
@@ -1770,7 +1802,7 @@ namespace gbe
   }
 
   void GenContext::buildPatchList(void) {
-    const uint32_t ptrSize = unit.getPointerSize() == ir::POINTER_32_BITS ? 4u : 8u;
+    const uint32_t ptrSize = this->getPointerSize();
     kernel->curbeSize = 0u;
     auto &stackUse = dag->getUse(ir::ocl::stackptr);
 
@@ -1792,12 +1824,13 @@ namespace gbe
       // For pointers and values, we have nothing to do. We just push the values
       if (arg.type == ir::FunctionArgument::GLOBAL_POINTER ||
           arg.type == ir::FunctionArgument::LOCAL_POINTER ||
-          arg.type == ir::FunctionArgument::CONSTANT_POINTER ||
-          arg.type == ir::FunctionArgument::VALUE ||
+          arg.type == ir::FunctionArgument::CONSTANT_POINTER)
+        this->insertCurbeReg(arg.reg, this->newCurbeEntry(GBE_CURBE_KERNEL_ARGUMENT, argID, ptrSize, ptrSize));
+      if (arg.type == ir::FunctionArgument::VALUE ||
           arg.type == ir::FunctionArgument::STRUCTURE ||
           arg.type == ir::FunctionArgument::IMAGE ||
           arg.type == ir::FunctionArgument::SAMPLER)
-        this->insertCurbeReg(arg.reg, this->newCurbeEntry(GBE_CURBE_KERNEL_ARGUMENT, argID, arg.size, ptrSize));
+        this->insertCurbeReg(arg.reg, this->newCurbeEntry(GBE_CURBE_KERNEL_ARGUMENT, argID, arg.size, arg.size));
     }
 
     // Go over all the instructions and find the special register we need
@@ -1879,13 +1912,17 @@ namespace gbe
       std::cout << genKernel->getName() << "'s disassemble begin:" << std::endl;
       ir::LabelIndex curLabel = (ir::LabelIndex)0;
       GenCompactInstruction * pCom = NULL;
-      GenNativeInstruction insn;
+      GenInstruction insn[2];
       std::cout << "  L0:" << std::endl;
       for (uint32_t insnID = 0; insnID < genKernel->insnNum; ) {
         if (labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID &&
             curLabel < this->getFunction().labelNum()) {
           std::cout << "  L" << curLabel + 1 << ":" << std::endl;
           curLabel = (ir::LabelIndex)(curLabel + 1);
+          while(labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID) {
+            std::cout << "  L" << curLabel + 1 << ":" << std::endl;
+            curLabel = (ir::LabelIndex)(curLabel + 1);
+          }
         }
         std::cout << "    (" << std::setw(8) << insnID << ")  ";
         pCom = (GenCompactInstruction*)&p->store[insnID];
