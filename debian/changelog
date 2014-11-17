@@ -1,13 +1,17 @@
-beignet (0.9.3~dfsg-2) UNRELEASED; urgency=medium
+beignet (1.0.0-1) UNRELEASED; urgency=medium
 
-  * Fix tgamma, pow, pown, erf, erfc (Closes: #768090)
-  * Fix constants handling bug and add test
+  [ Andreas Beckmann ]
+  * New upstream release.
+    - Fix tgamma, pow, pown, erf, erfc  (Closes: #768090)
+    - Drop upstream patches.
+
+  [ Rebecca N. Palmer ]
   * Re-enable GBE_DEBUG (lost when debhelper switched to 
     None build type)
   * Run tests (as non-fatal as they will fail on unsupported
     hardware) with extra debug output
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 03 Nov 2014 22:07:05 +0000
+ -- Andreas Beckmann <anbe@debian.org>  Mon, 17 Nov 2014 07:09:58 +0100
 
 beignet (0.9.3~dfsg-1) unstable; urgency=medium
 

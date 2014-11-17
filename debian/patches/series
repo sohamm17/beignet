@@ -1,12 +1,6 @@
-0001-fix-some-typos.patch
-0002-use-env-to-set-environment-variables-for-GBE_BIN_GEN.patch
-0003-GBE-fix-one-compilation-warning.patch
 Enhance-debug-output.patch
 Debian-compliant-compiler-flags-handling.patch
 Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
 Fix-build-failure.patch
-Skip-deleted-tests.patch
 Enable-test-debug.patch
-Fix-pow-erf-tgamma.patch
-Fix-constants-handling.patch
