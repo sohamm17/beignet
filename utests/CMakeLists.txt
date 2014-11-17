@@ -22,7 +22,6 @@ set (utests_sources
   utest_error.c
   compiler_basic_arithmetic.cpp
   compiler_displacement_map_element.cpp
-  compiler_shader_toy.cpp
   compiler_mandelbrot.cpp
   compiler_mandelbrot_alternate.cpp
   compiler_box_blur_float.cpp
@@ -41,6 +40,7 @@ set (utests_sources
   compiler_ceil.cpp
   compiler_clz_short.cpp
   compiler_clz_int.cpp
+  compiler_popcount.cpp
   compiler_convert_uchar_sat.cpp
   compiler_copy_buffer.cpp
   compiler_copy_image.cpp
@@ -103,6 +103,8 @@ set (utests_sources
   compiler_write_only.cpp
   compiler_write_only_shorts.cpp
   compiler_switch.cpp
+  compiler_overflow.cpp
+  compiler_bswap.cpp
   compiler_math.cpp
   compiler_atomic_functions.cpp
   compiler_async_copy.cpp
@@ -152,6 +154,7 @@ set (utests_sources
   builtin_convert_sat.cpp
   sub_buffer.cpp
   runtime_createcontext.cpp
+  runtime_set_kernel_arg.cpp
   runtime_null_kernel_arg.cpp
   runtime_event.cpp
   runtime_barrier_list.cpp
@@ -172,6 +175,7 @@ set (utests_sources
   compiler_getelementptr_bitcast.cpp
   compiler_simd_any.cpp
   compiler_simd_all.cpp
+  compiler_time_stamp.cpp
   compiler_double_precision.cpp
   load_program_from_bin_file.cpp
   load_program_from_gen_bin.cpp
@@ -185,7 +189,12 @@ set (utests_sources
   builtin_kernel_max_global_size.cpp
   image_1D_buffer.cpp
   compare_image_2d_and_1d_array.cpp
+  compiler_fill_image_1d_array.cpp
+  compiler_fill_image_2d_array.cpp
   compiler_constant_expr.cpp
+  compiler_assignment_operation_in_if.cpp
+  vload_bench.cpp
+  runtime_use_host_ptr_buffer.cpp
   utest_assert.cpp
   utest.cpp
   utest_file_map.cpp
@@ -204,6 +213,11 @@ else(GEN_PCI_ID)
   COMMAND ${GBE_BIN_GENERATER} ${kernel_bin}.cl -o${kernel_bin}.bin
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../backend/src/gbe_bin_generater ${kernel_bin}.cl)
 endif(GEN_PCI_ID)
+
+if (DRM_INTEL_USERPTR)
+SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
+SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
+endif (DRM_INTEL_USERPTR)
 
 ADD_CUSTOM_TARGET(kernel_bin.bin
     DEPENDS ${kernel_bin}.bin)
@@ -227,6 +241,10 @@ SET(UTESTS_REQUIRED_EGL_LIB ${EGL_LIBRARIES})
 else()
 SET(UTESTS_REQUIRED_EGL_LIB "")
 endif()
+
+if (COMPILER STREQUAL "CLANG")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
+endif ()
 
 ADD_LIBRARY(utests SHARED ${ADDMATHFUNC} ${utests_sources})
 

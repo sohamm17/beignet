@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -20,12 +20,12 @@
 #ifndef __CL_PLATFORM_ID_H__
 #define __CL_PLATFORM_ID_H__
 
+#include "CL/cl.h"
 #include "cl_internals.h"
 #include "cl_extensions.h"
 #include "cl_khr_icd.h"
-#include "CL/cl.h"
-
 #include "src/OCLConfig.h"
+#include "src/git_sha1.h"
 
 struct _cl_platform_id {
   DEFINE_ICD(dispatch)
@@ -63,10 +63,19 @@ extern cl_int cl_get_platform_info(cl_platform_id    platform,
 #define _JOINT(x, y) _STR(x) "." _STR(y)
 #define _JOINT3(x, y, z) _STR(x) "." _STR(y) "." _STR(z)
 
+#ifdef BEIGNET_GIT_SHA1
+       #define BEIGNET_GIT_SHA1_STRING " (" BEIGNET_GIT_SHA1 ")"
+#else
+       #define BEIGNET_GIT_SHA1_STRING
+#endif
 
+#ifdef LIBCL_DRIVER_VERSION_PATCH
 #define LIBCL_DRIVER_VERSION_STRING _JOINT3(LIBCL_DRIVER_VERSION_MAJOR, LIBCL_DRIVER_VERSION_MINOR, LIBCL_DRIVER_VERSION_PATCH)
-#define LIBCL_VERSION_STRING "OpenCL " _JOINT(LIBCL_C_VERSION_MAJOR, LIBCL_C_VERSION_MINOR) " beignet " LIBCL_DRIVER_VERSION_STRING
-#define LIBCL_C_VERSION_STRING "OpenCL C " _JOINT(LIBCL_C_VERSION_MAJOR, LIBCL_C_VERSION_MINOR) " beignet " LIBCL_DRIVER_VERSION_STRING
+#else
+#define LIBCL_DRIVER_VERSION_STRING _JOINT(LIBCL_DRIVER_VERSION_MAJOR, LIBCL_DRIVER_VERSION_MINOR)
+#endif
+#define LIBCL_VERSION_STRING "OpenCL " _JOINT(LIBCL_C_VERSION_MAJOR, LIBCL_C_VERSION_MINOR) " beignet " LIBCL_DRIVER_VERSION_STRING BEIGNET_GIT_SHA1_STRING
+#define LIBCL_C_VERSION_STRING "OpenCL C " _JOINT(LIBCL_C_VERSION_MAJOR, LIBCL_C_VERSION_MINOR) " beignet " LIBCL_DRIVER_VERSION_STRING BEIGNET_GIT_SHA1_STRING
 
 #endif /* __CL_PLATFORM_ID_H__ */
 

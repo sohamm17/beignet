@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -78,31 +78,6 @@
 #include "cl_driver.h"
 #include "cl_device_id.h"
 #include "cl_platform_id.h"
-
-#define SET_BLOCKED_SIGSET(DRIVER)   do {                     \
-  sigset_t bl_mask;                                           \
-  sigfillset(&bl_mask);                                       \
-  sigdelset(&bl_mask, SIGFPE);                                \
-  sigdelset(&bl_mask, SIGILL);                                \
-  sigdelset(&bl_mask, SIGSEGV);                               \
-  sigdelset(&bl_mask, SIGBUS);                                \
-  sigdelset(&bl_mask, SIGKILL);                               \
-  pthread_sigmask(SIG_SETMASK, &bl_mask, &(DRIVER)->sa_mask); \
-} while (0)
-
-#define RESTORE_BLOCKED_SIGSET(DRIVER) do {                   \
-  pthread_sigmask(SIG_SETMASK, &(DRIVER)->sa_mask, NULL);     \
-} while (0)
-
-#define PPTHREAD_MUTEX_LOCK(DRIVER) do {                      \
-  SET_BLOCKED_SIGSET(DRIVER);                                 \
-  pthread_mutex_lock(&(DRIVER)->ctxmutex);                    \
-} while (0)
-
-#define PPTHREAD_MUTEX_UNLOCK(DRIVER) do {                    \
-  pthread_mutex_unlock(&(DRIVER)->ctxmutex);                  \
-  RESTORE_BLOCKED_SIGSET(DRIVER);                             \
-} while (0)
 
 static void
 intel_driver_delete(intel_driver_t *driver)
@@ -183,7 +158,9 @@ intel_driver_init(intel_driver_t *driver, int dev_fd)
   else
     FATAL ("Unsupported Gen for emulation");
 #else
-  if (IS_GEN75(driver->device_id))
+  if (IS_GEN8(driver->device_id))
+    driver->gen_ver = 8;
+  else if (IS_GEN75(driver->device_id))
     driver->gen_ver = 75;
   else if (IS_GEN7(driver->device_id))
     driver->gen_ver = 7;
@@ -421,11 +398,13 @@ intel_get_device_id(void)
   return intel_device_id;
 }
 
+extern void intel_gpgpu_delete_all(intel_driver_t *driver);
 static void
 cl_intel_driver_delete(intel_driver_t *driver)
 {
   if (driver == NULL)
     return;
+  intel_gpgpu_delete_all(driver);
   intel_driver_context_destroy(driver);
   intel_driver_close(driver);
   intel_driver_terminate(driver);
@@ -439,7 +418,6 @@ cl_intel_driver_new(cl_context_prop props)
   intel_driver_t *driver = NULL;
   TRY_ALLOC_NO_ERR (driver, intel_driver_new());
   if(UNLIKELY(intel_driver_open(driver, props) != CL_SUCCESS)) goto error;
-  intel_driver_open(driver, props);
 exit:
   return driver;
 error:
@@ -473,6 +451,44 @@ static int get_cl_tiling(uint32_t drm_tiling)
     assert(0);
   }
   return CL_NO_TILE;
+}
+
+static uint32_t intel_buffer_get_tiling_align(cl_context ctx, uint32_t tiling_mode, uint32_t dim)
+{
+  uint32_t gen_ver = ((intel_driver_t *)ctx->drv)->gen_ver;
+  uint32_t ret = 0;
+
+  switch (tiling_mode) {
+  case CL_TILE_X:
+    if (dim == 0) { //tileX width in bytes
+      ret = 512;
+    } else if (dim == 1) { //tileX height in number of rows
+      ret = 8;
+    } else
+      assert(0);
+    break;
+
+  case CL_TILE_Y:
+    if (dim == 0) { //tileY width in bytes
+      ret = 128;
+    } else if (dim == 1) { //tileY height in number of rows
+      ret = 32;
+    } else
+      assert(0);
+    break;
+
+  case CL_NO_TILE:
+    if (dim == 1) { //vertical alignment
+      if (gen_ver == 8)
+        ret = 4;
+      else
+        ret = 2;
+    } else
+      assert(0);
+    break;
+  }
+
+  return ret;
 }
 
 #if defined(HAS_EGL)
@@ -674,6 +690,20 @@ cl_buffer intel_share_image_from_libva(cl_context ctx,
   return (cl_buffer)intel_bo;
 }
 
+static cl_buffer intel_buffer_alloc_userptr(cl_buffer_mgr bufmgr, const char* name, void *data,size_t size, unsigned long flags)
+{
+#ifdef HAS_USERPTR
+  drm_intel_bo *bo;
+  bo = drm_intel_bo_alloc_userptr((drm_intel_bufmgr *)bufmgr, name, data, I915_TILING_NONE, 0, size, flags);
+  /* Fallback to unsynchronized userptr allocation if kernel has no MMU notifier enabled. */
+  if (bo == NULL)
+    bo = drm_intel_bo_alloc_userptr((drm_intel_bufmgr *)bufmgr, name, data, I915_TILING_NONE, 0, size, flags | I915_USERPTR_UNSYNCHRONIZED);
+  return (cl_buffer)bo;
+#else
+  return NULL;
+#endif
+}
+
 static int32_t get_intel_tiling(cl_int tiling, uint32_t *intel_tiling)
 {
   switch (tiling) {
@@ -718,6 +748,7 @@ intel_setup_callbacks(void)
   cl_driver_get_bufmgr = (cl_driver_get_bufmgr_cb *) intel_driver_get_bufmgr;
   cl_driver_get_device_id = (cl_driver_get_device_id_cb *) intel_get_device_id;
   cl_buffer_alloc = (cl_buffer_alloc_cb *) drm_intel_bo_alloc;
+  cl_buffer_alloc_userptr = (cl_buffer_alloc_userptr_cb*) intel_buffer_alloc_userptr;
   cl_buffer_set_tiling = (cl_buffer_set_tiling_cb *) intel_buffer_set_tiling;
 #if defined(HAS_EGL)
   cl_buffer_alloc_from_texture = (cl_buffer_alloc_from_texture_cb *) intel_alloc_buffer_from_texture;
@@ -738,7 +769,9 @@ intel_setup_callbacks(void)
   cl_buffer_pin = (cl_buffer_pin_cb *) drm_intel_bo_pin;
   cl_buffer_unpin = (cl_buffer_unpin_cb *) drm_intel_bo_unpin;
   cl_buffer_subdata = (cl_buffer_subdata_cb *) drm_intel_bo_subdata;
+  cl_buffer_get_subdata = (cl_buffer_get_subdata_cb *) drm_intel_bo_get_subdata;
   cl_buffer_wait_rendering = (cl_buffer_wait_rendering_cb *) drm_intel_bo_wait_rendering;
   cl_buffer_get_fd = (cl_buffer_get_fd_cb *) drm_intel_bo_gem_export_to_prime;
+  cl_buffer_get_tiling_align = (cl_buffer_get_tiling_align_cb *)intel_buffer_get_tiling_align;
   intel_set_gpgpu_callbacks(intel_get_device_id());
 }

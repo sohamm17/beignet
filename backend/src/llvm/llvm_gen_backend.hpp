@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -26,7 +26,9 @@
 #ifndef __GBE_LLVM_GEN_BACKEND_HPP__
 #define __GBE_LLVM_GEN_BACKEND_HPP__
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Pass.h"
+#include "llvm/Analysis/LoopPass.h"
 #include "sys/platform.hpp"
 #include "sys/map.hpp"
 #include "sys/hash_map.hpp"
@@ -92,11 +94,22 @@ namespace gbe
   /*! Remove/add NoDuplicate function attribute for barrier functions. */
   llvm::ModulePass* createBarrierNodupPass(bool);
 
+  /*! Legalize all wide integer instructions */
+  llvm::FunctionPass* createLegalizePass();
+
   /*! Convert the Intrinsic call to gen function */
   llvm::BasicBlockPass *createIntrinsicLoweringPass();
 
   /*! Passer the printf function call. */
   llvm::FunctionPass* createPrintfParserPass();
+
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+  /* customized loop unrolling pass. */
+  llvm::LoopPass *createCustomLoopUnrollPass();
+#endif
+
+  /*! Add all the function call of ocl to our bitcode. */
+  llvm::Module* runBitCodeLinker(llvm::Module *mod, bool strictMath);
 
   void* getPrintfInfo(llvm::CallInst* inst);
 } /* namespace gbe */

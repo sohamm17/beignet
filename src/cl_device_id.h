@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -27,6 +27,7 @@ struct _cl_device_id {
   cl_uint  vendor_id;
   cl_uint  max_compute_unit;               // maximum EU number
   cl_uint  max_thread_per_unit;            // maximum EU threads per EU.
+  cl_uint  sub_slice_count;                // Device's sub slice count
   cl_uint  max_work_item_dimensions;       // should be 3.
   size_t   max_work_item_sizes[3];         // equal to maximum work group size.
   size_t   max_work_group_size;            // maximum work group size under simd16 mode.
@@ -59,7 +60,7 @@ struct _cl_device_id {
   size_t   image3d_max_width;
   size_t   image3d_max_height;
   size_t   image3d_max_depth;
-  cl_ulong image_mem_size;
+  size_t   image_mem_size;
   cl_uint  max_samplers;
   size_t   max_parameter_size;
   cl_uint  mem_base_addr_align;

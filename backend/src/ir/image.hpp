@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -52,11 +52,11 @@ namespace ir {
     /*! clear image info. */
     void clearInfo();
     /*! Get the image's index(actual location). */
-    const uint32_t getIdx(const Register imageReg) const;
+    uint32_t getIdx(const Register imageReg) const;
     size_t getDataSize(void) { return regMap.size(); }
     size_t getDataSize(void) const { return regMap.size(); }
 
-    const int32_t getInfoOffset(ImageInfoKey key) const;
+    int32_t getInfoOffset(ImageInfoKey key) const;
     void getData(struct ImageInfo *imageInfos) const;
     void operator = (const ImageSet& other) {
       regMap.insert(other.regMap.begin(), other.regMap.end());

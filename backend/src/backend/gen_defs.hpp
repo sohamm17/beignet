@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -52,6 +52,8 @@
 #define __GEN_DEFS_HPP__
 
 #include <stdint.h>
+#include "backend/gen7_instruction.hpp"
+#include "backend/gen8_instruction.hpp"
 
 /////////////////////////////////////////////////////////////////////////////
 // Gen EU defines
@@ -159,6 +161,7 @@ enum opcode {
   GEN_OPCODE_LZD = 74,
   GEN_OPCODE_FBH = 75,
   GEN_OPCODE_FBL = 76,
+  GEN_OPCODE_CBIT = 77,
   GEN_OPCODE_ADDC = 78,
   GEN_OPCODE_SUBB = 79,
   GEN_OPCODE_SAD2 = 80,
@@ -199,18 +202,18 @@ enum GenAtomicOpCode {
 /*! Gen SFID */
 enum GenMessageTarget {
   GEN_SFID_NULL                     = 0,
-  GEN_SFID_MATH                     = 1,
+  GEN_SFID_RESERVED                 = 1,
   GEN_SFID_SAMPLER                  = 2,
   GEN_SFID_MESSAGE_GATEWAY          = 3,
-  GEN_SFID_DATAPORT_READ            = 4,
-  GEN_SFID_DATAPORT_WRITE           = 5,
+  GEN_SFID_DATAPORT_SAMPLER         = 4,
+  GEN_SFID_DATAPORT_RENDER          = 5,
   GEN_SFID_URB                      = 6,
   GEN_SFID_THREAD_SPAWNER           = 7,
-  GEN6_SFID_DATAPORT_SAMPLER_CACHE  = 4,
-  GEN6_SFID_DATAPORT_RENDER_CACHE   = 5,
-  GEN6_SFID_DATAPORT_CONSTANT_CACHE = 9,
-  GEN_SFID_DATAPORT_DATA_CACHE      = 10,
-  GEN_SFID_DATAPORT1_DATA_CACHE     = 12,
+  GEN_SFID_VIDEO_MOTION_EST         = 8,
+  GEN_SFID_DATAPORT_CONSTANT        = 9,
+  GEN_SFID_DATAPORT_DATA            = 10,
+  GEN_SFID_PIXEL_INTERPOLATOR       = 11,
+  GEN_SFID_DATAPORT1_DATA           = 12, /* New for HSW and BDW. */
 };
 
 #define GEN_PREDICATE_NONE                    0
@@ -243,12 +246,12 @@ enum GenMessageTarget {
 #define GEN_TYPE_UB  4
 #define GEN_TYPE_B   5
 #define GEN_TYPE_VF  5 /* packed float vector, immediates only? */
-#define GEN_TYPE_HF  6
 #define GEN_TYPE_V   6 /* packed int vector, immediates only, uword dest only */
 #define GEN_TYPE_DF  6
 #define GEN_TYPE_F   7
 #define GEN_TYPE_UL  8
 #define GEN_TYPE_L   9
+#define GEN_TYPE_HF  10
 
 #define GEN_ARF_NULL                  0x00
 #define GEN_ARF_ADDRESS               0x10
@@ -261,6 +264,7 @@ enum GenMessageTarget {
 #define GEN_ARF_CONTROL               0x80
 #define GEN_ARF_NOTIFICATION_COUNT    0x90
 #define GEN_ARF_IP                    0xA0
+#define GEN_ARF_TM                    0xC0
 
 #define GEN_MRF_COMPR4   (1 << 7)
 
@@ -428,6 +432,8 @@ enum GenMessageTarget {
 #define GEN_MATH_FUNCTION_INT_DIV_QUOTIENT_AND_REMAINDER   11
 #define GEN_MATH_FUNCTION_INT_DIV_QUOTIENT                 12
 #define GEN_MATH_FUNCTION_INT_DIV_REMAINDER                13
+#define GEN8_MATH_FUNCTION_INVM                            14
+#define GEN8_MATH_FUNCTION_RSQRTM                          15
 
 #define GEN_MATH_INTEGER_UNSIGNED     0
 #define GEN_MATH_INTEGER_SIGNED       1
@@ -500,13 +506,16 @@ union GenNativeInstruction
     struct GenInstruction low;
     struct GenInstruction high;
   };
+  union Gen7NativeInstruction gen7_insn;
+  union Gen8NativeInstruction gen8_insn;
+
+  //Gen7 & Gen8 common field
   struct {
     struct {
       uint32_t opcode:7;
       uint32_t pad:1;
       uint32_t access_mode:1;
-      uint32_t mask_control:1;
-      uint32_t dependency_control:2;
+      uint32_t pad1:3;
       uint32_t quarter_control:2;
       uint32_t thread_control:2;
       uint32_t predicate_control:4;
@@ -519,221 +528,15 @@ union GenNativeInstruction
       uint32_t saturate:1;
     } header;
 
-    union {
-      struct {
-        uint32_t dest_reg_file:2;
-        uint32_t dest_reg_type:3;
-        uint32_t src0_reg_file:2;
-        uint32_t src0_reg_type:3;
-        uint32_t src1_reg_file:2;
-        uint32_t src1_reg_type:3;
-        uint32_t nib_ctrl:1;
-        uint32_t dest_subreg_nr:5;
-        uint32_t dest_reg_nr:8;
-        uint32_t dest_horiz_stride:2;
-        uint32_t dest_address_mode:1;
-      } da1;
-
-      struct {
-        uint32_t dest_reg_file:2;
-        uint32_t dest_reg_type:3;
-        uint32_t src0_reg_file:2;
-        uint32_t src0_reg_type:3;
-        uint32_t src1_reg_file:2;        /* 0x00000c00 */
-        uint32_t src1_reg_type:3;        /* 0x00007000 */
-        uint32_t nib_ctrl:1;
-        int dest_indirect_offset:10;        /* offset against the deref'd address reg */
-        uint32_t dest_subreg_nr:3; /* subnr for the address reg a0.x */
-        uint32_t dest_horiz_stride:2;
-        uint32_t dest_address_mode:1;
-      } ia1;
-
-      struct {
-        uint32_t dest_reg_file:2;
-        uint32_t dest_reg_type:3;
-        uint32_t src0_reg_file:2;
-        uint32_t src0_reg_type:3;
-        uint32_t src1_reg_file:2;
-        uint32_t src1_reg_type:3;
-        uint32_t nib_ctrl:1;
-        uint32_t dest_writemask:4;
-        uint32_t dest_subreg_nr:1;
-        uint32_t dest_reg_nr:8;
-        uint32_t dest_horiz_stride:2;
-        uint32_t dest_address_mode:1;
-      } da16;
-
-      struct {
-        uint32_t dest_reg_file:2;
-        uint32_t dest_reg_type:3;
-        uint32_t src0_reg_file:2;
-        uint32_t src0_reg_type:3;
-        uint32_t nib_ctrl:1;
-        uint32_t dest_writemask:4;
-        int dest_indirect_offset:6;
-        uint32_t dest_subreg_nr:3;
-        uint32_t dest_horiz_stride:2;
-        uint32_t dest_address_mode:1;
-      } ia16;
-
-      struct {
-        uint32_t dest_reg_file:2;
-        uint32_t dest_reg_type:3;
-        uint32_t src0_reg_file:2;
-        uint32_t src0_reg_type:3;
-        uint32_t src1_reg_file:2;
-        uint32_t src1_reg_type:3;
-        uint32_t pad:1;
-        int jump_count:16;
-      } branch_gen6;
-
-      struct {
-        uint32_t dest_reg_file:1;
-        uint32_t flag_subreg_num:1;
-        uint32_t pad0:2;
-        uint32_t src0_abs:1;
-        uint32_t src0_negate:1;
-        uint32_t src1_abs:1;
-        uint32_t src1_negate:1;
-        uint32_t src2_abs:1;
-        uint32_t src2_negate:1;
-        uint32_t pad1:7;
-        uint32_t dest_writemask:4;
-        uint32_t dest_subreg_nr:3;
-        uint32_t dest_reg_nr:8;
-      } da3src;
+    struct {
+      uint32_t pad1:32;
     } bits1;
 
-    union {
-      struct {
-        uint32_t src0_subreg_nr:5;
-        uint32_t src0_reg_nr:8;
-        uint32_t src0_abs:1;
-        uint32_t src0_negate:1;
-        uint32_t src0_address_mode:1;
-        uint32_t src0_horiz_stride:2;
-        uint32_t src0_width:3;
-        uint32_t src0_vert_stride:4;
-        uint32_t flag_sub_reg_nr:1;
-        uint32_t flag_reg_nr:1;
-        uint32_t pad:5;
-      } da1;
-
-      struct {
-        int src0_indirect_offset:10;
-        uint32_t src0_subreg_nr:3;
-        uint32_t src0_abs:1;
-        uint32_t src0_negate:1;
-        uint32_t src0_address_mode:1;
-        uint32_t src0_horiz_stride:2;
-        uint32_t src0_width:3;
-        uint32_t src0_vert_stride:4;
-        uint32_t flag_sub_reg_nr:1;
-        uint32_t flag_reg_nr:1;
-        uint32_t pad:5;
-      } ia1;
-
-      struct {
-        uint32_t src0_swz_x:2;
-        uint32_t src0_swz_y:2;
-        uint32_t src0_subreg_nr:1;
-        uint32_t src0_reg_nr:8;
-        uint32_t src0_abs:1;
-        uint32_t src0_negate:1;
-        uint32_t src0_address_mode:1;
-        uint32_t src0_swz_z:2;
-        uint32_t src0_swz_w:2;
-        uint32_t pad0:1;
-        uint32_t src0_vert_stride:4;
-        uint32_t flag_sub_reg_nr:1;
-        uint32_t flag_reg_nr:1;
-        uint32_t pad:5;
-      } da16;
-
-      struct {
-        uint32_t src0_swz_x:2;
-        uint32_t src0_swz_y:2;
-        int src0_indirect_offset:6;
-        uint32_t src0_subreg_nr:3;
-        uint32_t src0_abs:1;
-        uint32_t src0_negate:1;
-        uint32_t src0_address_mode:1;
-        uint32_t src0_swz_z:2;
-        uint32_t src0_swz_w:2;
-        uint32_t pad0:1;
-        uint32_t src0_vert_stride:4;
-        uint32_t flag_sub_reg_nr:1;
-        uint32_t flag_reg_nr:1;
-        uint32_t pad:5;
-      } ia16;
-
-      struct {
-        uint32_t src0_rep_ctrl:1;
-        uint32_t src0_swizzle:8;
-        uint32_t src0_subreg_nr:3;
-        uint32_t src0_reg_nr:8;
-        uint32_t pad0:1;
-        uint32_t src1_rep_ctrl:1;
-        uint32_t src1_swizzle:8;
-        uint32_t src1_subreg_nr_low:2;
-      } da3src;
+    struct {
+      uint32_t pad2:32;
     } bits2;
 
     union {
-      struct {
-        uint32_t src1_subreg_nr:5;
-        uint32_t src1_reg_nr:8;
-        uint32_t src1_abs:1;
-        uint32_t src1_negate:1;
-        uint32_t src1_address_mode:1;
-        uint32_t src1_horiz_stride:2;
-        uint32_t src1_width:3;
-        uint32_t src1_vert_stride:4;
-        uint32_t pad0:7;
-      } da1;
-
-      struct {
-        uint32_t src1_swz_x:2;
-        uint32_t src1_swz_y:2;
-        uint32_t src1_subreg_nr:1;
-        uint32_t src1_reg_nr:8;
-        uint32_t src1_abs:1;
-        uint32_t src1_negate:1;
-        uint32_t src1_address_mode:1;
-        uint32_t src1_swz_z:2;
-        uint32_t src1_swz_w:2;
-        uint32_t pad1:1;
-        uint32_t src1_vert_stride:4;
-        uint32_t pad2:7;
-      } da16;
-
-      struct {
-        int  src1_indirect_offset:10;
-        uint32_t src1_subreg_nr:3;
-        uint32_t src1_abs:1;
-        uint32_t src1_negate:1;
-        uint32_t src1_address_mode:1;
-        uint32_t src1_horiz_stride:2;
-        uint32_t src1_width:3;
-        uint32_t src1_vert_stride:4;
-        uint32_t pad1:7;
-      } ia1;
-
-      struct {
-        uint32_t src1_swz_x:2;
-        uint32_t src1_swz_y:2;
-        int  src1_indirect_offset:6;
-        uint32_t src1_subreg_nr:3;
-        uint32_t src1_abs:1;
-        uint32_t src1_negate:1;
-        uint32_t pad0:1;
-        uint32_t src1_swz_z:2;
-        uint32_t src1_swz_w:2;
-        uint32_t pad1:1;
-        uint32_t src1_vert_stride:4;
-        uint32_t pad2:7;
-      } ia16;
-
       struct {
         uint32_t function_control:19;
         uint32_t header_present:1;
@@ -933,17 +736,6 @@ union GenNativeInstruction
         uint32_t end_of_thread:1;
       } gen7_atomic_op;
 
-      struct {
-        uint32_t src1_subreg_nr_high:1;
-        uint32_t src1_reg_nr:8;
-        uint32_t pad0:1;
-        uint32_t src2_rep_ctrl:1;
-        uint32_t src2_swizzle:8;
-        uint32_t src2_subreg_nr:3;
-        uint32_t src2_reg_nr:8;
-        uint32_t pad1:2;
-      } da3src;
-
       /*! Message gateway */
       struct {
         uint32_t subfunc:3;
@@ -959,9 +751,8 @@ union GenNativeInstruction
       } gen7_msg_gw;
 
       struct {
-        uint32_t jip:16;
-        uint32_t uip:16;
-      } gen7_branch;
+        uint32_t jip:32;
+      } gen8_branch;
 
       int d;
       uint32_t ud;

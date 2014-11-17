@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -126,7 +126,7 @@ namespace ir {
     }
 
     // Reset the label to block mapping
-    this->labels.resize(last);
+    //this->labels.resize(last);
     foreachBlock([&](BasicBlock &bb) {
       const Instruction *first = bb.getFirstInstruction();
       const LabelInstruction *label = cast<LabelInstruction>(first);
@@ -187,7 +187,7 @@ namespace ir {
       return &bb == this->blocks[0];
   }
 
-  const BasicBlock &Function::getTopBlock(void) const {
+  BasicBlock &Function::getTopBlock(void) const {
     GBE_ASSERT(blockNum() > 0 && blocks[0] != NULL);
     return *blocks[0];
   }
@@ -204,7 +204,7 @@ namespace ir {
     return *blocks[n-1];
   }
 
-  const BasicBlock &Function::getBlock(LabelIndex label) const {
+  BasicBlock &Function::getBlock(LabelIndex label) const {
     GBE_ASSERT(label < labelNum() && labels[label] != NULL);
     return *labels[label];
   }
@@ -256,18 +256,27 @@ namespace ir {
       }
       if (bb.size() == 0) return;
       Instruction *last = bb.getLastInstruction();
-      if (last->isMemberOf<BranchInstruction>() == false) {
+      if (last->isMemberOf<BranchInstruction>() == false || last->getOpcode() == OP_ENDIF || last->getOpcode() == OP_ELSE) {
         jumpToNext = &bb;
         return;
       }
-      const BranchInstruction &insn = cast<BranchInstruction>(*last);
-      if (insn.getOpcode() == OP_BRA) {
+      ir::BasicBlock::iterator it = --bb.end();
+      uint32_t handledInsns = 0;
+      while ((handledInsns < 2 && it != bb.end()) &&
+             static_cast<ir::BranchInstruction *>(&*it)->getOpcode() == OP_BRA) {
+        const BranchInstruction &insn = cast<BranchInstruction>(*it);
+        if (insn.getOpcode() != OP_BRA)
+          break;
         const LabelIndex label = insn.getLabelIndex();
         BasicBlock *target = this->blocks[label];
         GBE_ASSERT(target != NULL);
         target->predecessors.insert(&bb);
         bb.successors.insert(target);
-        if ( insn.isPredicated() == true) jumpToNext = &bb;
+        if (insn.isPredicated() == true) jumpToNext = &bb;
+        // If we are going to handle the second bra, this bra must be a predicated bra
+        GBE_ASSERT(handledInsns == 0 || insn.isPredicated() == true);
+        --it;
+        ++handledInsns;
       }
     });
   }
@@ -321,7 +330,13 @@ namespace ir {
   // Basic Block
   ///////////////////////////////////////////////////////////////////////////
 
-  BasicBlock::BasicBlock(Function &fn) : fn(fn) {
+  BasicBlock::BasicBlock(Function &fn) : needEndif(true), needIf(true), endifLabel(0),
+                                         matchingEndifLabel(0), matchingElseLabel(0),
+                                         thisElseLabel(0), belongToStructure(false),
+                                         isStructureExit(false), isLoopExit(false),
+                                         hasExtraBra(false),
+                                         matchingStructureEntry(NULL),
+                                         fn(fn) {
     this->nextBlock = this->prevBlock = NULL;
   }
 
@@ -334,6 +349,11 @@ namespace ir {
   void BasicBlock::append(Instruction &insn) {
     insn.setParent(this);
     this->push_back(&insn);
+  }
+
+  void BasicBlock::insertAt(iterator pos, Instruction &insn) {
+    insn.setParent(this);
+    this->insert(pos, &insn);
   }
 
   Instruction *BasicBlock::getFirstInstruction(void) const {

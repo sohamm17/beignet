@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -45,7 +45,18 @@ namespace ir {
     IMM_LSHR,
     IMM_AND,
     IMM_OR,
-    IMM_XOR
+    IMM_XOR,
+    IMM_OEQ,
+    IMM_ONE,
+    IMM_OLE,
+    IMM_OGE,
+    IMM_OLT,
+    IMM_OGT,
+    IMM_ORD,
+    IMM_FPTOUI,
+    IMM_FPTOSI,
+    IMM_SITOFP,
+    IMM_UITOFP
   } ImmOpCode;
 
   typedef enum {
@@ -190,11 +201,20 @@ namespace ir {
     }
 
     Immediate(ImmOpCode op, const Immediate &other, Type dstType) {
-      if (op == IMM_TRUNC) {
-        copy(other, 0, 1);
-      } else if (op == IMM_BITCAST) {
-        *this = other;
-        type = (ImmType)dstType;
+      switch (op) {
+        default:
+          GBE_ASSERT(0);
+        case IMM_TRUNC:
+          copy(other, 0, 1);
+          break;
+        case IMM_BITCAST:
+          *this = other;
+          type = (ImmType)dstType;
+          break;
+        case IMM_FPTOUI: *this = Immediate((uint32_t)*other.data.f32); break;
+        case IMM_FPTOSI: *this = Immediate((int32_t)*other.data.f32); break;
+        case IMM_UITOFP: *this = Immediate((float)*other.data.u32); break;
+        case IMM_SITOFP: *this = Immediate((float)*other.data.s32); break;
       }
     }
 
@@ -208,6 +228,9 @@ namespace ir {
     }
 
   private:
+    ImmType type;  //!< Type of the value
+    uint32_t elemNum; //!< vector imm data type
+    uint64_t defaultData;
     union {
       bool *b;
       int8_t *s8;
@@ -223,22 +246,25 @@ namespace ir {
       const Immediate *immVec[];
       void *p;
     } data;     //!< Value to store
-    ImmType type;  //!< Type of the value
-    uint32_t elemNum; //!< vector imm data type
-    uint64_t defaultData;
     Immediate & operator= (const Immediate &);
-    Immediate operator+ (const Immediate &) const; 
-    Immediate operator- (const Immediate &) const; 
-    Immediate operator* (const Immediate &) const; 
-    Immediate operator/ (const Immediate &) const; 
-    Immediate operator% (const Immediate &) const; 
-    Immediate operator& (const Immediate &) const; 
-    Immediate operator| (const Immediate &) const; 
-    Immediate operator^ (const Immediate &) const; 
-    Immediate operator<< (const Immediate &) const; 
-    Immediate operator>> (const Immediate &) const; 
+    Immediate operator+ (const Immediate &) const;
+    Immediate operator- (const Immediate &) const;
+    Immediate operator* (const Immediate &) const;
+    Immediate operator/ (const Immediate &) const;
+    Immediate operator> (const Immediate &) const;
+    Immediate operator== (const Immediate &) const;
+    Immediate operator!= (const Immediate &) const;
+    Immediate operator>= (const Immediate &) const;
+    Immediate operator<= (const Immediate &) const;
+    Immediate operator&& (const Immediate &) const;
+    Immediate operator% (const Immediate &) const;
+    Immediate operator& (const Immediate &) const;
+    Immediate operator| (const Immediate &) const;
+    Immediate operator^ (const Immediate &) const;
+    Immediate operator<< (const Immediate &) const;
+    Immediate operator>> (const Immediate &) const;
     static Immediate lshr (const Immediate &left, const Immediate &right);
-
+    static Immediate less (const Immediate &left, const Immediate &right);
 
     void copy(const Immediate &other, int32_t offset, uint32_t num);
     GBE_CLASS(Immediate);

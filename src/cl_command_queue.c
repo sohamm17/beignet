@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -149,7 +149,7 @@ cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
       cl_gpgpu_bind_image(gpgpu, k->images[i].idx + BTI_MAX_IMAGE_NUM, image->base.bo, image->offset,
                           image->intel_fmt, image->image_type,
                           image->w, image->h, image->depth,
-                          image->row_pitch, image->tiling);
+                          image->row_pitch, (cl_gpgpu_tiling)image->tiling);
   }
   return CL_SUCCESS;
 }
@@ -336,7 +336,7 @@ cl_fulsim_read_all_surfaces(cl_command_queue queue, cl_kernel k)
     assert(mem->bo);
     chunk_n = cl_buffer_get_size(mem->bo) / chunk_sz;
     chunk_remainder = cl_buffer_get_size(mem->bo) % chunk_sz;
-    to = cl_mem_map(mem);
+    to = cl_mem_map(mem, 1);
     for (j = 0; j < chunk_n; ++j) {
       char name[256];
       sprintf(name, "dump%03i.bmp", curr);
@@ -410,7 +410,7 @@ cl_command_queue_ND_range(cl_command_queue queue,
   }
 #endif /* USE_FULSIM */
 
-  if (ver == 7 || ver == 75)
+  if (ver == 7 || ver == 75 || ver == 8)
     TRY (cl_command_queue_ND_range_gen7, queue, k, work_dim, global_wk_off, global_wk_sz, local_wk_sz);
   else
     FATAL ("Unknown Gen Device");

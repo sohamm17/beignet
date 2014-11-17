@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -60,7 +60,7 @@ namespace gbe
     const ir::Register getReg() const {
       return (ir::Register)(key & 0xFFFF);
     }
-    const int32_t getMaxID() const {
+    int32_t getMaxID() const {
       return key >> 16;
     }
     uint64_t key;
@@ -194,13 +194,17 @@ namespace gbe
                                    uint32_t regID, bool isSrc,
                                    ir::Type type = ir::TYPE_FLOAT, bool needMov = true) {
       ir::Register reg;
-      if (isSrc)
+      if (isSrc) {
         reg = sel.replaceSrc(insn, regID, type, needMov);
-      else
+        intervals.push_back(reg);
+        intervals[reg].minID = insn->ID - 1;
+        intervals[reg].maxID = insn->ID;
+      } else {
         reg = sel.replaceDst(insn, regID, type, needMov);
-      intervals.push_back(reg);
-      intervals[reg].minID = insn->ID;
-      intervals[reg].maxID = insn->ID;
+        intervals.push_back(reg);
+        intervals[reg].minID = insn->ID;
+        intervals[reg].maxID = insn->ID + 1;
+      }
       return reg;
     }
     /*! Use custom allocator */
@@ -353,7 +357,15 @@ namespace gbe
 
   template <bool sortStartingPoint>
   inline bool cmp(const GenRegInterval *i0, const GenRegInterval *i1) {
-    return sortStartingPoint ? i0->minID < i1->minID : i0->maxID < i1->maxID;
+    if (sortStartingPoint) {
+      if (i0->minID == i1->minID)
+        return (i0->maxID < i1->maxID);
+      return i0->minID < i1->minID;
+    } else {
+      if (i0->maxID == i1->maxID)
+        return (i0->minID < i1->minID);
+      return i0->maxID < i1->maxID;
+    }
   }
 
   bool GenRegAllocator::Opaque::expireGRF(const GenRegInterval &limit) {
@@ -573,6 +585,8 @@ namespace gbe
               // If this is a modFlag on a scalar bool, we need to remove it
               // from the allocated flags map. Then latter, the user could
               // validate the flag from the scalar value correctly.
+              // The reason is we can not predicate the active channel when we
+              // need to use this flag.
               if (IS_SCALAR_FLAG(insn)) {
                 allocatedFlags.erase(ir::Register(insn.state.flagIndex));
                 continue;
@@ -838,7 +852,7 @@ namespace gbe
       // from the RA map.
       bool success = expireReg(interval.reg);
       GBE_ASSERT(success);
-      success = success;
+      if(!success) return success;
       RA.erase(interval.reg);
     }
     spilledRegs.insert(std::make_pair(interval.reg, spillTag));
@@ -943,15 +957,14 @@ namespace gbe
                                                        uint32_t size,
                                                        uint32_t alignment) {
     uint32_t grfOffset;
-    static uint32_t tick = 0;
     // Doing expireGRF too freqently will cause the post register allocation
     // scheduling very hard. As it will cause a very high register conflict rate.
     // The tradeoff here is to reduce the freqency here. And if we are under spilling
     // then no need to reduce that freqency as the register pressure is the most
     // important factor.
-    if (tick % 12 == 0 || ctx.reservedSpillRegs != 0)
+    if (ctx.regSpillTick % 12 == 0 || ctx.reservedSpillRegs != 0)
       this->expireGRF(interval);
-    tick++;
+    ctx.regSpillTick++;
     // For some scalar byte register, it may be used as a destination register
     // and the source is a scalar Dword. If that is the case, the byte register
     // must get 4byte alignment register offset.
@@ -1065,7 +1078,8 @@ namespace gbe
                        insn.opcode == SEL_OP_JMPI ||
                        insn.state.predicate == GEN_PREDICATE_NONE ||
                        (block.hasBarrier && insn.opcode == SEL_OP_MOV) ||
-                       (insn.state.flag == 0 && insn.state.subFlag == 1)));
+                       (insn.state.flag == 0 && insn.state.subFlag == 1) ||
+                       (block.removeSimpleIfEndif && insn.state.flag == 0 && insn.state.subFlag == 0) ));
         }
         lastID = insnID;
         insnID++;

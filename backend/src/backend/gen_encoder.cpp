@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -115,7 +115,7 @@ namespace gbe
                                         unsigned char msg_type, uint32_t msg_length,
                                         bool header_present)
   {
-    const GenMessageTarget sfid = GEN6_SFID_DATAPORT_RENDER_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_RENDER;
     setMessageDescriptor(insn, sfid, msg_length, 0, header_present);
     insn->bits3.gen7_typed_rw.bti = bti;
     insn->bits3.gen7_typed_rw.msg_type = msg_type;
@@ -125,7 +125,7 @@ namespace gbe
                                   uint32_t rgba, uint32_t msg_type,
                                   uint32_t msg_length, uint32_t response_length)
   {
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
     insn->bits3.gen7_untyped_rw.msg_type = msg_type;
     insn->bits3.gen7_untyped_rw.bti = bti;
@@ -146,7 +146,7 @@ namespace gbe
                                      uint32_t msg_length,
                                      uint32_t response_length)
   {
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
     p->setMessageDescriptor(insn, sfid, msg_length, response_length);
     insn->bits3.gen7_byte_rw.msg_type = msg_type;
     insn->bits3.gen7_byte_rw.bti = bti;
@@ -167,7 +167,7 @@ namespace gbe
                           uint32_t msg_length,
                           uint32_t response_length)
   {
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
     p->setMessageDescriptor(insn, sfid, msg_length, response_length);
     assert(size == 2 || size == 4);
     insn->bits3.gen7_oblock_rw.msg_type = msg_type;
@@ -208,7 +208,7 @@ namespace gbe
     // message causes a hang at unit test case compiler_global_constant.
     // We workaround it to use DATA CACHE instead.
     const GenMessageTarget sfid = (p->deviceID == PCI_CHIP_BAYTRAIL_T) ?
-                                 GEN_SFID_DATAPORT_DATA_CACHE : GEN6_SFID_DATAPORT_CONSTANT_CACHE;
+                                 GEN_SFID_DATAPORT_DATA : GEN_SFID_DATAPORT_CONSTANT;
     p->setMessageDescriptor(insn, sfid, msg_length, response_length);
     insn->bits3.gen7_dword_rw.msg_type = msg_type;
     insn->bits3.gen7_dword_rw.bti = bti;
@@ -239,139 +239,6 @@ namespace gbe
   void GenEncoder::pop(void) {
     assert(stateNum > 0);
     curr = stack[--stateNum];
-  }
-
-  void GenEncoder::setHeader(GenNativeInstruction *insn) {
-    if (this->curr.execWidth == 8)
-      insn->header.execution_size = GEN_WIDTH_8;
-    else if (this->curr.execWidth == 16)
-      insn->header.execution_size = GEN_WIDTH_16;
-    else if (this->curr.execWidth == 4)
-      insn->header.execution_size = GEN_WIDTH_4;
-    else if (this->curr.execWidth == 1)
-      insn->header.execution_size = GEN_WIDTH_1;
-    else
-      NOT_IMPLEMENTED;
-    insn->header.acc_wr_control = this->curr.accWrEnable;
-    insn->header.quarter_control = this->curr.quarterControl;
-    insn->bits1.ia1.nib_ctrl = this->curr.nibControl;
-    insn->header.mask_control = this->curr.noMask;
-    insn->bits2.ia1.flag_reg_nr = this->curr.flag;
-    insn->bits2.ia1.flag_sub_reg_nr = this->curr.subFlag;
-    if (this->curr.predicate != GEN_PREDICATE_NONE) {
-      insn->header.predicate_control = this->curr.predicate;
-      insn->header.predicate_inverse = this->curr.inversePredicate;
-    }
-    insn->header.saturate = this->curr.saturate;
-  }
-
-  void GenEncoder::setDst(GenNativeInstruction *insn, GenRegister dest) {
-     if (dest.file != GEN_ARCHITECTURE_REGISTER_FILE)
-        assert(dest.nr < 128);
-
-     insn->bits1.da1.dest_reg_file = dest.file;
-     insn->bits1.da1.dest_reg_type = dest.type;
-     insn->bits1.da1.dest_address_mode = dest.address_mode;
-     insn->bits1.da1.dest_reg_nr = dest.nr;
-     insn->bits1.da1.dest_subreg_nr = dest.subnr;
-     if (dest.hstride == GEN_HORIZONTAL_STRIDE_0) {
-       if (dest.type == GEN_TYPE_UB || dest.type == GEN_TYPE_B)
-         dest.hstride = GEN_HORIZONTAL_STRIDE_4;
-       else if (dest.type == GEN_TYPE_UW || dest.type == GEN_TYPE_W)
-         dest.hstride = GEN_HORIZONTAL_STRIDE_2;
-       else
-         dest.hstride = GEN_HORIZONTAL_STRIDE_1;
-     }
-     insn->bits1.da1.dest_horiz_stride = dest.hstride;
-  }
-
-  void GenEncoder::setSrc0(GenNativeInstruction *insn, GenRegister reg) {
-     if (reg.file != GEN_ARCHITECTURE_REGISTER_FILE)
-        assert(reg.nr < 128);
-
-     if (reg.address_mode == GEN_ADDRESS_DIRECT) {
-       insn->bits1.da1.src0_reg_file = reg.file;
-       insn->bits1.da1.src0_reg_type = reg.type;
-       insn->bits2.da1.src0_abs = reg.absolute;
-       insn->bits2.da1.src0_negate = reg.negation;
-       insn->bits2.da1.src0_address_mode = reg.address_mode;
-
-       if (reg.file == GEN_IMMEDIATE_VALUE) {
-          insn->bits3.ud = reg.value.ud;
-
-          /* Required to set some fields in src1 as well: */
-          insn->bits1.da1.src1_reg_file = 0; /* arf */
-          insn->bits1.da1.src1_reg_type = reg.type;
-       }
-       else {
-         if (insn->header.access_mode == GEN_ALIGN_1) {
-           insn->bits2.da1.src0_subreg_nr = reg.subnr;
-           insn->bits2.da1.src0_reg_nr = reg.nr;
-         } else {
-           insn->bits2.da16.src0_subreg_nr = reg.subnr / 16;
-           insn->bits2.da16.src0_reg_nr = reg.nr;
-         }
-
-         if (reg.width == GEN_WIDTH_1 &&
-             insn->header.execution_size == GEN_WIDTH_1) {
-           insn->bits2.da1.src0_horiz_stride = GEN_HORIZONTAL_STRIDE_0;
-           insn->bits2.da1.src0_width = GEN_WIDTH_1;
-           insn->bits2.da1.src0_vert_stride = GEN_VERTICAL_STRIDE_0;
-         }
-         else {
-           insn->bits2.da1.src0_horiz_stride = reg.hstride;
-           insn->bits2.da1.src0_width = reg.width;
-           insn->bits2.da1.src0_vert_stride = reg.vstride;
-         }
-       }
-    } else {
-       insn->bits1.ia1.src0_reg_file = GEN_GENERAL_REGISTER_FILE;
-       insn->bits1.ia1.src0_reg_type = reg.type;
-       insn->bits2.ia1.src0_subreg_nr = 0;
-       insn->bits2.ia1.src0_indirect_offset = 0;
-       insn->bits2.ia1.src0_abs = 0;
-       insn->bits2.ia1.src0_negate = 0;
-       insn->bits2.ia1.src0_address_mode = reg.address_mode;
-       insn->bits2.ia1.src0_horiz_stride = GEN_HORIZONTAL_STRIDE_0;
-       insn->bits2.ia1.src0_width = GEN_WIDTH_1;
-       insn->bits2.ia1.src0_vert_stride = GEN_VERTICAL_STRIDE_ONE_DIMENSIONAL;
-    }
-  }
-
-  void GenEncoder::setSrc1(GenNativeInstruction *insn, GenRegister reg) {
-     assert(reg.nr < 128);
-     assert(reg.file != GEN_ARCHITECTURE_REGISTER_FILE || reg.nr == 0);
-
-     insn->bits1.da1.src1_reg_file = reg.file;
-     insn->bits1.da1.src1_reg_type = reg.type;
-     insn->bits3.da1.src1_abs = reg.absolute;
-     insn->bits3.da1.src1_negate = reg.negation;
-
-     assert(insn->bits1.da1.src0_reg_file != GEN_IMMEDIATE_VALUE);
-
-     if (reg.file == GEN_IMMEDIATE_VALUE)
-       insn->bits3.ud = reg.value.ud;
-     else {
-       assert (reg.address_mode == GEN_ADDRESS_DIRECT);
-       if (insn->header.access_mode == GEN_ALIGN_1) {
-         insn->bits3.da1.src1_subreg_nr = reg.subnr;
-         insn->bits3.da1.src1_reg_nr = reg.nr;
-       } else {
-         insn->bits3.da16.src1_subreg_nr = reg.subnr / 16;
-         insn->bits3.da16.src1_reg_nr = reg.nr;
-       }
-
-       if (reg.width == GEN_WIDTH_1 &&
-           insn->header.execution_size == GEN_WIDTH_1) {
-         insn->bits3.da1.src1_horiz_stride = GEN_HORIZONTAL_STRIDE_0;
-         insn->bits3.da1.src1_width = GEN_WIDTH_1;
-         insn->bits3.da1.src1_vert_stride = GEN_VERTICAL_STRIDE_0;
-       } else {
-         insn->bits3.da1.src1_horiz_stride = reg.hstride;
-         insn->bits3.da1.src1_width = reg.width;
-         insn->bits3.da1.src1_vert_stride = reg.vstride;
-       }
-     }
   }
 
   static const uint32_t untypedRWMask[] = {
@@ -532,7 +399,7 @@ namespace gbe
     this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
     this->setSrc1(insn, GenRegister::immud(0));
 
-    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
     insn->bits3.gen7_atomic_op.msg_type = GEN7_UNTYPED_ATOMIC_READ;
     insn->bits3.gen7_atomic_op.bti = bti;
@@ -695,83 +562,6 @@ namespace gbe
     }
   }
 
-#define NO_SWIZZLE ((0<<0) | (1<<2) | (2<<4) | (3<<6))
-
-  static GenNativeInstruction *alu3(GenEncoder *p,
-                              uint32_t opcode,
-                              GenRegister dest,
-                              GenRegister src0,
-                              GenRegister src1,
-                              GenRegister src2)
-  {
-     GenNativeInstruction *insn = p->next(opcode);
-
-     assert(dest.file == GEN_GENERAL_REGISTER_FILE);
-     assert(dest.nr < 128);
-     assert(dest.address_mode == GEN_ADDRESS_DIRECT);
-     assert(dest.type = GEN_TYPE_F);
-     insn->bits1.da3src.dest_reg_file = 0;
-     insn->bits1.da3src.dest_reg_nr = dest.nr;
-     insn->bits1.da3src.dest_subreg_nr = dest.subnr / 16;
-     insn->bits1.da3src.dest_writemask = 0xf;
-     p->setHeader(insn);
-     insn->header.access_mode = GEN_ALIGN_16;
-     insn->header.execution_size = GEN_WIDTH_8;
-
-     assert(src0.file == GEN_GENERAL_REGISTER_FILE);
-     assert(src0.address_mode == GEN_ADDRESS_DIRECT);
-     assert(src0.nr < 128);
-     assert(src0.type == GEN_TYPE_F);
-     insn->bits2.da3src.src0_swizzle = NO_SWIZZLE;
-     insn->bits2.da3src.src0_subreg_nr = src0.subnr / 4 ;
-     insn->bits2.da3src.src0_reg_nr = src0.nr;
-     insn->bits1.da3src.src0_abs = src0.absolute;
-     insn->bits1.da3src.src0_negate = src0.negation;
-     insn->bits2.da3src.src0_rep_ctrl = src0.vstride == GEN_VERTICAL_STRIDE_0;
-
-     assert(src1.file == GEN_GENERAL_REGISTER_FILE);
-     assert(src1.address_mode == GEN_ADDRESS_DIRECT);
-     assert(src1.nr < 128);
-     assert(src1.type == GEN_TYPE_F);
-     insn->bits2.da3src.src1_swizzle = NO_SWIZZLE;
-     insn->bits2.da3src.src1_subreg_nr_low = (src1.subnr / 4) & 0x3;
-     insn->bits3.da3src.src1_subreg_nr_high = (src1.subnr / 4) >> 2;
-     insn->bits2.da3src.src1_rep_ctrl = src1.vstride == GEN_VERTICAL_STRIDE_0;
-     insn->bits3.da3src.src1_reg_nr = src1.nr;
-     insn->bits1.da3src.src1_abs = src1.absolute;
-     insn->bits1.da3src.src1_negate = src1.negation;
-
-     assert(src2.file == GEN_GENERAL_REGISTER_FILE);
-     assert(src2.address_mode == GEN_ADDRESS_DIRECT);
-     assert(src2.nr < 128);
-     assert(src2.type == GEN_TYPE_F);
-     insn->bits3.da3src.src2_swizzle = NO_SWIZZLE;
-     insn->bits3.da3src.src2_subreg_nr = src2.subnr / 4;
-     insn->bits3.da3src.src2_rep_ctrl = src2.vstride == GEN_VERTICAL_STRIDE_0;
-     insn->bits3.da3src.src2_reg_nr = src2.nr;
-     insn->bits1.da3src.src2_abs = src2.absolute;
-     insn->bits1.da3src.src2_negate = src2.negation;
-
-     // Emit second half of the instruction
-     if (p->curr.execWidth == 16) {
-      GenNativeInstruction q1Insn = *insn;
-      insn = p->next(opcode);
-      *insn = q1Insn;
-      insn->header.quarter_control = GEN_COMPRESSION_Q2;
-      insn->bits1.da3src.dest_reg_nr++;
-      if (insn->bits2.da3src.src0_rep_ctrl == 0)
-        insn->bits2.da3src.src0_reg_nr++;
-      if (insn->bits2.da3src.src1_rep_ctrl == 0)
-        insn->bits3.da3src.src1_reg_nr++;
-      if (insn->bits3.da3src.src2_rep_ctrl == 0)
-        insn->bits3.da3src.src2_reg_nr++;
-     }
-
-     return insn;
-  }
-
-#undef NO_SWIZZLE
-
 #define ALU1(OP) \
   void GenEncoder::OP(GenRegister dest, GenRegister src0, uint32_t condition) { \
     alu1(this, GEN_OPCODE_##OP, dest, src0, condition); \
@@ -790,7 +580,7 @@ namespace gbe
 
 #define ALU3(OP) \
   void GenEncoder::OP(GenRegister dest, GenRegister src0, GenRegister src1, GenRegister src2) { \
-    alu3(this, GEN_OPCODE_##OP, dest, src0, src1, src2); \
+    this->alu3(GEN_OPCODE_##OP, dest, src0, src1, src2); \
   }
 
   void GenEncoder::LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value) {
@@ -822,38 +612,15 @@ namespace gbe
     pop();
   }
 
-  void GenEncoder::UPSAMPLE_SHORT(GenRegister dest, GenRegister src0, GenRegister src1) {
-    dest.type = GEN_TYPE_B;
-    dest.hstride = GEN_HORIZONTAL_STRIDE_2;
-    src0.type = GEN_TYPE_B;
-    src0.hstride = GEN_HORIZONTAL_STRIDE_2;
-    src1.type = GEN_TYPE_B;
-    src1.hstride = GEN_HORIZONTAL_STRIDE_2;
-    MOV(dest, src1);
-    dest.subnr ++;
-    MOV(dest, src0);
-  }
-
-  void GenEncoder::UPSAMPLE_INT(GenRegister dest, GenRegister src0, GenRegister src1) {
-    dest.type = GEN_TYPE_W;
-    dest.hstride = GEN_HORIZONTAL_STRIDE_2;
-    src0.type = GEN_TYPE_W;
-    src0.hstride = GEN_HORIZONTAL_STRIDE_2;
-    src1.type = GEN_TYPE_W;
-    src1.hstride = GEN_HORIZONTAL_STRIDE_2;
-    MOV(dest, src1);
-    dest.subnr += 2;
-    MOV(dest, src0);
-  }
-
   void GenEncoder::LOAD_INT64_IMM(GenRegister dest, int64_t value) {
     GenRegister u0 = GenRegister::immd((int)value), u1 = GenRegister::immd(value >> 32);
     MOV(dest.bottom_half(), u0);
     MOV(dest.top_half(this->simdWidth), u1);
   }
 
-  void GenEncoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister r) {
+  void GenEncoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp) {
     GBE_ASSERT((src0.type == GEN_TYPE_F && dest.isdf()) || (src0.isdf() && dest.type == GEN_TYPE_F));
+    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_F);
     int w = curr.execWidth;
     GenRegister r0;
     int factor = 1;
@@ -894,6 +661,14 @@ namespace gbe
     }
   }
 
+  void GenEncoder::F16TO32(GenRegister dest, GenRegister src0) {
+    alu1(this, GEN_OPCODE_F16TO32, dest, src0);
+  }
+
+  void GenEncoder::F32TO16(GenRegister dest, GenRegister src0) {
+    alu1(this, GEN_OPCODE_F32TO16, dest, src0);
+  }
+
   ALU1(MOV)
   ALU1(RNDZ)
   ALU1(RNDE)
@@ -901,8 +676,7 @@ namespace gbe
   ALU1(RNDU)
   ALU1(FBH)
   ALU1(FBL)
-  ALU1(F16TO32)
-  ALU1(F32TO16)
+  ALU1(CBIT)
   ALU2(SEL)
   ALU1(NOT)
   ALU2_MOD(AND)
@@ -1007,7 +781,7 @@ namespace gbe
     this->setHeader(insn);
     this->setDst(insn, dst);
     this->setSrc0(insn, dst);
-    setMessageDescriptor(insn, GEN_SFID_DATAPORT_DATA_CACHE, 1, 1, 1);
+    setMessageDescriptor(insn, GEN_SFID_DATAPORT_DATA, 1, 1, 1);
     insn->bits3.gen7_memory_fence.msg_type = GEN_MEM_FENCE;
     insn->bits3.gen7_memory_fence.commit_enable = 0x1;
   }
@@ -1024,29 +798,41 @@ namespace gbe
   }
 
   ALU2_BRA(IF)
+  ALU2_BRA(ELSE)
   ALU2_BRA(ENDIF)
+  ALU2_BRA(WHILE)
   ALU2_BRA(BRD)
   ALU2_BRA(BRC)
 
-  void GenEncoder::patchJMPI(uint32_t insnID, int32_t jumpDistance) {
+  void GenEncoder::patchJMPI(uint32_t insnID, int32_t jip, int32_t uip) {
     GenNativeInstruction &insn = *(GenNativeInstruction *)&this->store[insnID];
     GBE_ASSERT(insnID < this->store.size());
     GBE_ASSERT(insn.header.opcode == GEN_OPCODE_JMPI ||
                insn.header.opcode == GEN_OPCODE_BRD  ||
                insn.header.opcode == GEN_OPCODE_ENDIF ||
                insn.header.opcode == GEN_OPCODE_IF ||
-               insn.header.opcode == GEN_OPCODE_BRC);
+               insn.header.opcode == GEN_OPCODE_BRC ||
+               insn.header.opcode == GEN_OPCODE_WHILE ||
+               insn.header.opcode == GEN_OPCODE_ELSE);
 
-    if (insn.header.opcode != GEN_OPCODE_JMPI || (jumpDistance > -32769 && jumpDistance < 32768))  {
-           if (insn.header.opcode == GEN_OPCODE_IF) {
-             this->setSrc1(&insn, GenRegister::immd(jumpDistance));
-             return;
-           }
-           else if (insn.header.opcode == GEN_OPCODE_JMPI) {
-             jumpDistance = jumpDistance - 2;
-           }
+    if( insn.header.opcode == GEN_OPCODE_WHILE ){
+      // if this WHILE instruction jump back to an ELSE instruction,
+      // need add distance to go to the next instruction.
+      GenNativeInstruction & insn_else = *(GenNativeInstruction *)&this->store[insnID+jip];
+      if(insn_else.header.opcode == GEN_OPCODE_ELSE){
+        jip += 2;
+      }
+    }
 
-           this->setSrc1(&insn, GenRegister::immd(jumpDistance));
+    if (insn.header.opcode != GEN_OPCODE_JMPI || (jip > -32769 && jip < 32768))  {
+      if (insn.header.opcode == GEN_OPCODE_IF) {
+        this->setSrc1(&insn, GenRegister::immd((jip & 0xffff) | uip<<16));
+        return;
+      } else if (insn.header.opcode == GEN_OPCODE_JMPI) {
+        jip = jip - 2;
+      } else if(insn.header.opcode == GEN_OPCODE_ENDIF)
+        jip += 2;
+       this->setSrc1(&insn, GenRegister::immd((jip & 0xffff) | uip<<16));
     } else if ( insn.header.predicate_control == GEN_PREDICATE_NONE ) {
       // For the conditional jump distance out of S15 range, we need to use an
       // inverted jmp followed by a add ip, ip, distance to implement.
@@ -1058,13 +844,11 @@ namespace gbe
       // for all the branching instruction. And need to adjust the distance
       // for those branch instruction's start point and end point contains
       // this instruction.
-      GenNativeInstruction *insn2 = (GenNativeInstruction *)&this->store[insnID+2];
-      GBE_ASSERT(insn2->header.opcode == GEN_OPCODE_NOP);
-      insn2 = insn2;
+      GBE_ASSERT(((GenNativeInstruction *)&this->store[insnID+2])->header.opcode == GEN_OPCODE_NOP);
       insn.header.opcode = GEN_OPCODE_ADD;
       this->setDst(&insn, GenRegister::ip());
       this->setSrc0(&insn, GenRegister::ip());
-      this->setSrc1(&insn, GenRegister::immd(jumpDistance * 8));
+      this->setSrc1(&insn, GenRegister::immd(jip * 8));
     } else {
       GenNativeInstruction &insn2 = *(GenNativeInstruction *)&this->store[insnID+2];
       insn.header.predicate_inverse ^= 1;
@@ -1075,7 +859,7 @@ namespace gbe
       insn2.header.opcode = GEN_OPCODE_ADD;
       this->setDst(&insn2, GenRegister::ip());
       this->setSrc0(&insn2, GenRegister::ip());
-      this->setSrc1(&insn2, GenRegister::immd((jumpDistance - 2) * 8));
+      this->setSrc1(&insn2, GenRegister::immd((jip - 2) * 8));
     }
   }
 
@@ -1261,7 +1045,7 @@ namespace gbe
                                    uint32_t msg_length,
                                    uint32_t response_length)
   {
-     const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA_CACHE;
+     const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
      p->setMessageDescriptor(insn, sfid, msg_length, response_length, true);
      insn->bits3.gen7_scratch_rw.block_size = block_size;
      insn->bits3.gen7_scratch_rw.msg_type = msg_type;

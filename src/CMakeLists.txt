@@ -42,7 +42,8 @@ set (KERNEL_STR_FILES)
 set (KERNEL_NAMES cl_internal_copy_buf_align4
 cl_internal_copy_buf_align16 cl_internal_copy_buf_unalign_same_offset
 cl_internal_copy_buf_unalign_dst_offset cl_internal_copy_buf_unalign_src_offset
-cl_internal_copy_buf_rect cl_internal_copy_image_1d_to_1d cl_internal_copy_image_2d_to_2d
+cl_internal_copy_buf_rect cl_internal_copy_buf_rect_align4
+cl_internal_copy_image_1d_to_1d cl_internal_copy_image_2d_to_2d
 cl_internal_copy_image_3d_to_2d cl_internal_copy_image_2d_to_3d cl_internal_copy_image_3d_to_3d
 cl_internal_copy_image_2d_to_buffer cl_internal_copy_image_3d_to_buffer
 cl_internal_copy_buffer_to_image_2d cl_internal_copy_buffer_to_image_3d
@@ -108,10 +109,22 @@ SET(CMAKE_CXX_FLAGS "-DHAS_OCLIcd ${CMAKE_CXX_FLAGS}")
 SET(CMAKE_C_FLAGS "-DHAS_OCLIcd ${CMAKE_C_FLAGS}")
 endif (OCLIcd_FOUND)
 
+if (DRM_INTEL_USERPTR)
+SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
+SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
+endif (DRM_INTEL_USERPTR)
+
+set(GIT_SHA1 "git_sha1.h")
+add_custom_target(${GIT_SHA1} ALL
+  COMMAND chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/git_sha1.sh
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/git_sha1.sh ${CMAKE_CURRENT_SOURCE_DIR} ${GIT_SHA1}
+)
+
 SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic,--allow-shlib-undefined")
 
 link_directories (${LLVM_LIBRARY_DIR} ${DRM_LIBDIR})
 add_library(cl SHARED ${OPENCL_SRC})
+ADD_DEPENDENCIES(cl ${GIT_SHA1})
 target_link_libraries(
                       cl
                       ${X11_LIBRARIES}

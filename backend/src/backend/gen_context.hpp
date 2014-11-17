@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -26,7 +26,7 @@
 #define __GBE_GEN_CONTEXT_HPP__
 
 #include "backend/context.hpp"
-#include "backend/gen_encoder.hpp"
+#include "backend/gen7_encoder.hpp"
 #include "backend/program.h"
 #include "backend/gen_register.hpp"
 #include "ir/function.hpp"
@@ -76,6 +76,8 @@ namespace gbe
     virtual uint32_t alignScratchSize(uint32_t size);
     /*! Get the device's max srcatch size */
     virtual uint32_t getScratchSize(void) { return GEN7_SCRATCH_SIZE; }
+    /*! Get the pointer argument size for curbe alloc */
+    virtual uint32_t getPointerSize(void) { return 4; }
     /*! Function we emit code for */
     INLINE const ir::Function &getFunction(void) const { return fn; }
     /*! Simd width chosen for the current function */
@@ -116,6 +118,7 @@ namespace gbe
     void I64FullAdd(GenRegister high1, GenRegister low1, GenRegister high2, GenRegister low2);
     void I32FullMult(GenRegister high, GenRegister low, GenRegister src0, GenRegister src1);
     void I64FullMult(GenRegister dst1, GenRegister dst2, GenRegister dst3, GenRegister dst4, GenRegister x_high, GenRegister x_low, GenRegister y_high, GenRegister y_low);
+    void setFlag(GenRegister flag, GenRegister src);
     void saveFlag(GenRegister dest, int flag, int subFlag);
     void UnsignedI64ToFloat(GenRegister dst, GenRegister high, GenRegister low, GenRegister exp, GenRegister mantissa, GenRegister tmp, GenRegister flag);
 
@@ -192,13 +195,13 @@ namespace gbe
     uint32_t reservedSpillRegs;
     bool limitRegisterPressure;
     bool relaxMath;
-    const bool getIFENDIFFix(void) const { return ifEndifFix; }
+    bool getIFENDIFFix(void) const { return ifEndifFix; }
     void setIFENDIFFix(bool fix) { ifEndifFix = fix; }
-    const CompileErrorCode getErrCode() { return errCode; }
+    CompileErrorCode getErrCode() { return errCode; }
 
   protected:
     virtual GenEncoder* generateEncoder(void) {
-      return GBE_NEW(GenEncoder, this->simdWidth, 7, deviceID);
+      return GBE_NEW(Gen7Encoder, this->simdWidth, 7, deviceID);
     }
     /*! allocate a new curbe register and insert to curbe pool. */
     void allocCurbeReg(ir::Register reg, gbe_curbe_type value, uint32_t subValue = 0);
@@ -206,6 +209,7 @@ namespace gbe
   private:
     CompileErrorCode errCode;
     bool ifEndifFix;
+    uint32_t regSpillTick;
     /*! Build the curbe patch list for the given kernel */
     void buildPatchList(void);
     /*! Calc the group's slm offset from R0.0, to work around HSW SLM bug*/

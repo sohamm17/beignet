@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -51,6 +51,7 @@
 #include "backend/gen_program.hpp"
 #include "backend/gen_context.hpp"
 #include "backend/gen75_context.hpp"
+#include "backend/gen8_context.hpp"
 #include "backend/gen_defs.hpp"
 #include "backend/gen/gen_mesa_disasm.h"
 #include "backend/gen_reg_allocation.hpp"
@@ -75,7 +76,7 @@ namespace gbe {
   {}
   GenKernel::~GenKernel(void) { GBE_SAFE_DELETE_ARRAY(insns); }
   const char *GenKernel::getCode(void) const { return (const char*) insns; }
-  const void GenKernel::setCode(const char * ins, size_t size) {
+  void GenKernel::setCode(const char * ins, size_t size) {
     insns = (GenInstruction *)ins;
     insnNum = size / sizeof(GenInstruction);
   }
@@ -89,13 +90,13 @@ namespace gbe {
     char *buf = new char[4096];
     setbuffer(f, buf, 4096);
     GenCompactInstruction * pCom = NULL;
-    GenNativeInstruction nativeInsn;
+    GenInstruction insn[2];
 
     for (uint32_t i = 0; i < insnNum;) {
       pCom = (GenCompactInstruction*)(insns+i);
       if(pCom->bits1.cmpt_control == 1) {
-        decompactInstruction(pCom, &nativeInsn);
-        gen_disasm(f, &nativeInsn, deviceID, 1);
+        decompactInstruction(pCom, &insn);
+        gen_disasm(f, &insn, deviceID, 1);
         i++;
       } else {
         gen_disasm(f, insns+i, deviceID, 0);
@@ -164,6 +165,8 @@ namespace gbe {
       ctx = GBE_NEW(GenContext, unit, name, deviceID, relaxMath);
     } else if (IS_HASWELL(deviceID)) {
       ctx = GBE_NEW(Gen75Context, unit, name, deviceID, relaxMath);
+    } else if (IS_BROADWELL(deviceID)) {
+      ctx = GBE_NEW(Gen8Context, unit, name, deviceID, relaxMath);
     }
     GBE_ASSERTM(ctx != NULL, "Fail to create the gen context\n");
 
@@ -204,7 +207,8 @@ namespace gbe {
 #define DEVICE_MATCH(typeA, src_hw_info) ((IS_IVYBRIDGE(typeA) && !strcmp(src_hw_info, "IVB")) ||  \
                                       (IS_IVYBRIDGE(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
                                       (IS_BAYTRAIL_T(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
-                                      (IS_HASWELL(typeA) && !strcmp(src_hw_info, "HSW")) )
+                                      (IS_HASWELL(typeA) && !strcmp(src_hw_info, "HSW")) ||  \
+                                      (IS_BROADWELL(typeA) && !strcmp(src_hw_info, "BDW")) )
 
   static gbe_program genProgramNewFromBinary(uint32_t deviceID, const char *binary, size_t size) {
     using namespace gbe;
@@ -295,6 +299,10 @@ namespace gbe {
         src_hw_info[0]='H';
         src_hw_info[1]='S';
         src_hw_info[2]='W';
+      }else if(IS_BROADWELL(prog->deviceID)){
+        src_hw_info[0]='B';
+        src_hw_info[1]='D';
+        src_hw_info[2]='W';
       }
       FILL_DEVICE_ID(*binary, src_hw_info);
       memcpy(*binary+BINARY_HEADER_LENGTH, oss.str().c_str(), sz*sizeof(char));
@@ -365,17 +373,7 @@ namespace gbe {
       ((GenProgram*)dst_program)->module = llvm::CloneModule((llvm::Module*)((GenProgram*)src_program)->module);
       errSize = 0;
     }else{
-      //set the global variables and functions to link once to fix redefine.
       llvm::Module* src = (llvm::Module*)((GenProgram*)src_program)->module;
-      for (llvm::Module::global_iterator I = src->global_begin(), E = src->global_end(); I != E; ++I) {
-        I->setLinkage(llvm::GlobalValue::LinkOnceAnyLinkage);
-      }
-
-      for (llvm::Module::iterator I = src->begin(), E = src->end(); I != E; ++I) {
-        llvm::Function *F = llvm::dyn_cast<llvm::Function>(I);
-        if (F && isKernelFunction(*F)) continue;
-        I->setLinkage(llvm::GlobalValue::LinkOnceAnyLinkage);
-      }
       llvm::Module* dst = (llvm::Module*)((GenProgram*)dst_program)->module;
       llvm::Linker::LinkModules( dst,
                                  src,

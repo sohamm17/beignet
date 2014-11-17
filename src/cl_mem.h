@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -25,6 +25,7 @@
 #include "CL/cl.h"
 #include "cl_khr_icd.h"
 #include <assert.h>
+#include <pthread.h>
 
 #ifndef CL_VERSION_1_2
 #define CL_MEM_OBJECT_IMAGE1D                       0x10F4
@@ -91,6 +92,7 @@ typedef  struct _cl_mem {
   int map_ref;              /* The mapped count. */
   uint8_t mapped_gtt;       /* This object has mapped gtt, for unmap. */
   cl_mem_dstr_cb *dstr_cb;  /* The destroy callback. */
+  uint8_t is_userptr;    /* CL_MEM_USE_HOST_PTR is enabled*/
 } _cl_mem;
 
 struct _cl_mem_image {
@@ -231,7 +233,7 @@ extern cl_int cl_mem_copy_buffer_to_image(cl_command_queue, cl_mem, struct _cl_m
                                           const size_t, const size_t *, const size_t *);
 
 /* Directly map a memory object */
-extern void *cl_mem_map(cl_mem);
+extern void *cl_mem_map(cl_mem, int);
 
 /* Unmap a memory object */
 extern cl_int cl_mem_unmap(cl_mem);
@@ -246,7 +248,7 @@ extern void *cl_mem_map_gtt_unsync(cl_mem);
 extern cl_int cl_mem_unmap_gtt(cl_mem);
 
 /* Directly map a memory object - tiled images are mapped in GTT mode */
-extern void *cl_mem_map_auto(cl_mem);
+extern void *cl_mem_map_auto(cl_mem, int);
 
 /* Unmap a memory object - tiled images are unmapped in GTT mode */
 extern cl_int cl_mem_unmap_auto(cl_mem);
@@ -261,6 +263,7 @@ cl_mem_allocate(enum cl_mem_type type,
                 cl_mem_flags flags,
                 size_t sz,
                 cl_int is_tiled,
+                void *host_ptr,
                 cl_int *errcode);
 
 void

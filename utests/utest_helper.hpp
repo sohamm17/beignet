@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -225,10 +225,10 @@ extern void cl_write_bmp(const int *data, int width, int height, const char *fil
 extern int cl_check_image(const int *img, int w, int h, const char *bmp);
 
 /* Calculator ULP of each FLOAT value */
-extern const float cl_FLT_ULP(float float_number);
+extern float cl_FLT_ULP(float float_number);
 
 /* Calculator ULP of each INT value */
-extern const int cl_INT_ULP(int int_number);
+extern int cl_INT_ULP(int int_number);
 
 #endif /* __UTEST_HELPER_HPP__ */
 

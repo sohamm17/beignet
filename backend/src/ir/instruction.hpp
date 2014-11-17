@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -137,6 +137,7 @@ namespace ir {
       InstructionBase(reinterpret_cast<const char*>(&other.opcode)) {
       parent = other.parent;
     }
+
   private:
     /*! To be consistant with copy constructor */
     INLINE Instruction &operator= (const Instruction &other) { return *this; }
@@ -188,8 +189,8 @@ namespace ir {
       return T::isClassOf(*this);
     }
     /*! max_src for store instruction (vec16 + addr) */
-    static const uint32_t MAX_SRC_NUM = 17;
-    static const uint32_t MAX_DST_NUM = 16;
+    static const uint32_t MAX_SRC_NUM = 32;
+    static const uint32_t MAX_DST_NUM = 32;
   protected:
     BasicBlock *parent;      //!< The basic block containing the instruction
     GBE_CLASS(Instruction);  //!< Use internal allocators
@@ -364,7 +365,7 @@ namespace ir {
   public:
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
-    const uint8_t getImageIndex() const;
+    uint8_t getImageIndex() const;
     Type getSrcType(void) const;
     Type getCoordType(void) const;
   };
@@ -372,9 +373,9 @@ namespace ir {
   /*! Load texels from a texture */
   class SampleInstruction : public Instruction {
   public:
-    const uint8_t getImageIndex() const;
-    const uint8_t getSamplerIndex(void) const;
-    const uint8_t getSamplerOffset(void) const;
+    uint8_t getImageIndex() const;
+    uint8_t getSamplerIndex(void) const;
+    uint8_t getSamplerOffset(void) const;
     Type getSrcType(void) const;
     Type getDstType(void) const;
     /*! Return true if the given instruction is an instance of this class */
@@ -416,7 +417,7 @@ namespace ir {
      return 0;
    }
 
-    const uint8_t getImageIndex() const;
+    uint8_t getImageIndex() const;
     uint32_t getInfoType() const;
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
@@ -429,6 +430,8 @@ namespace ir {
   public:
     /*! Indicate if the branch is predicated */
     bool isPredicated(void) const;
+    /*! Indicate if the branch is inverse predicated */
+    bool getInversePredicated(void) const;
     /*! Return the predicate register (if predicated) */
     RegisterData getPredicate(void) const {
       GBE_ASSERTM(this->isPredicated() == true, "Branch is not predicated");
@@ -489,6 +492,23 @@ namespace ir {
   public:
     /*! Get the parameters (bitfields) of the sync instructions (see above) */
     uint32_t getParameters(void) const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
+  /*! Read one register (8 DWORD) in arf */
+  class ReadARFInstruction : public Instruction {
+  public:
+    Type getType() const;
+    ir::ARFRegister getARFRegister() const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
+  /*! return a region of a register, make sure the offset does not exceed the register size */
+  class RegionInstruction : public Instruction {
+  public:
+    uint32_t getOffset(void) const;
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
   };
@@ -565,6 +585,8 @@ namespace ir {
   Instruction FBH(Type type, Register dst, Register src);
   /*! fbl.type dst src */
   Instruction FBL(Type type, Register dst, Register src);
+  /*! cbit.type dst src */
+  Instruction CBIT(Type type, Register dst, Register src);
   /*! hadd.type dst src */
   Instruction HADD(Type type, Register dst, Register src0, Register src1);
   /*! rhadd.type dst src */
@@ -661,6 +683,14 @@ namespace ir {
   Instruction BRA(LabelIndex labelIndex);
   /*! (pred) bra labelIndex */
   Instruction BRA(LabelIndex labelIndex, Register pred);
+  /*! (pred) if labelIndex */
+  Instruction IF(LabelIndex labelIndex, Register pred, bool inv_pred=true);
+  /*! else labelIndex */
+  Instruction ELSE(LabelIndex labelIndex);
+  /*! endif */
+  Instruction ENDIF(LabelIndex labelIndex);
+  /*! (pred) while labelIndex */
+  Instruction WHILE(LabelIndex labelIndex, Register pred);
   /*! ret */
   Instruction RET(void);
   /*! load.type.space {dst1,...,dst_valueNum} offset value */
@@ -671,6 +701,9 @@ namespace ir {
   Instruction LOADI(Type type, Register dst, ImmediateIndex value);
   /*! sync.params... (see Sync instruction) */
   Instruction SYNC(uint32_t parameters);
+
+  Instruction READ_ARF(Type type, Register dst, ARFRegister arf);
+  Instruction REGION(Register dst, Register src, uint32_t offset);
   /*! typed write */
   Instruction TYPED_WRITE(uint8_t imageIndex, Tuple src, Type srcType, Type coordType);
   /*! sample textures */

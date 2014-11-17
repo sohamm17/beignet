@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -261,7 +261,7 @@ namespace ir {
         this->src = src;
         this->dstFamily = getFamily(dstType);
         this->srcFamily = getFamily(srcType);
-        GBE_ASSERT(srcNum <= 16 && dstNum <= 16);
+        GBE_ASSERT(srcNum <= Instruction::MAX_SRC_NUM && dstNum <= Instruction::MAX_DST_NUM);
         this->dstNum = dstNum;
         this->srcNum = srcNum;
       }
@@ -348,24 +348,25 @@ namespace ir {
       public NDstPolicy<BranchInstruction, 0>
     {
     public:
-      INLINE BranchInstruction(Opcode op, LabelIndex labelIndex, Register predicate) {
-        GBE_ASSERT(op == OP_BRA);
+      INLINE BranchInstruction(Opcode op, LabelIndex labelIndex, Register predicate, bool inv_pred=false) {
+        GBE_ASSERT(op == OP_BRA || op == OP_IF || op == OP_WHILE);
         this->opcode = op;
         this->predicate = predicate;
         this->labelIndex = labelIndex;
         this->hasPredicate = true;
         this->hasLabel = true;
+        this->inversePredicate = inv_pred;
       }
       INLINE BranchInstruction(Opcode op, LabelIndex labelIndex) {
-        GBE_ASSERT(op == OP_BRA);
-        this->opcode = OP_BRA;
+        GBE_ASSERT(op == OP_BRA || op == OP_ELSE || op == OP_ENDIF);
+        this->opcode = op;
         this->labelIndex = labelIndex;
         this->hasPredicate = false;
         this->hasLabel = true;
       }
       INLINE BranchInstruction(Opcode op) {
         GBE_ASSERT(op == OP_RET);
-        this->opcode = OP_RET;
+        this->opcode = op;
         this->hasPredicate = false;
         this->hasLabel = false;
       }
@@ -385,11 +386,13 @@ namespace ir {
         predicate = reg;
       }
       INLINE bool isPredicated(void) const { return hasPredicate; }
+      INLINE bool getInversePredicated(void) const { return inversePredicate; }
       INLINE bool wellFormed(const Function &fn, std::string &why) const;
       INLINE void out(std::ostream &out, const Function &fn) const;
       Register predicate;    //!< Predication means conditional branch
       LabelIndex labelIndex; //!< Index of the label the branch targets
       bool hasPredicate:1;   //!< Is it predicated?
+      bool inversePredicate:1;   //!< Is it inverse predicated?
       bool hasLabel:1;       //!< Is there any target label?
       Register dst[0];       //!< No destination
     };
@@ -531,11 +534,11 @@ namespace ir {
       Tuple src;
       Tuple dst;
 
-      INLINE const uint8_t getImageIndex(void) const { return this->imageIdx; }
+      INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
       INLINE Type getSrcType(void) const { return this->srcIsFloat ? TYPE_FLOAT : TYPE_S32; }
       INLINE Type getDstType(void) const { return this->dstIsFloat ? TYPE_FLOAT : TYPE_U32; }
-      INLINE const uint8_t getSamplerIndex(void) const { return this->samplerIdx; }
-      INLINE const uint8_t getSamplerOffset(void) const { return this->samplerOffset; }
+      INLINE uint8_t getSamplerIndex(void) const { return this->samplerIdx; }
+      INLINE uint8_t getSamplerOffset(void) const { return this->samplerOffset; }
       uint8_t srcIsFloat:1;
       uint8_t dstIsFloat:1;
       uint8_t samplerIdx:4;
@@ -578,7 +581,7 @@ namespace ir {
       uint8_t coordType;
       uint8_t imageIdx;
 
-      INLINE const uint8_t getImageIndex(void) const { return this->imageIdx; }
+      INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
       INLINE Type getSrcType(void) const { return (Type)this->srcType; }
       INLINE Type getCoordType(void) const { return (Type)this->coordType; }
       // bti, u, v, w, 4 data elements
@@ -614,7 +617,7 @@ namespace ir {
             << " info reg %" << this->getSrc(fn, 0);
       }
 
-      INLINE const uint8_t getImageIndex(void) const { return imageIdx; }
+      INLINE uint8_t getImageIndex(void) const { return imageIdx; }
 
       uint8_t infoType;                 //!< Type of the requested information.
       uint8_t imageIdx;                //!< surface index.
@@ -663,6 +666,48 @@ namespace ir {
       INLINE void out(std::ostream &out, const Function &fn) const;
       uint32_t parameters;
       Register dst[0], src[0];
+    };
+
+    class ALIGNED_INSTRUCTION ReadARFInstruction :
+      public BasePolicy,
+      public NSrcPolicy<ReadARFInstruction, 0>,
+      public NDstPolicy<ReadARFInstruction, 1>
+    {
+    public:
+      INLINE ReadARFInstruction(Type type, Register dst, ARFRegister arf) {
+        this->type = type;
+        this->dst[0] = dst;
+        this->opcode = OP_READ_ARF;
+        this->arf = arf;
+      }
+      INLINE ir::ARFRegister getARFRegister(void) const { return this->arf; }
+      INLINE Type getType(void) const { return this->type; }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const;
+      Type type;
+      ARFRegister arf;
+      Register dst[1];
+      Register src[0];
+    };
+
+    class ALIGNED_INSTRUCTION RegionInstruction :
+      public BasePolicy,
+      public NSrcPolicy<RegionInstruction, 1>,
+      public NDstPolicy<RegionInstruction, 1>
+    {
+    public:
+      INLINE RegionInstruction(Register dst, Register src, uint32_t offset) {
+        this->offset = offset;
+        this->dst[0] = dst;
+        this->src[0] = src;
+        this->opcode = OP_REGION;
+      }
+      INLINE uint32_t getOffset(void) const { return this->offset; }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const;
+      uint32_t offset;
+      Register dst[1];
+      Register src[1];
     };
 
     class ALIGNED_INSTRUCTION LabelInstruction :
@@ -989,7 +1034,7 @@ namespace ir {
       }
       const ir::Type immType = fn.getImmediate(immediateIndex).getType();
       if (UNLIKELY(type != immType)) {
-        whyNot = "Inconsistant type for the immediate value to load";
+        whyNot = "Inconsistent type for the immediate value to load";
         return false;
       }
       const RegisterFamily family = getFamily(type);
@@ -1016,6 +1061,30 @@ namespace ir {
         whyNot = "Missing parameters for sync instruction";
         return false;
       }
+      return true;
+    }
+
+    INLINE bool ReadARFInstruction::wellFormed(const Function &fn, std::string &whyNot) const
+    {
+      if (UNLIKELY( this->type != TYPE_U32 && this->type != TYPE_S32)) {
+        whyNot = "Only support S32/U32 type";
+        return false;
+      }
+
+      const RegisterFamily family = getFamily(this->type);
+      if (UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
+        return false;
+
+      return true;
+    }
+
+    INLINE bool RegionInstruction::wellFormed(const Function &fn, std::string &whyNot) const
+    {
+      if (UNLIKELY(checkRegisterData(FAMILY_DWORD, src[0], fn, whyNot) == false))
+        return false;
+      if (UNLIKELY(checkRegisterData(FAMILY_DWORD, dst[0], fn, whyNot) == false))
+        return false;
+
       return true;
     }
 
@@ -1135,6 +1204,16 @@ namespace ir {
         out << ": " << (int)bti.bti[i];
     }
 
+    INLINE void ReadARFInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+      out << " %" << this->getDst(fn, 0) << " arf:" << arf;
+    }
+
+    INLINE void RegionInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+      out << " %" << this->getDst(fn, 0) << " %" << this->getSrc(fn, 0) << " offset: " << this->offset;
+    }
+
     INLINE void LabelInstruction::out(std::ostream &out, const Function &fn) const {
       this->outOpcode(out);
       out << " $" << labelIndex;
@@ -1142,6 +1221,8 @@ namespace ir {
 
     INLINE void BranchInstruction::out(std::ostream &out, const Function &fn) const {
       this->outOpcode(out);
+      if(opcode == OP_IF && inversePredicate)
+        out << " !";
       if (hasPredicate)
         out << "<%" << this->getSrc(fn, 0) << ">";
       if (hasLabel) out << " -> label$" << labelIndex;
@@ -1281,6 +1362,14 @@ END_INTROSPECTION(StoreInstruction)
 START_INTROSPECTION(SyncInstruction)
 #include "ir/instruction.hxx"
 END_INTROSPECTION(SyncInstruction)
+
+START_INTROSPECTION(ReadARFInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(ReadARFInstruction)
+
+START_INTROSPECTION(RegionInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(RegionInstruction)
 
 START_INTROSPECTION(LabelInstruction)
 #include "ir/instruction.hxx"
@@ -1463,18 +1552,22 @@ DECL_MEM_FN(LoadInstruction, bool, isAligned(void), isAligned())
 DECL_MEM_FN(LoadImmInstruction, Type, getType(void), getType())
 DECL_MEM_FN(LabelInstruction, LabelIndex, getLabelIndex(void), getLabelIndex())
 DECL_MEM_FN(BranchInstruction, bool, isPredicated(void), isPredicated())
+DECL_MEM_FN(BranchInstruction, bool, getInversePredicated(void), getInversePredicated())
 DECL_MEM_FN(BranchInstruction, LabelIndex, getLabelIndex(void), getLabelIndex())
 DECL_MEM_FN(SyncInstruction, uint32_t, getParameters(void), getParameters())
+DECL_MEM_FN(ReadARFInstruction, Type, getType(void), getType())
+DECL_MEM_FN(ReadARFInstruction, ARFRegister, getARFRegister(void), getARFRegister())
+DECL_MEM_FN(RegionInstruction, uint32_t, getOffset(void), getOffset())
 DECL_MEM_FN(SampleInstruction, Type, getSrcType(void), getSrcType())
 DECL_MEM_FN(SampleInstruction, Type, getDstType(void), getDstType())
-DECL_MEM_FN(SampleInstruction, const uint8_t, getSamplerIndex(void), getSamplerIndex())
-DECL_MEM_FN(SampleInstruction, const uint8_t, getSamplerOffset(void), getSamplerOffset())
-DECL_MEM_FN(SampleInstruction, const uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(SampleInstruction, uint8_t, getSamplerIndex(void), getSamplerIndex())
+DECL_MEM_FN(SampleInstruction, uint8_t, getSamplerOffset(void), getSamplerOffset())
+DECL_MEM_FN(SampleInstruction, uint8_t, getImageIndex(void), getImageIndex())
 DECL_MEM_FN(TypedWriteInstruction, Type, getSrcType(void), getSrcType())
 DECL_MEM_FN(TypedWriteInstruction, Type, getCoordType(void), getCoordType())
-DECL_MEM_FN(TypedWriteInstruction, const uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(TypedWriteInstruction, uint8_t, getImageIndex(void), getImageIndex())
 DECL_MEM_FN(GetImageInfoInstruction, uint32_t, getInfoType(void), getInfoType())
-DECL_MEM_FN(GetImageInfoInstruction, const uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex())
 
 #undef DECL_MEM_FN
 
@@ -1501,6 +1594,7 @@ DECL_MEM_FN(GetImageInfoInstruction, const uint8_t, getImageIndex(void), getImag
   DECL_EMIT_FUNCTION(MOV)
   DECL_EMIT_FUNCTION(FBH)
   DECL_EMIT_FUNCTION(FBL)
+  DECL_EMIT_FUNCTION(CBIT)
   DECL_EMIT_FUNCTION(COS)
   DECL_EMIT_FUNCTION(SIN)
   DECL_EMIT_FUNCTION(LOG)
@@ -1614,6 +1708,25 @@ DECL_MEM_FN(GetImageInfoInstruction, const uint8_t, getImageIndex(void), getImag
     return internal::BranchInstruction(OP_BRA, labelIndex, pred).convert();
   }
 
+  // IF
+  Instruction IF(LabelIndex labelIndex, Register pred, bool inv_pred) {
+    return internal::BranchInstruction(OP_IF, labelIndex, pred, inv_pred).convert();
+  }
+
+  // ELSE
+  Instruction ELSE(LabelIndex labelIndex) {
+    return internal::BranchInstruction(OP_ELSE, labelIndex).convert();
+  }
+  // ENDIF
+  Instruction ENDIF(LabelIndex labelIndex) {
+    return internal::BranchInstruction(OP_ENDIF, labelIndex).convert();
+  }
+
+  // WHILE
+  Instruction WHILE(LabelIndex labelIndex, Register pred) {
+    return internal::BranchInstruction(OP_WHILE, labelIndex, pred).convert();
+  }
+
   // RET
   Instruction RET(void) {
     return internal::BranchInstruction(OP_RET).convert();
@@ -1647,6 +1760,13 @@ DECL_MEM_FN(GetImageInfoInstruction, const uint8_t, getImageIndex(void), getImag
     return internal::SyncInstruction(parameters).convert();
   }
 
+  Instruction READ_ARF(Type type, Register dst, ARFRegister arf) {
+    return internal::ReadARFInstruction(type, dst, arf).convert();
+  }
+  Instruction REGION(Register dst, Register src, uint32_t offset) {
+    return internal::RegionInstruction(dst, src, offset).convert();
+  }
+
   // LABEL
   Instruction LABEL(LabelIndex labelIndex) {
     return internal::LabelInstruction(labelIndex).convert();
@@ -1667,10 +1787,17 @@ DECL_MEM_FN(GetImageInfoInstruction, const uint8_t, getImageIndex(void), getImag
 
   std::ostream &operator<< (std::ostream &out, const Instruction &insn) {
     const Function &fn = insn.getFunction();
+    const BasicBlock *bb = insn.getParent();
     switch (insn.getOpcode()) {
 #define DECL_INSN(OPCODE, CLASS) \
       case OP_##OPCODE: \
-        reinterpret_cast<const internal::CLASS&>(insn).out(out, fn); \
+          if(OP_##OPCODE == OP_ELSE) \
+          { \
+            reinterpret_cast<const internal::CLASS&>(insn).out(out, fn); \
+            out << "  <**>label: " << bb->thisElseLabel; \
+            break; \
+          } \
+          reinterpret_cast<const internal::CLASS&>(insn).out(out, fn); \
         break;
 #include "instruction.hxx"
 #undef DECL_INSN

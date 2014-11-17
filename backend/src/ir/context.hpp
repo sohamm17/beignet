@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -117,11 +117,6 @@ namespace ir {
       return fn->newImmediate(dstImm);
     }
 
-    /*! Set an immediate value */
-    template <typename T> INLINE void setImmediate(ImmediateIndex index, T value) {
-      const Immediate imm(value);
-      fn->immediates[index] = imm;
-    }
     /*! Create a new register holding the given value. A LOADI is pushed */
     template <typename T> INLINE Register immReg(T value) {
       GBE_ASSERTM(fn != NULL, "No function currently defined");

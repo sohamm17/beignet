@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -60,6 +60,8 @@
 #include "llvm/llvm_to_gen.hpp"
 #include "sys/cvar.hpp"
 #include "sys/platform.hpp"
+#include "ir/unit.hpp"
+#include "ir/structural_analysis.hpp"
 
 #include <clang/CodeGen/CodeGenAction.h>
 
@@ -70,10 +72,8 @@
 
 namespace gbe
 {
-  BVAR(OCL_OUTPUT_LLVM, false);
   BVAR(OCL_OUTPUT_CFG, false);
   BVAR(OCL_OUTPUT_CFG_ONLY, false);
-  BVAR(OCL_OUTPUT_LLVM_BEFORE_EXTRA_PASS, false);
   using namespace llvm;
 
   void runFuntionPass(Module &mod, TargetLibraryInfo *libraryInfo, const DataLayout &DL)
@@ -86,13 +86,10 @@ namespace gbe
     FPM.add(new DataLayout(DL));
 #endif
 
-    // XXX remove the verifier pass to workaround a non-fatal error.
-    // add this pass cause the Clang abort with the following error message:
-    // "Global is external, but doesn't have external or weak linkage"
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=5
-    //FPM.add(createVerifierPass(true));
+    FPM.add(createVerifierPass(true));
 #else
-    //FPM.add(createVerifierPass());
+    FPM.add(createVerifierPass());
 #endif
     FPM.add(new TargetLibraryInfo(*libraryInfo));
     FPM.add(createTypeBasedAliasAnalysisPass());
@@ -110,7 +107,7 @@ namespace gbe
     FPM.doFinalization();
   }
 
-  void runModulePass(Module &mod, TargetLibraryInfo *libraryInfo, const DataLayout &DL, int optLevel)
+  void runModulePass(Module &mod, TargetLibraryInfo *libraryInfo, const DataLayout &DL, int optLevel, bool strictMath)
   {
     llvm::PassManager MPM;
 
@@ -122,6 +119,7 @@ namespace gbe
     MPM.add(new TargetLibraryInfo(*libraryInfo));
     MPM.add(createTypeBasedAliasAnalysisPass());
     MPM.add(createBasicAliasAnalysisPass());
+    MPM.add(createIntrinsicLoweringPass());
     MPM.add(createGlobalOptimizerPass());     // Optimize out global vars
 
     MPM.add(createIPSCCPPass());              // IP SCCP
@@ -154,9 +152,24 @@ namespace gbe
     MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
     MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
     MPM.add(createLoopDeletionPass());          // Delete dead loops
-    MPM.add(createLoopUnrollPass());          // Unroll small loops
-    if(optLevel > 0)
+    MPM.add(createLoopUnrollPass()); //1024, 32, 1024, 512)); //Unroll loops
+    if(optLevel > 0) {
+      MPM.add(createSROAPass(/*RequiresDomTree*/ false));
       MPM.add(createGVNPass());                 // Remove redundancies
+    }
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+    // FIXME Workaround: we find that CustomLoopUnroll may increase register pressure greatly,
+    // and it may even make som cl kernel cannot compile because of limited scratch memory for spill.
+    // As we observe this under strict math. So we disable CustomLoopUnroll if strict math is enabled.
+    if (!strictMath) {
+      MPM.add(createCustomLoopUnrollPass()); //1024, 32, 1024, 512)); //Unroll loops
+      MPM.add(createLoopUnrollPass()); //1024, 32, 1024, 512)); //Unroll loops
+      if(optLevel > 0) {
+        MPM.add(createSROAPass(/*RequiresDomTree*/ false));
+        MPM.add(createGVNPass());                 // Remove redundancies
+      }
+    }
+#endif
     MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
     MPM.add(createSCCPPass());                  // Constant prop with SCCP
 
@@ -178,32 +191,71 @@ namespace gbe
     MPM.run(mod);
   }
 
-  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module, int optLevel)
+
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#define OUTPUT_BITCODE(STAGE, MOD)  do {         \
+   llvm::PassManager passes__;                   \
+   if (OCL_OUTPUT_LLVM_##STAGE) {                \
+     passes__.add(createPrintModulePass(*o));    \
+     passes__.run(MOD);                          \
+   }                                             \
+ }while(0)
+#else
+#define OUTPUT_BITCODE(STAGE, MOD)  do {         \
+   llvm::PassManager passes__;                   \
+   if (OCL_OUTPUT_LLVM_##STAGE) {                \
+     passes__.add(createPrintModulePass(&*o));   \
+     passes__.run(MOD);                          \
+   }                                             \
+ }while(0)
+#endif
+
+  BVAR(OCL_OUTPUT_LLVM_BEFORE_LINK, false);
+  BVAR(OCL_OUTPUT_LLVM_AFTER_LINK, false);
+  BVAR(OCL_OUTPUT_LLVM_AFTER_GEN, false);
+
+  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module, int optLevel, bool strictMath)
   {
     std::string errInfo;
     std::unique_ptr<llvm::raw_fd_ostream> o = NULL;
-    if (OCL_OUTPUT_LLVM_BEFORE_EXTRA_PASS || OCL_OUTPUT_LLVM)
+    if (OCL_OUTPUT_LLVM_BEFORE_LINK || OCL_OUTPUT_LLVM_AFTER_LINK || OCL_OUTPUT_LLVM_AFTER_GEN)
       o = std::unique_ptr<llvm::raw_fd_ostream>(new llvm::raw_fd_ostream(fileno(stdout), false));
 
     // Get the module from its file
     llvm::SMDiagnostic Err;
-    std::auto_ptr<Module> M;
-    if(fileName){
-      // only when module is null, Get the global LLVM context
+
+    Module* cl_mod = NULL;
+    if (module) {
+      cl_mod = reinterpret_cast<Module*>(const_cast<void*>(module));
+    } else if (fileName){
       llvm::LLVMContext& c = llvm::getGlobalContext();
-      M.reset(ParseIRFile(fileName, Err, c));
-      if (M.get() == 0) return false;
+      cl_mod = ParseIRFile(fileName, Err, c);
     }
-    Module &mod = (module!=NULL)?*(llvm::Module*)module:*M.get();
+
+    if (!cl_mod) return false;
+
+    OUTPUT_BITCODE(BEFORE_LINK, (*cl_mod));
+
+    std::unique_ptr<Module> M;
+
+    /* Before do any thing, we first filter in all CL functions in bitcode. */ 
+    M.reset(runBitCodeLinker(cl_mod, strictMath));
+    if (!module)
+      delete cl_mod;
+    if (M.get() == 0)
+      return true;
+
+    Module &mod = *M.get();
     DataLayout DL(&mod);
 
     Triple TargetTriple(mod.getTargetTriple());
     TargetLibraryInfo *libraryInfo = new TargetLibraryInfo(TargetTriple);
     libraryInfo->disableAllFunctions();
 
-    runFuntionPass(mod, libraryInfo, DL);
-    runModulePass(mod, libraryInfo, DL, optLevel);
+    OUTPUT_BITCODE(AFTER_LINK, mod);
 
+    runFuntionPass(mod, libraryInfo, DL);
+    runModulePass(mod, libraryInfo, DL, optLevel, strictMath);
     llvm::PassManager passes;
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
     passes.add(new DataLayoutPass(DL));
@@ -211,12 +263,6 @@ namespace gbe
     passes.add(new DataLayout(DL));
 #endif
     // Print the code before further optimizations
-    if (OCL_OUTPUT_LLVM_BEFORE_EXTRA_PASS)
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
-      passes.add(createPrintModulePass(*o));
-#else
-      passes.add(createPrintModulePass(&*o));
-#endif
     passes.add(createIntrinsicLoweringPass());
     passes.add(createFunctionInliningPass(200000));
     passes.add(createScalarReplAggregatesPass(64, true, -1, -1, 64));
@@ -229,6 +275,7 @@ namespace gbe
       passes.add(createGVNPass());                  // Remove redundancies
     passes.add(createPrintfParserPass());
     passes.add(createScalarizePass());        // Expand all vector ops
+    passes.add(createLegalizePass());
     passes.add(createDeadInstEliminationPass());  // Remove simplified instructions
     passes.add(createCFGSimplificationPass());     // Merge & remove BBs
     passes.add(createScalarizePass());        // Expand all vector ops
@@ -238,15 +285,22 @@ namespace gbe
     if(OCL_OUTPUT_CFG_ONLY)
       passes.add(createCFGOnlyPrinterPass());
     passes.add(createGenPass(unit));
+    passes.run(mod);
 
     // Print the code extra optimization passes
-    if (OCL_OUTPUT_LLVM)
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
-      passes.add(createPrintModulePass(*o));
-#else
-      passes.add(createPrintModulePass(&*o));
-#endif
-    passes.run(mod);
+    OUTPUT_BITCODE(AFTER_GEN, mod);
+
+    const ir::Unit::FunctionSet& fs = unit.getFunctionSet();
+    ir::Unit::FunctionSet::const_iterator iter = fs.begin();
+    while(iter != fs.end())
+    {
+      analysis::ControlTree *ct = new analysis::ControlTree(iter->second);
+      ct->analyze();
+      delete ct;
+      iter++;
+    }
+
+    delete libraryInfo;
     return true;
   }
 } /* namespace gbe */

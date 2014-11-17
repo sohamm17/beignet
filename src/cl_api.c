@@ -4,7 +4,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -90,10 +90,10 @@ handle_events(cl_command_queue queue, cl_int num, const cl_event *wait_list,
 }
 
 /* The following code checking overlap is from Appendix of openCL spec 1.1 */
-inline cl_bool check_copy_overlap(const size_t src_offset[3],
-                                  const size_t dst_offset[3],
-                                  const size_t region[3],
-                                  size_t row_pitch, size_t slice_pitch)
+cl_bool check_copy_overlap(const size_t src_offset[3],
+                           const size_t dst_offset[3],
+                           const size_t region[3],
+                           size_t row_pitch, size_t slice_pitch)
 {
   const size_t src_min[] = {src_offset[0], src_offset[1], src_offset[2]};
   const size_t src_max[] = {src_offset[0] + region[0],
@@ -1903,7 +1903,7 @@ clEnqueueFillBuffer(cl_command_queue   command_queue,
     goto error;
   }
 
-  if (offset < 0 || offset + size > buffer->size) {
+  if (offset + size > buffer->size) {
     err = CL_INVALID_VALUE;
     goto error;
   }
@@ -1985,11 +1985,11 @@ clEnqueueCopyBuffer(cl_command_queue     command_queue,
     goto error;
   }
 
-  if (src_offset < 0 || src_offset + cb > src_buffer->size) {
+  if (src_offset + cb > src_buffer->size) {
     err = CL_INVALID_VALUE;
     goto error;
   }
-  if (dst_offset < 0 || dst_offset + cb > dst_buffer->size) {
+  if (dst_offset + cb > dst_buffer->size) {
     err = CL_INVALID_VALUE;
     goto error;
   }
@@ -2653,6 +2653,8 @@ clEnqueueMapBuffer(cl_command_queue  command_queue,
   data->size        = size;
   data->ptr         = ptr;
   data->unsync_map  = 1;
+  if (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))
+    data->write_map = 1;
 
   if(handle_events(command_queue, num_events_in_wait_list, event_wait_list,
                    event, data, CL_COMMAND_MAP_BUFFER) == CL_ENQUEUE_EXECUTE_IMM) {
@@ -2663,9 +2665,13 @@ clEnqueueMapBuffer(cl_command_queue  command_queue,
     ptr = data->ptr;
     if(event) cl_event_set_status(*event, CL_COMPLETE);
   } else {
-    if ((ptr = cl_mem_map_gtt_unsync(buffer)) == NULL) {
-      err = CL_MAP_FAILURE;
-      goto error;
+    if (buffer->is_userptr)
+      ptr = buffer->host_ptr;
+    else {
+      if ((ptr = cl_mem_map_gtt_unsync(buffer)) == NULL) {
+        err = CL_MAP_FAILURE;
+        goto error;
+      }
     }
   }
   err = _cl_map_mem(buffer, ptr, &mem_ptr, offset, size, NULL, NULL);
@@ -2735,6 +2741,8 @@ clEnqueueMapImage(cl_command_queue   command_queue,
   data->region[0]   = region[0];  data->region[1] = region[1];  data->region[2] = region[2];
   data->ptr         = ptr;
   data->unsync_map  = 1;
+  if (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))
+    data->write_map = 1;
 
   if(handle_events(command_queue, num_events_in_wait_list, event_wait_list,
                    event, data, CL_COMMAND_MAP_IMAGE) == CL_ENQUEUE_EXECUTE_IMM) {
@@ -3203,7 +3211,7 @@ clMapBufferIntel(cl_mem mem, cl_int *errcode_ret)
   void *ptr = NULL;
   cl_int err = CL_SUCCESS;
   CHECK_MEM (mem);
-  ptr = cl_mem_map(mem);
+  ptr = cl_mem_map(mem, 1);
 error:
   if (errcode_ret)
     *errcode_ret = err;
