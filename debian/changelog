@@ -4,6 +4,7 @@ beignet (1.0.0-1) UNRELEASED; urgency=medium
   * New upstream release.
     - Fix tgamma, pow, pown, erf, erfc  (Closes: #768090)
     - Drop upstream patches.
+    - Refresh patches.
 
   [ Rebecca N. Palmer ]
   * Re-enable GBE_DEBUG (lost when debhelper switched to 

@@ -2,5 +2,4 @@ Enhance-debug-output.patch
 Debian-compliant-compiler-flags-handling.patch
 Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
-Fix-build-failure.patch
 Enable-test-debug.patch
