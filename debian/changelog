@@ -13,6 +13,7 @@ beignet (1.0.0-1) UNRELEASED; urgency=medium
     None build type)
   * Enable extra debug output in tests
   * Document in the description what hardware this supports.
+  * Declare Conflicts: mesa-opencl-icd (workaround for #768185)
 
  -- Andreas Beckmann <anbe@debian.org>  Mon, 17 Nov 2014 07:09:58 +0100
 

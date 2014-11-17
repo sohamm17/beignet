@@ -38,7 +38,7 @@ Description: Intel OpenCL library (development files)
 Package: beignet
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Conflicts: beignet0.0.1
+Conflicts: beignet0.0.1, mesa-opencl-icd
 Replaces: beignet0.0.1
 Provides: opencl-icd
 Description: OpenCL library for Intel GPUs
