@@ -41,9 +41,11 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 Conflicts: beignet0.0.1
 Replaces: beignet0.0.1
 Provides: opencl-icd
-Description: Intel OpenCL library
+Description: OpenCL library for Intel GPUs
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
  CPUs, GPUs and other processors.
  .
- This package contains the shared library for the Intel implementation.
+ This package contains the shared library for the Intel implementation,
+ which supports the integrated GPUs of Ivy Bridge, Haswell and Broadwell
+ processors.
