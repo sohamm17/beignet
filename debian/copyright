@@ -3,8 +3,8 @@ Upstream-Name: beignet
 Source: http://cgit.freedesktop.org/beignet/
 
 Files: *
-Copyright: 2012 Intel Corporation
-License: LGPL-2.0+
+Copyright: 2012-2014 Intel Corporation
+License: LGPL-2.1+
 
 Files: backend/src/sys/intrusive_list.*
 Copyright: 2007 Maciej Sinilo
@@ -18,22 +18,17 @@ Files: backend/src/backend/gen_register.hpp
 Copyright: 2012 Intel Corporation
 License: MIT
 
-Files: backend/src/gbe_bin_interpreter.cpp
-       src/cl_gbe_loader.cpp
-       src/cl_gbe_loader.h
-Copyright: 2014 Intel Corporation
-License: LGPL-2.0+
-
 Files: debian/*
 Copyright: 2013 Simon Richter <sjr@debian.org>
            2014 Julian Wollrath <jwollrath@web.de>
-License: LGPL-2.0+
+           © 2014 Andreas Beckmann <anbe@debian.org>
+License: LGPL-2.1+
 
-License: LGPL-2.0+
+License: LGPL-2.1+
  This package is free software; you can redistribute it and/or
  modify it under the terms of the GNU Lesser General Public
  License as published by the Free Software Foundation; either
- version 2 of the License, or (at your option) any later version.
+ version 2.1 of the License, or (at your option) any later version.
  .
  This package is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -44,7 +39,7 @@ License: LGPL-2.0+
  along with this program. If not, see <http://www.gnu.org/licenses/>.
  .
  On Debian systems, the complete text of the GNU Lesser General
- Public License can be found in "/usr/share/common-licenses/LGPL-2".
+ Public License can be found in "/usr/share/common-licenses/LGPL-2.1".
 
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a
