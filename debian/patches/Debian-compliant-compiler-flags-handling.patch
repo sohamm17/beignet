@@ -1,12 +1,6 @@
-From: Simon Richter <sjr@debian.org>
-Date: Fri, 29 Aug 2014 16:17:45 +0200
-Subject: Debian compliant compiler flags handling
+Description: Respect CFLAGS,etc and be verbose
 
----
- CMakeLists.txt         |  1 -
- backend/CMakeLists.txt | 46 +++++++++++++++++++++++-----------------------
- 2 files changed, 23 insertions(+), 24 deletions(-)
-
+Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -30,7 +30,6 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINA
@@ -17,3 +11,23 @@ Subject: Debian compliant compiler flags handling
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
  if (NOT LIB_INSTALL_DIR)
    set (LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+@@ -81,8 +80,8 @@ elseif (COMPILER STREQUAL "CLANG")
+ elseif (COMPILER STREQUAL "ICC")
+   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -wd2928 -Wall -fPIC -fstrict-aliasing -fp-model fast -msse4.1 -Wl,-E")
+ endif ()
+-set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -fno-rtti")
+-set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
++set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -fno-rtti")
++set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS}")
+ set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
+ set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
+ set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
+@@ -96,7 +95,7 @@ set (CMAKE_C_FLAGS_RELEASE        "-O2 -
+ #INCLUDE(CMake/FindLLVM.cmake)
+ Find_Package(LLVM 3.3)
+ 
+-set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${LLVM_LDFLAGS}")
++set (CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS} "-Wl,--no-undefined ${LLVM_LDFLAGS}")
+ 
+ # XLib
+ Find_Package(X11)
