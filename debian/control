@@ -23,18 +23,6 @@ Homepage: http://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
 Vcs-Browser: https://anonscm.debian.org/cgit/pkg-opencl/beignet.git
 
-Package: beignet-dev
-Section: libdevel
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet (= ${binary:Version}), ${misc:Depends}
-Description: Intel OpenCL library (development files)
- OpenCL (Open Computing Language) is a multivendor open standard for
- general-purpose parallel programming of heterogeneous systems that include
- CPUs, GPUs and other processors.
- .
- This package contains the development files for directly linking against
- the Intel implementation.
-
 Package: beignet
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
@@ -49,3 +37,15 @@ Description: OpenCL library for Intel GPUs
  This package contains the shared library for the Intel implementation,
  which supports the integrated GPUs of Ivy Bridge, Haswell and Broadwell
  processors.
+
+Package: beignet-dev
+Section: libdevel
+Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Depends: beignet (= ${binary:Version}), ${misc:Depends}
+Description: Intel OpenCL library (development files)
+ OpenCL (Open Computing Language) is a multivendor open standard for
+ general-purpose parallel programming of heterogeneous systems that include
+ CPUs, GPUs and other processors.
+ .
+ This package contains the development files for directly linking against
+ the Intel implementation.
