@@ -1,4 +1,4 @@
-beignet (1.0.0-1) UNRELEASED; urgency=medium
+beignet (1.0.0-1) experimental; urgency=medium
 
   [ Andreas Beckmann ]
   * New upstream release.
@@ -9,6 +9,7 @@ beignet (1.0.0-1) UNRELEASED; urgency=medium
     Switch the packaging, too.
   * README.Debian: Document interoperability problem with mesa-opencl-icd.
   * Ship documentation.
+  * Upload to experimental.
 
   [ Rebecca N. Palmer ]
   * Re-enable GBE_DEBUG (lost when debhelper switched to 
@@ -16,7 +17,7 @@ beignet (1.0.0-1) UNRELEASED; urgency=medium
   * Enable extra debug output in tests
   * Document in the description what hardware this supports.
 
- -- Andreas Beckmann <anbe@debian.org>  Mon, 17 Nov 2014 07:09:58 +0100
+ -- Andreas Beckmann <anbe@debian.org>  Tue, 18 Nov 2014 14:58:00 +0100
 
 beignet (0.9.3~dfsg-1) unstable; urgency=medium
 
