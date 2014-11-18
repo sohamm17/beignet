@@ -7,6 +7,7 @@ beignet (1.0.0-1) UNRELEASED; urgency=medium
     - Refresh patches.
   * d/copyright: Upstream switched to a consistent usage of LGPL-2.1+.
     Switch the packaging, too.
+  * README.Debian: Document interoperability problem with mesa-opencl-icd.
 
   [ Rebecca N. Palmer ]
   * Re-enable GBE_DEBUG (lost when debhelper switched to 

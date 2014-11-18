@@ -1,0 +1,9 @@
+Known Issues
+============
+
+* Interoperability problems with mesa-opencl-icd
+  https://bugs.debian.org/768185
+
+  There are interoperability problems between beignet and mesa-opencl-icd
+  that may render the whole OpenCL stack unusable. This issue is currently
+  being investigated. As a workaround uninstall one of these packages.
