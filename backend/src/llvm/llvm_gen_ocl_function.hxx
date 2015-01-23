@@ -46,38 +46,14 @@ DECL_LLVM_GEN_FUNCTION(FORCE_SIMD8,  __gen_ocl_force_simd8)
 DECL_LLVM_GEN_FUNCTION(FORCE_SIMD16, __gen_ocl_force_simd16)
 
 // To read_image functions.
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_1D, _Z21__gen_ocl_read_imageijtfj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_1D, _Z22__gen_ocl_read_imageuijtfj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_1D, _Z21__gen_ocl_read_imagefjtfj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_2D, _Z21__gen_ocl_read_imageijtffj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_2D, _Z22__gen_ocl_read_imageuijtffj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_2D, _Z21__gen_ocl_read_imagefjtffj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_3D, _Z21__gen_ocl_read_imageijtfffj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_3D, _Z22__gen_ocl_read_imageuijtfffj)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_3D, _Z21__gen_ocl_read_imagefjtfffj)
-// work around read image with the LD message. The coords are integer type.
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_1D_I, _Z21__gen_ocl_read_imageijtij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_1D_I, _Z22__gen_ocl_read_imageuijtij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_1D_I, _Z21__gen_ocl_read_imagefjtij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_2D_I, _Z21__gen_ocl_read_imageijtiij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_2D_I, _Z22__gen_ocl_read_imageuijtiij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_2D_I, _Z21__gen_ocl_read_imagefjtiij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I_3D_I, _Z21__gen_ocl_read_imageijtiiij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI_3D_I, _Z22__gen_ocl_read_imageuijtiiij)
-DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F_3D_I, _Z21__gen_ocl_read_imagefjtiiij)
+DECL_LLVM_GEN_FUNCTION(READ_IMAGE_I, __gen_ocl_read_imagei)
+DECL_LLVM_GEN_FUNCTION(READ_IMAGE_UI, __gen_ocl_read_imageui)
+DECL_LLVM_GEN_FUNCTION(READ_IMAGE_F, __gen_ocl_read_imagef)
 
 // To write_image functions.
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_I_1D, _Z22__gen_ocl_write_imageijiDv4_i)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_UI_1D, _Z23__gen_ocl_write_imageuijiDv4_j)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_F_1D, _Z22__gen_ocl_write_imagefjiDv4_f)
-
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_I_2D, _Z22__gen_ocl_write_imageijiiDv4_i)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_UI_2D, _Z23__gen_ocl_write_imageuijiiDv4_j)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_F_2D, _Z22__gen_ocl_write_imagefjiiDv4_f)
-
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_I_3D, _Z22__gen_ocl_write_imageijiiiDv4_i)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_UI_3D, _Z23__gen_ocl_write_imageuijiiiDv4_j)
-DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_F_3D, _Z22__gen_ocl_write_imagefjiiiDv4_f)
+DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_I, __gen_ocl_write_imagei)
+DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_UI, __gen_ocl_write_imageui)
+DECL_LLVM_GEN_FUNCTION(WRITE_IMAGE_F, __gen_ocl_write_imagef)
 
 // To get image info function
 DECL_LLVM_GEN_FUNCTION(GET_IMAGE_WIDTH, __gen_ocl_get_image_width)

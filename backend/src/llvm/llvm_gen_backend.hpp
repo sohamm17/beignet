@@ -26,12 +26,17 @@
 #ifndef __GBE_LLVM_GEN_BACKEND_HPP__
 #define __GBE_LLVM_GEN_BACKEND_HPP__
 
+#include <cxxabi.h>
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Pass.h"
 #include "llvm/Analysis/LoopPass.h"
+#if LLVM_VERSION_MINOR <= 2
+#include "llvm/Instructions.h"
+#else
+#include "llvm/IR/Instructions.h"
+#endif
 #include "sys/platform.hpp"
 #include "sys/map.hpp"
-#include "sys/hash_map.hpp"
 #include <algorithm>
 
 // LLVM Type
@@ -51,7 +56,7 @@ namespace gbe
 
   /*! Build the hash map for OCL functions on Gen */
   struct OCLIntrinsicMap {
-    /*! Build the intrinsic hash map */
+    /*! Build the intrinsic map */
     OCLIntrinsicMap(void) {
 #define DECL_LLVM_GEN_FUNCTION(ID, NAME) \
   map.insert(std::make_pair(#NAME, GEN_OCL_##ID));
@@ -59,14 +64,35 @@ namespace gbe
 #undef DECL_LLVM_GEN_FUNCTION
     }
     /*! Sort intrinsics with their names */
-    hash_map<std::string, OCLInstrinsic> map;
+    gbe::map<std::string, OCLInstrinsic> map;
+    OCLInstrinsic find(const std::string symbol) const {
+      auto it = map.find(symbol);
+
+      if (it == map.end()) {
+        int status;
+        const char *realName = abi::__cxa_demangle(symbol.c_str(), NULL, NULL, &status);
+        if (status == 0) {
+          std::string realFnName(realName), stripName;
+          stripName = realFnName.substr(0, realFnName.find("("));
+          it = map.find(stripName);
+        }
+      }
+      // FIXME, should create a complete error reporting mechanism
+      // when found error in beignet managed passes including Gen pass.
+      if (it == map.end()) {
+        std::cerr << "Unresolved symbol: " << symbol << std::endl;
+        std::cerr << "Aborting..." << std::endl;
+        exit(-1);
+      }
+      return it->second;
+    }
   };
 
   /*! Sort the OCL Gen instrinsic functions (built on pre-main) */
-  static const OCLIntrinsicMap instrinsicMap;
+  static const OCLIntrinsicMap intrinsicMap;
 
   /*! Pad the offset */
-  uint32_t getPadding(uint32_t offset, uint32_t align);
+  int32_t getPadding(int32_t offset, int32_t align);
 
   /*! Get the type alignment in bytes */
   uint32_t getAlignmentByte(const ir::Unit &unit, llvm::Type* Ty);
@@ -76,6 +102,9 @@ namespace gbe
 
   /*! Get the type size in bytes */
   uint32_t getTypeByteSize(const ir::Unit &unit, llvm::Type* Ty);
+
+  /*! Get GEP constant offset for the specified operand.*/
+  int32_t getGEPConstOffset(const ir::Unit &unit, llvm::CompositeType *CompTy, int32_t TypeIndex);
 
   /*! whether this is a kernel function */
   bool isKernelFunction(const llvm::Function &f);
@@ -107,6 +136,7 @@ namespace gbe
   /* customized loop unrolling pass. */
   llvm::LoopPass *createCustomLoopUnrollPass();
 #endif
+  llvm::FunctionPass* createSamplerFixPass();
 
   /*! Add all the function call of ocl to our bitcode. */
   llvm::Module* runBitCodeLinker(llvm::Module *mod, bool strictMath);

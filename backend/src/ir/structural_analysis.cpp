@@ -667,21 +667,6 @@ namespace analysis
   }
 
 
-  bool ControlTree::pathBack(Node* m, Node* n)
-  {
-    for(NodeSet::const_iterator iter = n->preds().begin(); iter!= n->preds().end(); iter++)
-    {
-      if(isBackedge(*iter, n))
-      {
-        visited.clear();
-        if(path(m, *iter, n))
-          return true;
-      }
-    }
-
-    return false;
-  }
-
   /* this algorithm is from Muchnick's textbook(sec 7.7) (Advanced Compiler Design and Implementation) */
   Node* ControlTree::acyclicRegionType(Node* node, NodeSet& nset)
   {
@@ -841,7 +826,6 @@ namespace analysis
     return NULL;
   }
 
-
   bool ControlTree::path(Node *from, Node *to, Node *notthrough)
   {
 
@@ -863,9 +847,6 @@ namespace analysis
   }
 
 
-  /* this algorithm could work right, but it is quite inefficient, and
-   * we are not handling any cyclic regions at this moment, so here just
-   * ignore the identification of cyclic regions. */
   Node * ControlTree::cyclicRegionType(Node *node, NodeList &nset)
   {
     /* check for self-loop */
@@ -883,6 +864,9 @@ namespace analysis
         return NULL;
     }
 
+    //FIXME: as our IR could only handle self loop, the while loop node
+    //is disabled to avoid performace regression by the path function.
+#if 0
     /* check for improper region */
     for(NodeList::const_iterator m = nset.begin(); m != nset.end(); m++)
     {
@@ -907,6 +891,8 @@ namespace analysis
         return insertNode(p);
       }
     }
+#endif
+
     return NULL;
   }
 
@@ -1029,23 +1015,44 @@ namespace analysis
           if(nset.find(entry) != nset.end())
             entry = region;
         }
-        // FIXME loop optimization is still buggy and under development, now disable it by default.
         else
         {
-#if 0
           reachUnder.clear();
           nset.clear();
-          for(NodeList::const_iterator m = post_order.begin(); m != post_order.end(); m++)
-          {
-            if(*m != n && pathBack(*m, n))
+
+          //reuse the loop info from llvm gaterLoopInfo.
+          const gbe::vector<ir::Loop *> &loops = fn->getLoops();
+          if(loops.size() == 0){
+            post_ctr++;
+            continue;
+          }
+
+          Node* loop_header = NULL;
+          //if n is basic block node, query the llvm loop info to find the loop whoose loop header is n;
+          if(n->type() == BasicBlock){
+            for (auto l : loops) {
+              ir::BasicBlock &a = fn->getBlock(l->bbs[0]);
+              loop_header = bbmap.find(&a)->second;
+
+              if(loop_header == n){
+                for (auto bb : l->bbs) {
+                  ir::BasicBlock &tmp = fn->getBlock(bb);
+                  Node* node_ = bbmap.find(&tmp)->second;
+                  reachUnder.push_front(node_);
+                  nset.insert(node_);
+                }
+                break;
+              }
+            }
+          }else{
+          //n is compacted node, it would have a successor pointed to itself for self loop.
+            if(n->succs().find(n) != n->succs().end())
             {
-              reachUnder.push_front(*m);
-              nset.insert(*m);
+                reachUnder.push_front(n);
+                nset.insert(n);
             }
           }
 
-          reachUnder.push_front(n);
-          nset.insert(n);
           region = cyclicRegionType(n, reachUnder);
 
           if(NULL != region)
@@ -1060,9 +1067,6 @@ namespace analysis
           {
             post_ctr++;
           }
-#else
-          post_ctr++;
-#endif
         }
       }
 

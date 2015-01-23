@@ -104,6 +104,9 @@ intel_gpgpu_load_curbe_buffer_t *intel_gpgpu_load_curbe_buffer = NULL;
 typedef void (intel_gpgpu_load_idrt_t)(intel_gpgpu_t *gpgpu);
 intel_gpgpu_load_idrt_t *intel_gpgpu_load_idrt = NULL;
 
+typedef void (intel_gpgpu_pipe_control_t)(intel_gpgpu_t *gpgpu);
+intel_gpgpu_pipe_control_t *intel_gpgpu_pipe_control = NULL;
+
 static void
 intel_gpgpu_sync(void *buf)
 {
@@ -289,13 +292,6 @@ intel_gpgpu_set_base_address_gen7(intel_gpgpu_t *gpgpu)
 
   OUT_BATCH(gpgpu->batch, 0 | (def_cc << 8) | BASE_ADDRESS_MODIFY); /* Indirect Obj Base Addr */
   OUT_BATCH(gpgpu->batch, 0 | (def_cc << 8) | BASE_ADDRESS_MODIFY); /* Instruction Base Addr  */
-  /* If we output an AUB file, we limit the total size to 64MB */
-#if USE_FULSIM
-  OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* General State Access Upper Bound */
-  OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Dynamic State Access Upper Bound */
-  OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Indirect Obj Access Upper Bound */
-  OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Instruction Access Upper Bound */
-#else
   OUT_BATCH(gpgpu->batch, 0 | BASE_ADDRESS_MODIFY);
   /* According to mesa i965 driver code, we must set the dynamic state access upper bound
    * to a valid bound value, otherwise, the border color pointer may be rejected and you
@@ -303,7 +299,6 @@ intel_gpgpu_set_base_address_gen7(intel_gpgpu_t *gpgpu)
   OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
   OUT_BATCH(gpgpu->batch, 0 | BASE_ADDRESS_MODIFY);
   OUT_BATCH(gpgpu->batch, 0 | BASE_ADDRESS_MODIFY);
-#endif /* USE_FULSIM */
   ADVANCE_BATCH(gpgpu->batch);
 }
 
@@ -341,13 +336,7 @@ intel_gpgpu_set_base_address_gen8(intel_gpgpu_t *gpgpu)
               I915_GEM_DOMAIN_INSTRUCTION,
               0 + (0 | (def_cc << 4) | (0 << 1)| BASE_ADDRESS_MODIFY));
     OUT_BATCH(gpgpu->batch, 0);
-    /* If we output an AUB file, we limit the total size to 64MB */
-#if USE_FULSIM
-    OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* General State Access Upper Bound */
-    OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Dynamic State Access Upper Bound */
-    OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Indirect Obj Access Upper Bound */
-    OUT_BATCH(gpgpu->batch, 0x04000000 | BASE_ADDRESS_MODIFY); /* Instruction Access Upper Bound */
-#else
+
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
     /* According to mesa i965 driver code, we must set the dynamic state access upper bound
      * to a valid bound value, otherwise, the border color pointer may be rejected and you
@@ -355,7 +344,6 @@ intel_gpgpu_set_base_address_gen8(intel_gpgpu_t *gpgpu)
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
-#endif /* USE_FULSIM */
     ADVANCE_BATCH(gpgpu->batch);
 }
 
@@ -542,7 +530,7 @@ intel_gpgpu_write_timestamp(intel_gpgpu_t *gpgpu, int idx)
 }
 
 static void
-intel_gpgpu_pipe_control(intel_gpgpu_t *gpgpu)
+intel_gpgpu_pipe_control_gen7(intel_gpgpu_t *gpgpu)
 {
   gen6_pipe_control_t* pc = (gen6_pipe_control_t*)
     intel_batchbuffer_alloc_space(gpgpu->batch, sizeof(gen6_pipe_control_t));
@@ -561,12 +549,40 @@ intel_gpgpu_pipe_control(intel_gpgpu_t *gpgpu)
 }
 
 static void
+intel_gpgpu_pipe_control_gen75(intel_gpgpu_t *gpgpu)
+{
+  gen6_pipe_control_t* pc = (gen6_pipe_control_t*)
+    intel_batchbuffer_alloc_space(gpgpu->batch, sizeof(gen6_pipe_control_t));
+  memset(pc, 0, sizeof(*pc));
+  pc->dw0.length = SIZEOF32(gen6_pipe_control_t) - 2;
+  pc->dw0.instruction_subopcode = GEN7_PIPE_CONTROL_SUBOPCODE_3D_CONTROL;
+  pc->dw0.instruction_opcode = GEN7_PIPE_CONTROL_OPCODE_3D_CONTROL;
+  pc->dw0.instruction_pipeline = GEN7_PIPE_CONTROL_3D;
+  pc->dw0.instruction_type = GEN7_PIPE_CONTROL_INSTRUCTION_GFX;
+  pc->dw1.cs_stall = 1;
+  pc->dw1.dc_flush_enable = 1;
+
+  pc = (gen6_pipe_control_t*)
+    intel_batchbuffer_alloc_space(gpgpu->batch, sizeof(gen6_pipe_control_t));
+  memset(pc, 0, sizeof(*pc));
+  pc->dw0.length = SIZEOF32(gen6_pipe_control_t) - 2;
+  pc->dw0.instruction_subopcode = GEN7_PIPE_CONTROL_SUBOPCODE_3D_CONTROL;
+  pc->dw0.instruction_opcode = GEN7_PIPE_CONTROL_OPCODE_3D_CONTROL;
+  pc->dw0.instruction_pipeline = GEN7_PIPE_CONTROL_3D;
+  pc->dw0.instruction_type = GEN7_PIPE_CONTROL_INSTRUCTION_GFX;
+  pc->dw1.render_target_cache_flush_enable = 1;
+  pc->dw1.texture_cache_invalidation_enable = 1;
+  pc->dw1.cs_stall = 1;
+  ADVANCE_BATCH(gpgpu->batch);
+}
+
+static void
 intel_gpgpu_set_L3_gen7(intel_gpgpu_t *gpgpu, uint32_t use_slm)
 {
   BEGIN_BATCH(gpgpu->batch, 9);
   OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
   OUT_BATCH(gpgpu->batch, GEN7_L3_SQC_REG1_ADDRESS_OFFSET);
-  OUT_BATCH(gpgpu->batch, 0x00730000);
+  OUT_BATCH(gpgpu->batch, 0x00A00000);
 
   OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
   OUT_BATCH(gpgpu->batch, GEN7_L3_CNTL_REG2_ADDRESS_OFFSET);
@@ -616,10 +632,19 @@ static void
 intel_gpgpu_set_L3_gen75(intel_gpgpu_t *gpgpu, uint32_t use_slm)
 {
   /* still set L3 in batch buffer for fulsim. */
-  BEGIN_BATCH(gpgpu->batch, 9);
+  BEGIN_BATCH(gpgpu->batch, 15);
+  OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
+  /* FIXME: KMD always disable the atomic in L3 for some reason.
+     I checked the spec, and don't think we need that workaround now.
+     Before I send a patch to kernel, let's just enable it here. */
+  OUT_BATCH(gpgpu->batch, HSW_SCRATCH1_OFFSET);
+  OUT_BATCH(gpgpu->batch, 0);                         /* enable atomic in L3 */
+  OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
+  OUT_BATCH(gpgpu->batch, HSW_ROW_CHICKEN3_HDC_OFFSET);
+  OUT_BATCH(gpgpu->batch, (1 << 6ul) << 16);          /* enable atomic in L3 */
   OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
   OUT_BATCH(gpgpu->batch, GEN7_L3_SQC_REG1_ADDRESS_OFFSET);
-  OUT_BATCH(gpgpu->batch, 0x00610000);
+  OUT_BATCH(gpgpu->batch, 0x08800000);
 
   OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
   OUT_BATCH(gpgpu->batch, GEN7_L3_CNTL_REG2_ADDRESS_OFFSET);
@@ -745,7 +770,6 @@ static void
 intel_gpgpu_flush_batch_buffer(intel_batchbuffer_t *batch)
 {
   assert(batch);
-  intel_batchbuffer_emit_mi_flush(batch);
   intel_batchbuffer_flush(batch);
 }
 
@@ -1003,11 +1027,11 @@ static int
 intel_get_surface_type(cl_mem_object_type type)
 {
   switch (type) {
-  case CL_MEM_OBJECT_IMAGE1D_BUFFER:
   case CL_MEM_OBJECT_IMAGE1D:
   case CL_MEM_OBJECT_IMAGE1D_ARRAY:
     return I965_SURFACE_1D;
 
+  case CL_MEM_OBJECT_IMAGE1D_BUFFER:
   case CL_MEM_OBJECT_IMAGE2D:
   case CL_MEM_OBJECT_IMAGE2D_ARRAY:
     return I965_SURFACE_2D;
@@ -1031,7 +1055,7 @@ static uint32_t get_surface_type(intel_gpgpu_t *gpgpu, int index, cl_mem_object_
   if (((IS_IVYBRIDGE(gpgpu->drv->device_id) ||
         IS_HASWELL(gpgpu->drv->device_id) ||
         IS_BROADWELL(gpgpu->drv->device_id))) &&
-      index >= BTI_MAX_IMAGE_NUM + BTI_RESERVED_NUM &&
+      index >= BTI_WORKAROUND_IMAGE_OFFSET + BTI_RESERVED_NUM &&
       type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
     surface_type = I965_SURFACE_2D;
   else
@@ -1063,7 +1087,7 @@ intel_gpgpu_bind_image_gen7(intel_gpgpu_t *gpgpu,
     ss->ss0.surface_array_spacing = 1;
   }
   ss->ss0.surface_format = format;
-  ss->ss1.base_addr = obj_bo->offset;
+  ss->ss1.base_addr = obj_bo->offset + obj_bo_offset;
   ss->ss2.width = w - 1;
 
   ss->ss2.height = h - 1;
@@ -1108,7 +1132,7 @@ intel_gpgpu_bind_image_gen75(intel_gpgpu_t *gpgpu,
     ss->ss0.surface_array_spacing = 1;
   }
   ss->ss0.surface_format = format;
-  ss->ss1.base_addr = obj_bo->offset;
+  ss->ss1.base_addr = obj_bo->offset + obj_bo_offset;
   ss->ss2.width = w - 1;
   ss->ss2.height = h - 1;
   ss->ss3.depth = depth - 1;
@@ -1170,8 +1194,8 @@ intel_gpgpu_bind_image_gen8(intel_gpgpu_t *gpgpu,
   ss->ss2.height = h - 1;
   ss->ss3.depth = depth - 1;
 
-  ss->ss8.surface_base_addr_lo = obj_bo->offset64 & 0xffffffff;
-  ss->ss9.surface_base_addr_hi = (obj_bo->offset64 >> 32) & 0xffffffff;
+  ss->ss8.surface_base_addr_lo = (obj_bo->offset64 + obj_bo_offset) & 0xffffffff;
+  ss->ss9.surface_base_addr_hi = ((obj_bo->offset64 + obj_bo_offset) >> 32) & 0xffffffff;
 
   ss->ss4.render_target_view_ext = depth - 1;
   ss->ss4.min_array_elt = 0;
@@ -1595,6 +1619,9 @@ intel_gpgpu_walker_gen7(intel_gpgpu_t *gpgpu,
   OUT_BATCH(gpgpu->batch, CMD_MEDIA_STATE_FLUSH | 0);
   OUT_BATCH(gpgpu->batch, 0);                        /* kernel index == 0 */
   ADVANCE_BATCH(gpgpu->batch);
+
+  if (IS_IVYBRIDGE(gpgpu->drv->device_id))
+    intel_gpgpu_pipe_control(gpgpu);
 }
 
 static void
@@ -1645,6 +1672,8 @@ intel_gpgpu_walker_gen8(intel_gpgpu_t *gpgpu,
   OUT_BATCH(gpgpu->batch, CMD_MEDIA_STATE_FLUSH | 0);
   OUT_BATCH(gpgpu->batch, 0);                        /* kernel index == 0 */
   ADVANCE_BATCH(gpgpu->batch);
+
+  intel_gpgpu_pipe_control(gpgpu);
 }
 
 static intel_event_t*
@@ -1867,11 +1896,14 @@ intel_gpgpu_set_printf_info(intel_gpgpu_t *gpgpu, void* printf_info, size_t * gl
 }
 
 static void*
-intel_gpgpu_get_printf_info(intel_gpgpu_t *gpgpu, size_t * global_sz)
+intel_gpgpu_get_printf_info(intel_gpgpu_t *gpgpu, size_t * global_sz, size_t *outbuf_sz)
 {
   global_sz[0] = gpgpu->global_wk_sz[0];
   global_sz[1] = gpgpu->global_wk_sz[1];
   global_sz[2] = gpgpu->global_wk_sz[2];
+
+  if (gpgpu->printf_b.bo)
+    *outbuf_sz = gpgpu->printf_b.bo->size;
   return gpgpu->printf_info;
 }
 
@@ -1925,6 +1957,7 @@ intel_set_gpgpu_callbacks(int device_id)
     intel_gpgpu_load_curbe_buffer = intel_gpgpu_load_curbe_buffer_gen8;
     intel_gpgpu_load_idrt = intel_gpgpu_load_idrt_gen8;
     cl_gpgpu_bind_sampler = (cl_gpgpu_bind_sampler_cb *) intel_gpgpu_bind_sampler_gen8;
+    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen7;
     return;
   }
 
@@ -1943,6 +1976,7 @@ intel_set_gpgpu_callbacks(int device_id)
     intel_gpgpu_post_action = intel_gpgpu_post_action_gen75;
     intel_gpgpu_read_ts_reg = intel_gpgpu_read_ts_reg_gen7; //HSW same as ivb
     intel_gpgpu_setup_bti = intel_gpgpu_setup_bti_gen75;
+    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen75;
   }
   else if (IS_IVYBRIDGE(device_id)) {
     cl_gpgpu_bind_image = (cl_gpgpu_bind_image_cb *) intel_gpgpu_bind_image_gen7;
@@ -1957,5 +1991,6 @@ intel_set_gpgpu_callbacks(int device_id)
     intel_gpgpu_get_scratch_index = intel_gpgpu_get_scratch_index_gen7;
     intel_gpgpu_post_action = intel_gpgpu_post_action_gen7;
     intel_gpgpu_setup_bti = intel_gpgpu_setup_bti_gen7;
+    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen7;
   }
 }

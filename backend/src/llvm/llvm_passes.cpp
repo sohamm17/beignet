@@ -126,7 +126,7 @@ namespace gbe
     return bKernel;
   }
 
-  uint32_t getPadding(uint32_t offset, uint32_t align) {
+  int32_t getPadding(int32_t offset, int32_t align) {
     return (align - (offset % align)) % align; 
   }
 
@@ -220,24 +220,44 @@ namespace gbe
     return size_bit/8;
   }
 
+  int32_t getGEPConstOffset(const ir::Unit &unit, CompositeType *CompTy, int32_t TypeIndex) {
+    int32_t offset = 0;
+    SequentialType * seqType = dyn_cast<SequentialType>(CompTy);
+    if (seqType != NULL) {
+      if (TypeIndex != 0) {
+        Type *elementType = seqType->getElementType();
+        uint32_t elementSize = getTypeByteSize(unit, elementType);
+        uint32_t align = getAlignmentByte(unit, elementType);
+        elementSize += getPadding(elementSize, align);
+        offset = elementSize * TypeIndex;
+      }
+    } else {
+      int32_t step = TypeIndex > 0 ? 1 : -1;
+      GBE_ASSERT(CompTy->isStructTy());
+      for(int32_t ty_i=0; ty_i != TypeIndex; ty_i += step)
+      {
+        Type* elementType = CompTy->getTypeAtIndex(ty_i);
+        uint32_t align = getAlignmentByte(unit, elementType);
+        offset += getPadding(offset, align * step);
+        offset += getTypeByteSize(unit, elementType) * step;
+      }
+
+      //add getPaddingding for accessed type
+      const uint32_t align = getAlignmentByte(unit, CompTy->getTypeAtIndex(TypeIndex));
+      offset += getPadding(offset, align * step);
+    }
+    return offset;
+  }
+
   class GenRemoveGEPPasss : public BasicBlockPass
   {
 
    public:
     static char ID;
-#define FORMER_VERSION 0
-#if FORMER_VERSION
-   GenRemoveGEPPasss(map<const Value *, const Value *>& 
-                                       parentCompositePointer)
-     : BasicBlockPass(ID),
-     parentPointers(parentCompositePointer) {}
-    map<const Value *, const Value *>& parentPointers;
-#else
-   GenRemoveGEPPasss(const ir::Unit &unit) :
-     BasicBlockPass(ID),
-     unit(unit) {}
-  const ir::Unit &unit;
-#endif
+    GenRemoveGEPPasss(const ir::Unit &unit) :
+      BasicBlockPass(ID),
+      unit(unit) {}
+    const ir::Unit &unit;
     void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.setPreservesCFG();
     }
@@ -267,51 +287,22 @@ namespace gbe
   {
     const uint32_t ptrSize = unit.getPointerSize();
     Value* parentPointer = GEPInst->getOperand(0);
-#if FORMER_VERSION
-    Value* topParent = parentPointer;
-#endif
     CompositeType* CompTy = cast<CompositeType>(parentPointer->getType());
 
     Value* currentAddrInst = 
       new PtrToIntInst(parentPointer, IntegerType::get(GEPInst->getContext(), ptrSize), "", GEPInst);
 
-    uint32_t constantOffset = 0;
+    int32_t constantOffset = 0;
 
     for(uint32_t op=1; op<GEPInst->getNumOperands(); ++op)
     {
-      uint32_t TypeIndex;
-      //we have a constant struct/array acces
-      if(ConstantInt* ConstOP = dyn_cast<ConstantInt>(GEPInst->getOperand(op)))
-      {
-        uint32_t offset = 0;
+      int32_t TypeIndex;
+      ConstantInt* ConstOP = dyn_cast<ConstantInt>(GEPInst->getOperand(op));
+      if (ConstOP != NULL) {
         TypeIndex = ConstOP->getZExtValue();
-        if (op == 1) {
-          if (TypeIndex != 0) {
-            Type *elementType = (cast<PointerType>(parentPointer->getType()))->getElementType();
-            uint32_t elementSize = getTypeByteSize(unit, elementType);
-            uint32_t align = getAlignmentByte(unit, elementType);
-            elementSize += getPadding(elementSize, align);
-            offset += elementSize * TypeIndex;
-          }
-        } else {
-          for(uint32_t ty_i=0; ty_i<TypeIndex; ty_i++)
-          {
-            Type* elementType = CompTy->getTypeAtIndex(ty_i);
-            uint32_t align = getAlignmentByte(unit, elementType);
-            offset += getPadding(offset, align);
-            offset += getTypeByteSize(unit, elementType);
-          }
-
-          //add getPaddingding for accessed type
-          const uint32_t align = getAlignmentByte(unit, CompTy->getTypeAtIndex(TypeIndex));
-          offset += getPadding(offset, align);
-        }
-
-        constantOffset += offset;
+        constantOffset += getGEPConstOffset(unit, CompTy, TypeIndex);
       }
-      // none constant index (=> only array/verctor allowed)
-      else
-      {
+      else {
         // we only have array/vectors here, 
         // therefore all elements have the same size
         TypeIndex = 0;
@@ -381,13 +372,6 @@ namespace gbe
     GEPInst->replaceAllUsesWith(intToPtrInst);
     GEPInst->dropAllReferences();
     GEPInst->eraseFromParent();
-
-#if FORMER_VERSION
-    //insert new pointer into parent list
-    while(parentPointers.find(topParent)!=parentPointers.end())
-      topParent = parentPointers.find(topParent)->second;
-    parentPointers[intToPtrInst] = topParent;
-#endif
 
     return true;
   }

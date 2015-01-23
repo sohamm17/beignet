@@ -61,8 +61,6 @@
 
 #define MI_NOOP                                 (CMD_MI | 0)
 #define MI_BATCH_BUFFER_END                     (CMD_MI | (0xA << 23))
-#define MI_FLUSH                                (CMD_MI | (0x4 << 23))
-#define STATE_INSTRUCTION_CACHE_INVALIDATE      (0x1 << 0)
 
 #define XY_COLOR_BLT_CMD                        (CMD_2D | (0x50 << 22) | 0x04)
 #define XY_COLOR_BLT_WRITE_ALPHA                (1 << 21)
@@ -142,9 +140,6 @@ extern int intel_driver_terminate(intel_driver_t*);
 
 /* simple check if driver was initialized (checking fd should suffice) */
 extern int intel_driver_is_active(intel_driver_t*);
-
-/* query device parameters using driver ioctl */
-extern int intel_driver_get_param(intel_driver_t*, int param, int *value);
 
 /* init the call backs used by the ocl driver */
 extern void intel_setup_callbacks(void);

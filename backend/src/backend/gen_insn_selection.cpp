@@ -340,9 +340,6 @@ namespace gbe
     INLINE ir::Register replaceDst(SelectionInstruction *insn, uint32_t regID, ir::Type type, bool needMov);
     /*! spill a register (insert spill/unspill instructions) */
     INLINE bool spillRegs(const SpilledRegs &spilledRegs, uint32_t registerPool);
-    /*! should add per thread offset to the local memory address when load/store/atomic */
-    bool needPatchSLMAddr() const { return patchSLMAddr; }
-    void setPatchSLMAddr(bool b) { patchSLMAddr = b; }
     bool has32X32Mul() const { return bHas32X32Mul; }
     void setHas32X32Mul(bool b) { bHas32X32Mul = b; }
     /*! indicate whether a register is a scalar/uniform register. */
@@ -629,7 +626,6 @@ namespace gbe
   private:
     /*! Auxiliary label for if/endif. */ 
     uint16_t currAuxLabel;
-    bool patchSLMAddr;
     bool bHas32X32Mul;
     INLINE ir::LabelIndex newAuxLabel()
     {
@@ -670,7 +666,7 @@ namespace gbe
     curr(ctx.getSimdWidth()), file(ctx.getFunction().getRegisterFile()),
     maxInsnNum(ctx.getFunction().getLargestBlockSize()), dagPool(maxInsnNum),
     stateNum(0), vectorNum(0), bwdCodeGeneration(false), currAuxLabel(ctx.getFunction().labelNum()),
-    patchSLMAddr(false), bHas32X32Mul(false)
+    bHas32X32Mul(false)
   {
     const ir::Function &fn = ctx.getFunction();
     this->regNum = fn.regNum();
@@ -1464,14 +1460,13 @@ namespace gbe
   } selectionLibraryInitializer;
 
   bool Selection::Opaque::isRoot(const ir::Instruction &insn) const {
-    if (insn.getDstNum() > 1 ||
-        insn.hasSideEffect() ||
+    if (insn.hasSideEffect() ||
         insn.isMemberOf<ir::BranchInstruction>() ||
         insn.isMemberOf<ir::LabelInstruction>())
     return true;
 
     // No side effect, not a branch and no destination? Impossible
-    GBE_ASSERT(insn.getDstNum() == 1);
+    GBE_ASSERT(insn.getDstNum() >= 1);
 
     // Root if alive outside the block.
     // XXX we should use Value and not registers in liveness info
@@ -1747,7 +1742,6 @@ namespace gbe
   }
 
   Selection75::Selection75(GenContext &ctx) : Selection(ctx) {
-    this->opaque->setPatchSLMAddr(true);
   }
 
   Selection8::Selection8(GenContext &ctx) : Selection(ctx) {
@@ -2844,7 +2838,6 @@ namespace gbe
                    vector<GenRegister> &dst2,
                    GenRegister addr,
                    uint32_t valueNum,
-                   ir::AddressSpace space,
                    ir::BTI bti) const
     {
       for (uint32_t x = 0; x < bti.count; x++) {
@@ -2852,7 +2845,7 @@ namespace gbe
           for (uint32_t dstID = 0; dstID < valueNum; ++dstID)
             dst2[dstID] = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
 
-        GenRegister temp = getRelativeAddress(sel, addr, space, bti.bti[x]);
+        GenRegister temp = getRelativeAddress(sel, addr, bti.bti[x]);
         sel.UNTYPED_READ(temp, dst2.data(), valueNum, bti.bti[x]);
         if(x > 0) {
           sel.push();
@@ -2878,7 +2871,7 @@ namespace gbe
       vector<GenRegister> dst2(valueNum);
       for (uint32_t dstID = 0; dstID < valueNum; ++dstID)
         dst2[dstID] = dst[dstID] = sel.selReg(insn.getValue(dstID), TYPE_U32);
-      readDWord(sel, dst, dst2, addr, valueNum, insn.getAddressSpace(), bti);
+      readDWord(sel, dst, dst2, addr, valueNum, bti);
     }
 
     void emitDWordGather(Selection::Opaque &sel,
@@ -2925,7 +2918,7 @@ namespace gbe
       GBE_ASSERT(valueNum == 1);
       GBE_ASSERT(bti.count == 1);
       vector<GenRegister> dst(valueNum);
-      GenRegister tmpAddr = getRelativeAddress(sel, addr, insn.getAddressSpace(), bti.bti[0]);
+      GenRegister tmpAddr = getRelativeAddress(sel, addr, bti.bti[0]);
       for ( uint32_t dstID = 0; dstID < valueNum; ++dstID)
         dst[dstID] = sel.selReg(insn.getValue(dstID), ir::TYPE_U64);
       sel.READ64(tmpAddr, dst.data(), valueNum, bti.bti[0]);
@@ -2996,7 +2989,7 @@ namespace gbe
         tmp2[i] = tmp[i] = GenRegister::udxgrf(simdWidth, tmpReg[i]);
       }
 
-      readDWord(sel, tmp, tmp2, address, tmpRegNum, insn.getAddressSpace(), bti);
+      readDWord(sel, tmp, tmp2, address, tmpRegNum, bti);
 
       for(uint32_t i = 0; i < tmpRegNum; i++) {
         unsigned int elemNum = (valueNum - i * (4 / typeSize)) > 4/typeSize ?
@@ -3099,7 +3092,7 @@ namespace gbe
               sel.ADD(alignedAddr, alignedAddr, GenRegister::immud(pos * 4));
             sel.pop();
           }
-          readDWord(sel, t1, t2, alignedAddr, width, insn.getAddressSpace(), bti);
+          readDWord(sel, t1, t2, alignedAddr, width, bti);
           remainedReg -= width;
           pos += width;
         } while(remainedReg);
@@ -3124,7 +3117,7 @@ namespace gbe
           if (x > 0)
             tmp = sel.selReg(sel.reg(family, simdWidth == 1), insn.getValueType());
 
-          GenRegister addr = getRelativeAddress(sel, address, insn.getAddressSpace(), bti.bti[x]);
+          GenRegister addr = getRelativeAddress(sel, address, bti.bti[x]);
           readByteAsDWord(sel, elemSize, addr, tmp, simdWidth, bti.bti[x]);
           if (x > 0) {
             sel.push();
@@ -3151,8 +3144,8 @@ namespace gbe
       sel.INDIRECT_MOVE(dst, src);
     }
 
-    INLINE GenRegister getRelativeAddress(Selection::Opaque &sel, GenRegister address, ir::AddressSpace space, uint8_t bti) const {
-      if(space == ir::MEM_LOCAL || space == ir::MEM_CONSTANT)
+    INLINE GenRegister getRelativeAddress(Selection::Opaque &sel, GenRegister address, uint8_t bti) const {
+      if (bti == 0xfe || bti == BTI_CONSTANT)
         return address;
 
       sel.push();
@@ -3162,11 +3155,18 @@ namespace gbe
       sel.pop();
       return temp;
     }
+    // check whether all binded table index point to constant memory
+    INLINE bool isAllConstant(const ir::BTI &bti) const {
+      for (int x = 0; x < bti.count; x++) {
+         if (bti.bti[x] != BTI_CONSTANT)
+           return false;
+      }
+      return true;
+    }
 
     INLINE bool emitOne(Selection::Opaque &sel, const ir::LoadInstruction &insn, bool &markChildren) const {
       using namespace ir;
       GenRegister address = sel.selReg(insn.getAddress(), ir::TYPE_U32);
-      const AddressSpace space = insn.getAddressSpace();
       GBE_ASSERT(insn.getAddressSpace() == MEM_GLOBAL ||
                  insn.getAddressSpace() == MEM_CONSTANT ||
                  insn.getAddressSpace() == MEM_PRIVATE ||
@@ -3174,19 +3174,10 @@ namespace gbe
       //GBE_ASSERT(sel.isScalarReg(insn.getValue(0)) == false);
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(type);
-      if(space == MEM_LOCAL && sel.needPatchSLMAddr()) {
-        GenRegister temp = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
-        sel.ADD(temp, address, sel.selReg(ocl::slmoffset, ir::TYPE_U32));
-        address = temp;
-      }
-      BTI bti;
-      if (space == MEM_CONSTANT || space == MEM_LOCAL) {
-        bti.bti[0] = space == MEM_CONSTANT ? BTI_CONSTANT : 0xfe;
-        bti.count = 1;
-      } else {
-        bti = insn.getBTI();
-      }
-      if (space == MEM_CONSTANT) {
+      const BTI &bti = insn.getBTI();
+      bool allConstant = isAllConstant(bti);
+
+      if (allConstant) {
         // XXX TODO read 64bit constant through constant cache
         // Per HW Spec, constant cache messages can read at least DWORD data.
         // So, byte/short data type, we have to read through data cache.
@@ -3291,40 +3282,34 @@ namespace gbe
       }
     }
 
+    INLINE GenRegister getRelativeAddress(Selection::Opaque &sel, GenRegister address, uint8_t bti) const {
+      if(bti == 0xfe)
+        return address;
+
+      sel.push();
+        sel.curr.noMask = 1;
+        GenRegister temp = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+        sel.ADD(temp, address, GenRegister::negate(sel.selReg(sel.ctx.getSurfaceBaseReg(bti), ir::TYPE_U32)));
+      sel.pop();
+      return temp;
+    }
+
     INLINE bool emitOne(Selection::Opaque &sel, const ir::StoreInstruction &insn, bool &markChildren) const
     {
       using namespace ir;
-      const AddressSpace space = insn.getAddressSpace();
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(type);
       GenRegister address = sel.selReg(insn.getAddress(), ir::TYPE_U32);
-      if(space == MEM_LOCAL && sel.needPatchSLMAddr()) {
-        GenRegister temp = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
-        sel.ADD(temp, address, sel.selReg(ocl::slmoffset, ir::TYPE_U32));
-        address = temp;
-      }
-      if(space == MEM_LOCAL) {
+
+      BTI bti = insn.getBTI();
+      for (int x = 0; x < bti.count; x++) {
+        GenRegister temp = getRelativeAddress(sel, address, bti.bti[x]);
         if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
-          this->emitWrite64(sel, insn, address, 0xfe);
+          this->emitWrite64(sel, insn, temp, bti.bti[x]);
         else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
-          this->emitUntypedWrite(sel, insn, address,  0xfe);
-        else
-          this->emitByteScatter(sel, insn, elemSize, address, 0xfe);
-      } else {
-        BTI bti = insn.getBTI();
-        for (int x = 0; x < bti.count; x++) {
-          GenRegister temp = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
-          sel.push();
-            sel.curr.noMask = 1;
-            sel.ADD(temp, address, GenRegister::negate(sel.selReg(sel.ctx.getSurfaceBaseReg(bti.bti[x]), ir::TYPE_U32)));
-          sel.pop();
-          if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
-            this->emitWrite64(sel, insn, temp, bti.bti[x]);
-          else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
-            this->emitUntypedWrite(sel, insn, temp,  bti.bti[x]);
-          else {
-            this->emitByteScatter(sel, insn, elemSize, temp, bti.bti[x]);
-          }
+          this->emitUntypedWrite(sel, insn, temp,  bti.bti[x]);
+        else {
+          this->emitByteScatter(sel, insn, elemSize, temp, bti.bti[x]);
         }
       }
       return true;
@@ -3734,11 +3719,6 @@ namespace gbe
       GenRegister dst  = sel.selReg(insn.getDst(0), TYPE_U32);
       GenAtomicOpCode genAtomicOp = (GenAtomicOpCode)atomicOp;
       if(space == MEM_LOCAL) {
-        if (sel.needPatchSLMAddr()) {
-          GenRegister temp = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-          sel.ADD(temp, src0, sel.selReg(ocl::slmoffset, ir::TYPE_U32));
-          src0 = temp;
-        }
         sel.ATOMIC(dst, genAtomicOp, srcNum, src0, src1, src2, 0xfe);
       } else {
         ir::BTI b = insn.getBTI();
@@ -3996,8 +3976,8 @@ namespace gbe
         msgLen = srcNum;
       }
       // We switch to a fixup bti for linear filter on a image1d array sampling.
-      uint32_t bti = insn.getImageIndex() + (insn.getSamplerOffset() == 2 ? BTI_MAX_IMAGE_NUM : 0);
-      if (bti > 253) {
+      uint32_t bti = insn.getImageIndex() + (insn.getSamplerOffset() == 2 ? BTI_WORKAROUND_IMAGE_OFFSET : 0);
+      if (bti > BTI_MAX_ID) {
         std::cerr << "Too large bti " << bti;
         return false;
       }

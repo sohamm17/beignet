@@ -35,11 +35,11 @@ namespace gbe
     {
       fmts.push_back(*fmt);
 
-      for (auto &f : fmts.back()) {
-        if (f.type == PRINTF_SLOT_TYPE_STRING)
+      for (PrintfFmt::iterator f = fmts.back().begin(); f != fmts.back().end(); ++f) {
+        if (f->type == PRINTF_SLOT_TYPE_STRING)
           continue;
 
-        slots.push_back(&f);
+        slots.push_back(&(*f));
       }
 
       /* Update the total size of size. */
@@ -105,30 +105,36 @@ namespace gbe
 #define PRINT_SOMETHING(target_ty, conv)  do {                          \
       if (!vec_i)                                                       \
         pf_str = pf_str + std::string(#conv);                           \
-      printf(pf_str.c_str(),                                            \
-             ((target_ty *)((char *)buf_addr + sizeOfSize * global_wk_sz0 * global_wk_sz1 * global_wk_sz2 * n \
-                                              + slot.state->out_buf_sizeof_offset * \
-                                                         global_wk_sz0 * global_wk_sz1 * global_wk_sz2)) \
-             [(k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i) * vec_num + vec_i]);\
+      char *ptr = ((char *)buf_addr + sizeOfSize * global_wk_sz0 * global_wk_sz1 * global_wk_sz2 * n \
+                   + slot.state->out_buf_sizeof_offset *                \
+                   global_wk_sz0 * global_wk_sz1 * global_wk_sz2);      \
+      target_ty* obj_ptr = ((target_ty *)ptr) + (k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i) * vec_num + vec_i; \
+      if ((char *)obj_ptr + sizeof(target_ty) > (char *)buf_addr + output_sz) {            \
+        printf("\n\n!!!The printf message is out of range because of the limited buffer, ignore.\n"); \
+        return;                                                         \
+      }                                                                 \
+      printf(pf_str.c_str(),  *obj_ptr);                                \
     } while (0)
 
 
     void PrintfSet::outputPrintf(void* index_addr, void* buf_addr, size_t global_wk_sz0,
-                                 size_t global_wk_sz1, size_t global_wk_sz2)
+                                 size_t global_wk_sz1, size_t global_wk_sz2, size_t output_sz)
     {
       LockOutput lock;
       size_t i, j, k;
       std::string pf_str;
       int stmt = 0;
 
-      for (auto &pf : fmts) {
+      for (size_t count = 0; count < fmts.size(); ++count) {
+        PrintfFmt& pf = fmts[count];
         for (i = 0; i < global_wk_sz0; i++) {
           for (j = 0; j < global_wk_sz1; j++) {
             for (k = 0; k < global_wk_sz2; k++) {
               int loop_num = ((int *)index_addr)[stmt*global_wk_sz0*global_wk_sz1*global_wk_sz2
                                                  + k*global_wk_sz0*global_wk_sz1 + j*global_wk_sz0 + i];
               for (int n = 0; n < loop_num; n++) {
-                for (auto &slot : pf) {
+                for (PrintfFmt::iterator pfit = pf.begin(); pfit != pf.end(); ++pfit) {
+                  PrintfSlot& slot = *pfit;
                   pf_str = "";
                   int vec_num;
 
