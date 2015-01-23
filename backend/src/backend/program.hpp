@@ -32,7 +32,6 @@
 #include "ir/function.hpp"
 #include "ir/printf.hpp"
 #include "ir/sampler.hpp"
-#include "sys/hash_map.hpp"
 #include "sys/vector.hpp"
 #include <string>
 
@@ -156,10 +155,10 @@ namespace gbe {
     }
 
     void outputPrintf(void* index_addr, void* buf_addr, size_t global_wk_sz0,
-                      size_t global_wk_sz1, size_t global_wk_sz2) {
+                      size_t global_wk_sz1, size_t global_wk_sz2, size_t output_sz) {
       if(printfSet)
         printfSet->outputPrintf(index_addr, buf_addr, global_wk_sz0,
-                                global_wk_sz1, global_wk_sz2);
+                                global_wk_sz1, global_wk_sz2, output_sz);
     }
 
     ir::FunctionArgument::InfoFromLLVM* getArgInfo(uint32_t id) const { return &args[id].info; }
@@ -251,7 +250,7 @@ namespace gbe {
     uint32_t getKernelNum(void) const { return kernels.size(); }
     /*! Get the kernel from its name */
     Kernel *getKernel(const std::string &name) const {
-      auto it = kernels.find(name);
+      map<std::string, Kernel*>::const_iterator it = kernels.find(name);
       if (it == kernels.end())
         return NULL;
       else
@@ -261,9 +260,9 @@ namespace gbe {
     Kernel *getKernel(uint32_t ID) const {
       uint32_t currID = 0;
       Kernel *kernel = NULL;
-      for (const auto &pair : kernels) {
+      for (map<std::string, Kernel*>::const_iterator it = kernels.begin(); it != kernels.end(); ++it) {
         if (currID == ID) {
-          kernel = pair.second;
+          kernel = it->second;
           break;
         }
         currID++;
@@ -307,7 +306,7 @@ namespace gbe {
     /*! Allocate an empty kernel. */
     virtual Kernel *allocateKernel(const std::string &name) = 0;
     /*! Kernels sorted by their name */
-    hash_map<std::string, Kernel*> kernels;
+    map<std::string, Kernel*> kernels;
     /*! Global (constants) outside any kernel */
     ir::ConstantSet *constantSet;
     /*! Use custom allocators */

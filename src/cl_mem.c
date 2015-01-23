@@ -190,10 +190,18 @@ cl_get_image_info(cl_mem mem,
     *(size_t *)param_value = image->slice_pitch;
     break;
   case CL_IMAGE_WIDTH:
-    *(size_t *)param_value = image->w;
+
+    if (mem->type == CL_MEM_BUFFER1D_IMAGE_TYPE) {
+      struct _cl_mem_buffer1d_image *buffer1d_image = (struct _cl_mem_buffer1d_image*) image;
+      *(size_t *)param_value = buffer1d_image->size;
+    } else
+      *(size_t *)param_value = image->w;
     break;
   case CL_IMAGE_HEIGHT:
-    *(size_t *)param_value = IS_1D(image) ? 0 : image->h;
+    if (mem->type == CL_MEM_BUFFER1D_IMAGE_TYPE)
+      *(size_t *)param_value = 0;
+    else
+      *(size_t *)param_value = IS_1D(image) ? 0 : image->h;
     break;
   case CL_IMAGE_DEPTH:
     *(size_t *)param_value = IS_3D(image) ? image->depth : 0;
@@ -243,6 +251,10 @@ cl_mem_allocate(enum cl_mem_type type,
     struct _cl_mem_gl_image *gl_image = NULL;
     TRY_ALLOC (gl_image, CALLOC(struct _cl_mem_gl_image));
     mem = &gl_image->base.base;
+  } else if (type == CL_MEM_BUFFER1D_IMAGE_TYPE) {
+    struct _cl_mem_buffer1d_image *buffer1d_image = NULL;
+    TRY_ALLOC(buffer1d_image, CALLOC(struct _cl_mem_buffer1d_image));
+    mem = &buffer1d_image->base.base;
   } else {
     struct _cl_mem_buffer *buffer = NULL;
     TRY_ALLOC (buffer, CALLOC(struct _cl_mem_buffer));
@@ -266,15 +278,25 @@ cl_mem_allocate(enum cl_mem_type type,
 
 #ifdef HAS_USERPTR
     if (ctx->device->host_unified_memory) {
+      int page_size = getpagesize();
       /* currently only cl buf is supported, will add cl image support later */
-      if ((flags & CL_MEM_USE_HOST_PTR) && host_ptr != NULL) {
-        /* userptr not support tiling */
-        if (!is_tiled) {
-          int page_size = getpagesize();
-          if ((((unsigned long)host_ptr | sz) & (page_size - 1)) == 0) {
-            mem->is_userptr = 1;
-            mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", host_ptr, sz, 0);
+      if (type == CL_MEM_BUFFER_TYPE) {
+        if (flags & CL_MEM_USE_HOST_PTR) {
+          assert(host_ptr != NULL);
+          /* userptr not support tiling */
+          if (!is_tiled) {
+            if ((((unsigned long)host_ptr | sz) & (page_size - 1)) == 0) {
+              mem->is_userptr = 1;
+              mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", host_ptr, sz, 0);
+            }
           }
+        }
+        else if (flags & CL_MEM_ALLOC_HOST_PTR) {
+          const size_t alignedSZ = ALIGN(sz, page_size);
+          void* internal_host_ptr = cl_aligned_malloc(alignedSZ, page_size);
+          mem->host_ptr = internal_host_ptr;
+          mem->is_userptr = 1;
+          mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", internal_host_ptr, alignedSZ, 0);
         }
       }
     }
@@ -377,22 +399,6 @@ cl_mem_new_buffer(cl_context ctx,
     goto error;
   }
 
-  /* CL_MEM_ALLOC_HOST_PTR and CL_MEM_USE_HOST_PTR
-     are mutually exclusive. */
-  if (UNLIKELY(flags & CL_MEM_ALLOC_HOST_PTR &&
-               flags & CL_MEM_USE_HOST_PTR)) {
-    err = CL_INVALID_HOST_PTR;
-    goto error;
-  }
-
-  /* CL_MEM_COPY_HOST_PTR and CL_MEM_USE_HOST_PTR
-     are mutually exclusive. */
-  if (UNLIKELY(flags & CL_MEM_COPY_HOST_PTR &&
-               flags & CL_MEM_USE_HOST_PTR)) {
-    err = CL_INVALID_HOST_PTR;
-    goto error;
-  }
-
   if ((err = cl_get_device_info(ctx->device,
                                 CL_DEVICE_MAX_MEM_ALLOC_SIZE,
                                 sizeof(max_mem_size),
@@ -416,13 +422,17 @@ cl_mem_new_buffer(cl_context ctx,
     goto error;
 
   /* Copy the data if required */
-  if (flags & CL_MEM_COPY_HOST_PTR)
-    cl_buffer_subdata(mem->bo, 0, sz, data);
+  if (flags & CL_MEM_COPY_HOST_PTR) {
+    if (mem->is_userptr)
+      memcpy(mem->host_ptr, data, sz);
+    else
+      cl_buffer_subdata(mem->bo, 0, sz, data);
+  }
 
   if ((flags & CL_MEM_USE_HOST_PTR) && !mem->is_userptr)
     cl_buffer_subdata(mem->bo, 0, sz, data);
 
-  if (flags & CL_MEM_USE_HOST_PTR || flags & CL_MEM_COPY_HOST_PTR)
+  if (flags & CL_MEM_USE_HOST_PTR)
     mem->host_ptr = data;
 
 exit:
@@ -637,11 +647,15 @@ cl_mem_copy_image(struct _cl_mem_image *image,
   cl_mem_unmap_auto((cl_mem)image);
 }
 
-cl_image_tiling_t cl_get_default_tiling(void)
+cl_image_tiling_t cl_get_default_tiling(cl_driver drv)
 {
   static int initialized = 0;
   static cl_image_tiling_t tiling = CL_TILE_X;
+
   if (!initialized) {
+    // FIXME, need to find out the performance diff's root cause on BDW.
+    if(cl_driver_get_ver(drv) == 8)
+      tiling = CL_TILE_Y;
     char *tilingStr = getenv("OCL_TILING");
     if (tilingStr != NULL) {
       switch (tilingStr[0]) {
@@ -676,6 +690,7 @@ _cl_mem_new_image(cl_context ctx,
   cl_mem_object_type image_type = orig_image_type;
   uint32_t bpp = 0, intel_fmt = INTEL_UNSUPPORTED_FORMAT;
   size_t sz = 0, aligned_pitch = 0, aligned_slice_pitch = 0, aligned_h = 0;
+  size_t origin_width = w;  // for image1d buffer work around.
   cl_image_tiling_t tiling = CL_NO_TILE;
 
   /* Check flags consistency */
@@ -708,8 +723,7 @@ _cl_mem_new_image(cl_context ctx,
       image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER)))
     DO_IMAGE_ERROR;
 
-  if (image_type == CL_MEM_OBJECT_IMAGE1D ||
-      image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+  if (image_type == CL_MEM_OBJECT_IMAGE1D) {
     size_t min_pitch = bpp * w;
     if (data && pitch == 0)
       pitch = min_pitch;
@@ -722,18 +736,29 @@ _cl_mem_new_image(cl_context ctx,
     if (UNLIKELY(!data && pitch != 0)) DO_IMAGE_ERROR;
     if (UNLIKELY(!data && slice_pitch != 0)) DO_IMAGE_ERROR;
     tiling = CL_NO_TILE;
-  } else if (image_type == CL_MEM_OBJECT_IMAGE2D) {
+  } else if (image_type == CL_MEM_OBJECT_IMAGE2D ||
+             image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+
+    if (image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (UNLIKELY(w > ctx->device->image_mem_size)) DO_IMAGE_ERROR;
+      /* This is an image1d buffer which exceeds normal image size restrication
+         We have to use a 2D image to simulate this 1D image. */
+      h = (w + ctx->device->image2d_max_width - 1) / ctx->device->image2d_max_width;
+      w = w > ctx->device->image2d_max_width ? ctx->device->image2d_max_width : w;
+      tiling = CL_NO_TILE;
+    } else if (cl_driver_get_ver(ctx->drv) != 6) {
+      /* Pick up tiling mode (we do only linear on SNB) */
+      tiling = cl_get_default_tiling(ctx->drv);
+    }
+
     size_t min_pitch = bpp * w;
     if (data && pitch == 0)
       pitch = min_pitch;
+
     if (UNLIKELY(w > ctx->device->image2d_max_width)) DO_IMAGE_ERROR;
     if (UNLIKELY(h > ctx->device->image2d_max_height)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_pitch > pitch)) DO_IMAGE_ERROR;
     if (UNLIKELY(!data && pitch != 0)) DO_IMAGE_ERROR;
-
-    /* Pick up tiling mode (we do only linear on SNB) */
-    if (cl_driver_get_ver(ctx->drv) != 6)
-      tiling = cl_get_default_tiling();
 
     depth = 1;
   } else if (image_type == CL_MEM_OBJECT_IMAGE3D ||
@@ -743,7 +768,7 @@ _cl_mem_new_image(cl_context ctx,
       h = 1;
       tiling = CL_NO_TILE;
     } else if (cl_driver_get_ver(ctx->drv) != 6)
-      tiling = cl_get_default_tiling();
+      tiling = cl_get_default_tiling(ctx->drv);
 
     size_t min_pitch = bpp * w;
     if (data && pitch == 0)
@@ -785,11 +810,20 @@ _cl_mem_new_image(cl_context ctx,
   if(tiling != CL_NO_TILE && sz > MAX_TILING_SIZE) {
     tiling = CL_NO_TILE;
     aligned_pitch = w * bpp;
-    aligned_h     = h;
+    aligned_h     = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
     sz = aligned_pitch * aligned_h * depth;
   }
 
-  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
+  if (image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER)
+    mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
+  else {
+    mem = cl_mem_allocate(CL_MEM_BUFFER1D_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
+    if (mem != NULL && err == CL_SUCCESS) {
+      struct _cl_mem_buffer1d_image *buffer1d_image = (struct _cl_mem_buffer1d_image *)mem;
+      buffer1d_image->size = origin_width;;
+    }
+  }
+
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
@@ -1080,6 +1114,9 @@ cl_mem_delete(cl_mem mem)
   } else if (LIKELY(mem->bo != NULL)) {
     cl_buffer_unreference(mem->bo);
   }
+
+  if (mem->is_userptr && (mem->flags & CL_MEM_ALLOC_HOST_PTR))
+    cl_free(mem->host_ptr);
 
   cl_free(mem);
 }
@@ -1818,8 +1855,13 @@ cl_mem_map_auto(cl_mem mem, int write)
 {
   if (IS_IMAGE(mem) && cl_mem_image(mem)->tiling != CL_NO_TILE)
     return cl_mem_map_gtt(mem);
-  else
-    return cl_mem_map(mem, write);
+  else {
+    if (mem->is_userptr) {
+      cl_buffer_wait_rendering(mem->bo);
+      return mem->host_ptr;
+    }else
+      return cl_mem_map(mem, write);
+  }
 }
 
 LOCAL cl_int
@@ -1829,7 +1871,7 @@ cl_mem_unmap_auto(cl_mem mem)
     cl_buffer_unmap_gtt(mem->bo);
     mem->mapped_gtt = 0;
   }
-  else
+  else if (!mem->is_userptr)
     cl_buffer_unmap(mem->bo);
   return CL_SUCCESS;
 }
@@ -1910,7 +1952,7 @@ LOCAL cl_mem cl_mem_new_libva_image(cl_context ctx,
 
   image = cl_mem_image(mem);
 
-  mem->bo = cl_buffer_get_image_from_libva(ctx, bo_name, image, offset);
+  mem->bo = cl_buffer_get_image_from_libva(ctx, bo_name, image);
 
   image->w = width;
   image->h = height;

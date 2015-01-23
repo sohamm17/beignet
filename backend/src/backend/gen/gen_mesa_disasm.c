@@ -67,6 +67,7 @@ static const struct {
   [GEN_OPCODE_LZD] = { .name = "lzd", .nsrc = 1, .ndst = 1 },
   [GEN_OPCODE_FBH] = { .name = "fbh", .nsrc = 1, .ndst = 1 },
   [GEN_OPCODE_FBL] = { .name = "fbl", .nsrc = 1, .ndst = 1 },
+  [GEN_OPCODE_CBIT] = { .name = "cbit", .nsrc = 1, .ndst = 1 },
   [GEN_OPCODE_F16TO32] = { .name = "f16to32", .nsrc = 1, .ndst = 1 },
   [GEN_OPCODE_F32TO16] = { .name = "f32to16", .nsrc = 1, .ndst = 1 },
 
@@ -515,8 +516,8 @@ static int gen_version;
 #define SCRATCH_RW_BLOCK_SIZE(inst) GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.block_size)
 #define SCRATCH_RW_CHANNEL_MODE(inst) GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.channel_mode)
 #define SCRATCH_RW_MSG_TYPE(inst)  GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.msg_type)
-#define DWORD_RW_BTI(inst)         GEN_BITS_FIELD(inst, bits3.gen7_dword_rw.msg_type)
-#define DWORD_RW_MSG_TYPE(inst)    GEN_BITS_FIELD(inst, bits3.gen7_dword_rw.bti)
+#define DWORD_RW_BTI(inst)         GEN_BITS_FIELD(inst, bits3.gen7_dword_rw.bti)
+#define DWORD_RW_MSG_TYPE(inst)    GEN_BITS_FIELD(inst, bits3.gen7_dword_rw.msg_type)
 #define MSG_GW_SUBFUNC(inst)       GEN_BITS_FIELD(inst, bits3.gen7_msg_gw.subfunc)
 #define MSG_GW_NOTIFY(inst)        GEN_BITS_FIELD(inst, bits3.gen7_msg_gw.notify)
 #define MSG_GW_ACKREQ(inst)        GEN_BITS_FIELD(inst, bits3.gen7_msg_gw.ackreq)

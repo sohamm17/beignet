@@ -66,8 +66,10 @@ enum gbe_get_arg_info_value {
 #define BTI_CONSTANT 0
 #define BTI_PRIVATE 1
 #define BTI_RESERVED_NUM 2
-#define BTI_MAX_IMAGE_NUM 128
-#define BTI_MAX_ID (BTI_MAX_IMAGE_NUM + BTI_RESERVED_NUM - 1)
+#define BTI_MAX_READ_IMAGE_ARGS 128
+#define BTI_MAX_WRITE_IMAGE_ARGS  8
+#define BTI_WORKAROUND_IMAGE_OFFSET 128
+#define BTI_MAX_ID 253
 
 /*! Constant buffer values (ie values to setup in the constant buffer) */
 enum gbe_curbe_type {
@@ -155,7 +157,7 @@ typedef uint32_t (gbe_get_printf_sizeof_size_cb)(void* printf_info);
 extern gbe_get_printf_sizeof_size_cb *gbe_get_printf_sizeof_size;
 
 typedef void (gbe_output_printf_cb) (void* printf_info, void* index_addr, void* buf_addr,
-                         size_t global_wk_sz0, size_t global_wk_sz1, size_t global_wk_sz2);
+              size_t global_wk_sz0, size_t global_wk_sz1, size_t global_wk_sz2, size_t outbuf_sz);
 extern gbe_output_printf_cb* gbe_output_printf;
 
 /*! Create a new program from the given source code (zero terminated string) */

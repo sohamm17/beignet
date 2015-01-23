@@ -401,7 +401,7 @@ cl_ocl_init(void)
 
 error:
   if (props)
-    delete props;
+    delete[] props;
   return status;
 }
 
@@ -679,4 +679,26 @@ float cl_FLT_ULP(float float_number)
 int cl_INT_ULP(int int_number)
 {
   return 0;
+}
+
+int time_subtract(struct timeval *y, struct timeval *x, struct timeval *result)
+{
+  if ( x->tv_sec > y->tv_sec )
+    return   -1;
+
+  if ((x->tv_sec == y->tv_sec) && (x->tv_usec > y->tv_usec))
+    return   -1;
+
+  if ( result != NULL){
+    result->tv_sec = ( y->tv_sec - x->tv_sec );
+    result->tv_usec = ( y->tv_usec - x->tv_usec );
+
+    if (result->tv_usec < 0){
+      result->tv_sec --;
+      result->tv_usec += 1000000;
+    }
+  }
+
+  int msec = 1000.0*(y->tv_sec - x->tv_sec) + (y->tv_usec - x->tv_usec)/1000.0;
+  return msec;
 }

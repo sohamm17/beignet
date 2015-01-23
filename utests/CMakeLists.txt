@@ -18,8 +18,18 @@ configure_file (
 
 #XXX only need GL if required
 link_directories (${LLVM_LIBRARY_DIR} ${OPENGL_LIBDIR} ${DRM_LIBDIR})
-set (utests_sources
+
+set (utests_basic_sources
   utest_error.c
+  utest_assert.cpp
+  utest.cpp
+  utest_file_map.cpp
+  utest_helper.cpp)
+
+# the test case with binary kernel
+set (utests_binary_kernel_sources load_program_from_bin_file.cpp enqueue_built_in_kernels.cpp)
+
+set (utests_sources
   compiler_basic_arithmetic.cpp
   compiler_displacement_map_element.cpp
   compiler_mandelbrot.cpp
@@ -36,6 +46,7 @@ set (utests_sources
   compiler_array1.cpp
   compiler_array2.cpp
   compiler_array3.cpp
+  compiler_array4.cpp
   compiler_byte_scatter.cpp
   compiler_ceil.cpp
   compiler_clz_short.cpp
@@ -103,7 +114,6 @@ set (utests_sources
   compiler_write_only.cpp
   compiler_write_only_shorts.cpp
   compiler_switch.cpp
-  compiler_overflow.cpp
   compiler_bswap.cpp
   compiler_math.cpp
   compiler_atomic_functions.cpp
@@ -171,13 +181,13 @@ set (utests_sources
   compiler_function_argument3.cpp
   compiler_function_qualifiers.cpp
   compiler_bool_cross_basic_block.cpp
+  compiler_private_const.cpp
   compiler_private_data_overflow.cpp
   compiler_getelementptr_bitcast.cpp
   compiler_simd_any.cpp
   compiler_simd_all.cpp
   compiler_time_stamp.cpp
   compiler_double_precision.cpp
-  load_program_from_bin_file.cpp
   load_program_from_gen_bin.cpp
   get_arg_info.cpp
   profiling_exec.cpp
@@ -185,7 +195,6 @@ set (utests_sources
   enqueue_copy_buf_unaligned.cpp
   test_printf.cpp
   enqueue_fill_buf.cpp
-  enqueue_built_in_kernels.cpp
   builtin_kernel_max_global_size.cpp
   image_1D_buffer.cpp
   compare_image_2d_and_1d_array.cpp
@@ -195,29 +204,37 @@ set (utests_sources
   compiler_assignment_operation_in_if.cpp
   vload_bench.cpp
   runtime_use_host_ptr_buffer.cpp
-  utest_assert.cpp
-  utest.cpp
-  utest_file_map.cpp
-  utest_helper.cpp)
+  runtime_alloc_host_ptr_buffer.cpp)
+
+if (LLVM_VERSION_NODOT VERSION_GREATER 34)
+  SET(utests_sources
+      ${utests_sources}
+      compiler_overflow.cpp)
+endif (LLVM_VERSION_NODOT VERSION_GREATER 34)
+
+if (X11_FOUND)
+  set(utests_sources
+      ${utests_sources}
+      runtime_climage_from_boname.cpp)
+  SET(UTESTS_REQUIRED_X11_LIB ${X11_LIBRARIES} ${XEXT_LIBRARIES})
+else()
+SET(UTESTS_REQUIRED_X11_LIB "")
+endif (X11_FOUND)
 
 SET (kernel_bin ${CMAKE_CURRENT_SOURCE_DIR}/../kernels/compiler_ceil)
 
+list (GET GBE_BIN_GENERATER -1 GBE_BIN_FILE)
 if(GEN_PCI_ID)
   ADD_CUSTOM_COMMAND(
   OUTPUT ${kernel_bin}.bin
   COMMAND ${GBE_BIN_GENERATER} ${kernel_bin}.cl -o${kernel_bin}.bin -t${GEN_PCI_ID}
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../backend/src/gbe_bin_generater ${kernel_bin}.cl)
+  DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
 else(GEN_PCI_ID)
   ADD_CUSTOM_COMMAND(
   OUTPUT ${kernel_bin}.bin
   COMMAND ${GBE_BIN_GENERATER} ${kernel_bin}.cl -o${kernel_bin}.bin
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../backend/src/gbe_bin_generater ${kernel_bin}.cl)
+  DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
 endif(GEN_PCI_ID)
-
-if (DRM_INTEL_USERPTR)
-SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
-endif (DRM_INTEL_USERPTR)
 
 ADD_CUSTOM_TARGET(kernel_bin.bin
     DEPENDS ${kernel_bin}.bin)
@@ -234,21 +251,27 @@ add_custom_target(utest_generator
     )
 
 if (EGL_FOUND AND MESA_SOURCE_FOUND)
-SET(utests_sources ${utests_sources} compiler_fill_gl_image.cpp)
-SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
-SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
-SET(UTESTS_REQUIRED_EGL_LIB ${EGL_LIBRARIES})
+  SET(utests_sources ${utests_sources} compiler_fill_gl_image.cpp)
+  SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
+  SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
+  SET(UTESTS_REQUIRED_EGL_LIB ${EGL_LIBRARIES})
 else()
-SET(UTESTS_REQUIRED_EGL_LIB "")
+  SET(UTESTS_REQUIRED_EGL_LIB "")
 endif()
 
-if (COMPILER STREQUAL "CLANG")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
+if (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
+  SET(utests_sources ${utests_basic_sources} ${utests_binary_kernel_sources})
+else ()
+  SET(utests_sources ${utests_basic_sources} ${utests_binary_kernel_sources} ${ADDMATHFUNC} ${utests_sources})
 endif ()
 
-ADD_LIBRARY(utests SHARED ${ADDMATHFUNC} ${utests_sources})
+if (COMPILER STREQUAL "CLANG")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
+endif ()
 
-TARGET_LINK_LIBRARIES(utests cl m ${OPENGL_LIBRARIES} ${UTESTS_REQUIRED_EGL_LIB} ${CMAKE_THREAD_LIBS_INIT})
+ADD_LIBRARY(utests SHARED ${utests_sources})
+
+TARGET_LINK_LIBRARIES(utests cl m ${OPENGL_LIBRARIES} ${UTESTS_REQUIRED_EGL_LIB} ${CMAKE_THREAD_LIBS_INIT} ${UTESTS_REQUIRED_X11_LIB})
 
 ADD_EXECUTABLE(utest_run utest_run.cpp)
 TARGET_LINK_LIBRARIES(utest_run utests)

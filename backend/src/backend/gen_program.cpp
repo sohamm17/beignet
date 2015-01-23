@@ -22,6 +22,7 @@
  * \author Benjamin Segovia <benjamin.segovia@intel.com>
  */
 
+#ifdef GBE_COMPILER_AVAILABLE
 #include "llvm/Config/llvm-config.h"
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 2
 #include "llvm/LLVMContext.h"
@@ -45,6 +46,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/IRReader/IRReader.h"
+#endif
 
 #include "backend/program.h"
 #include "backend/gen_program.h"
@@ -56,10 +58,12 @@
 #include "backend/gen/gen_mesa_disasm.h"
 #include "backend/gen_reg_allocation.hpp"
 #include "ir/unit.hpp"
+
+#ifdef GBE_COMPILER_AVAILABLE
 #include "llvm/llvm_to_gen.hpp"
 #include "llvm/llvm_gen_backend.hpp"
-
 #include <clang/CodeGen/CodeGenAction.h>
+#endif
 
 #include <cstring>
 #include <sstream>
@@ -135,7 +139,6 @@ namespace gbe {
     bool limitRegisterPressure;
   } codeGenStrategy[] = {
     {16, 0, false},
-    {16, 10, false},
     {8, 0, false},
     {8, 8, false},
     {8, 16, false},
@@ -151,9 +154,9 @@ namespace gbe {
     uint32_t codeGen = 0;
     GenContext *ctx = NULL;
     if (fn->getSimdWidth() == 8) {
-      codeGen = 2;
+      codeGen = 1;
     } else if (fn->getSimdWidth() == 16) {
-      codeGenNum = 2;
+      codeGenNum = 1;
     } else if (fn->getSimdWidth() == 0) {
       codeGen = 0;
     } else

@@ -31,12 +31,16 @@
 #include "ir/value.hpp"
 #include "ir/unit.hpp"
 #include "ir/printf.hpp"
+
+#ifdef GBE_COMPILER_AVAILABLE
 #include "llvm/llvm_to_gen.hpp"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/IR/LLVMContext.h"
+#endif
+
 #include <cstring>
 #include <algorithm>
 #include <fstream>
@@ -46,6 +50,7 @@
 #include <unistd.h>
 #include <mutex>
 
+#ifdef GBE_COMPILER_AVAILABLE
 /* Not defined for LLVM 3.0 */
 #if !defined(LLVM_VERSION_MAJOR)
 #define LLVM_VERSION_MAJOR 3
@@ -75,6 +80,8 @@
 #endif  /* LLVM_VERSION_MINOR <= 2 */
 #include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/Support/raw_ostream.h>
+#endif
+
 #include "src/GBEConfig.h"
 
 namespace gbe {
@@ -99,7 +106,8 @@ namespace gbe {
 
   Program::Program(void) : constantSet(NULL) {}
   Program::~Program(void) {
-    for (auto &kernel : kernels) GBE_DELETE(kernel.second);
+    for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it)
+      GBE_DELETE(it->second);
     if (constantSet) delete constantSet;
   }
 
@@ -184,8 +192,8 @@ namespace gbe {
     }
 
     OUT_UPDATE_SZ(ker_num);
-    for (auto ker : kernels) {
-      size_t sz = ker.second->serializeToBin(outs);
+    for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it) {
+      size_t sz = it->second->serializeToBin(outs);
       if (!sz)
         return 0;
 
@@ -268,7 +276,8 @@ namespace gbe {
     }
 
     OUT_UPDATE_SZ(patches.size());
-    for (auto patch : patches) {
+    for (size_t i = 0; i < patches.size(); ++i) {
+      const PatchInfo& patch = patches[i];
       unsigned int tmp;
       tmp = patch.type;
       OUT_UPDATE_SZ(tmp);
@@ -439,8 +448,8 @@ namespace gbe {
       constantSet->printStatus(indent + 4, outs);
     }
 
-    for (auto ker : kernels) {
-      ker.second->printStatus(indent + 4, outs);
+    for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it) {
+      it->second->printStatus(indent + 4, outs);
     }
 
     outs << spaces << "================ End Program ================" << "\n";
@@ -474,7 +483,8 @@ namespace gbe {
 
     outs << spaces_nl << "  Patches Number is " << patches.size() << "\n";
     num = 0;
-    for (auto patch : patches) {
+    for (size_t i = 0; i < patches.size(); ++i) {
+      PatchInfo& patch = patches[i];
       num++;
       outs << spaces_nl << "  patch " << num << ":\n";
       outs << spaces_nl << "      type value: "<< patch.type << "\n";
@@ -1058,12 +1068,13 @@ namespace gbe {
 
   static void kernelOutputPrintf(void * printf_info, void* index_addr,
                                  void* buf_addr, size_t global_wk_sz0,
-                                 size_t global_wk_sz1, size_t global_wk_sz2)
+                                 size_t global_wk_sz1, size_t global_wk_sz2,
+                                 size_t output_sz)
   {
     if (printf_info == NULL) return;
     ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
     ps->outputPrintf(index_addr, buf_addr, global_wk_sz0,
-                         global_wk_sz1, global_wk_sz2);
+                         global_wk_sz1, global_wk_sz2, output_sz);
   }
 
   static void kernelGetCompileWorkGroupSize(gbe_kernel gbeKernel, size_t wg_size[3]) {

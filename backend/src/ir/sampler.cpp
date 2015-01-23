@@ -49,15 +49,11 @@ namespace ir {
     ir::FunctionArgument *arg =  ctx->getFunction().getArg(samplerReg);
     GBE_ASSERT(arg != NULL);
 
-    // XXX As LLVM 3.2/3.1 doesn't have a new data type for the sampler_t, we have to fix up the argument
-    // type here. Once we switch to the LLVM and use the new data type sampler_t, we can remove this
-    // work around.
-    arg->type = ir::FunctionArgument::SAMPLER;
-    arg->info.typeName = "sampler_t";
+    GBE_ASSERT(arg->type == ir::FunctionArgument::SAMPLER);
     int32_t id = ctx->getFunction().getArgID(arg);
     GBE_ASSERT(id < (1 << __CLK_SAMPLER_ARG_BITS));
 
-    auto it = samplerMap.find(SAMPLER_ID(id));
+    map<uint32_t, uint32_t>::iterator it = samplerMap.find(SAMPLER_ID(id));
     if (it != samplerMap.end()) {
       return it->second;
     }
@@ -75,9 +71,9 @@ namespace ir {
     OUT_UPDATE_SZ(magic_begin);
 
     OUT_UPDATE_SZ(samplerMap.size());
-    for (auto iter : samplerMap) {
-      OUT_UPDATE_SZ(iter.first);
-      OUT_UPDATE_SZ(iter.second);
+    for (map<uint32_t, uint32_t>::iterator it = samplerMap.begin(); it != samplerMap.end(); ++it) {
+      OUT_UPDATE_SZ(it->first);
+      OUT_UPDATE_SZ(it->second);
     }
 
     OUT_UPDATE_SZ(magic_end);
@@ -127,9 +123,9 @@ namespace ir {
     outs << spaces_nl << "  SamplerSet Map: [index, sampler_reg, sampler_slot]\n";
     outs << spaces_nl << "     samplerMap size: " << samplerMap.size() << "\n";
 
-    for (auto iter : samplerMap) {
-      outs << spaces_nl <<  "     [" << iter.first << ", "
-           << iter.second << "]\n";
+    for (map<uint32_t, uint32_t>::iterator it = samplerMap.begin(); it != samplerMap.end(); ++it) {
+      outs << spaces_nl <<  "     [" << it->first << ", "
+           << it->second << "]\n";
     }
 
     outs << spaces << "------------- End SamplerSet -------------" << "\n";

@@ -180,6 +180,35 @@ namespace ir {
       std::string accessQual;
       std::string typeQual;
       std::string argName; // My different from arg->getName()
+
+      bool isImage1dT() const {
+        return typeName.compare("image1d_t") == 0;
+      }
+      bool isImage1dArrayT() const {
+        return typeName.compare("image1d_array_t") == 0;
+      }
+      bool isImage1dBufferT() const {
+        return typeName.compare("image1d_buffer_t") == 0;
+      }
+      bool isImage2dT() const {
+        return typeName.compare("image2d_t") == 0;
+      }
+      bool isImage2dArrayT() const {
+        return typeName.compare("image2d_array_t") == 0;
+      }
+      bool isImage3dT() const {
+        return typeName.compare("image3d_t") == 0;
+      }
+
+      bool isImageType() const {
+        return isImage1dT() || isImage1dArrayT() || isImage1dBufferT() ||
+               isImage2dT() || isImage2dArrayT() || isImage3dT();
+      }
+
+      bool isSamplerType() const {
+        return typeName.compare("sampler_t") == 0;
+      }
+
     };
 
     /*! Create a function input argument */
@@ -324,12 +353,20 @@ namespace ir {
      *  this is not an input argument
      */
     INLINE const FunctionArgument *getArg(const Register &reg) const {
-      for (auto arg : args) if (arg->reg == reg) return arg;
+      for (size_t i = 0; i < args.size(); ++i) {
+        const FunctionArgument* arg = args[i];
+        if (arg->reg == reg)
+          return arg;
+      }
       return NULL;
     }
 
     INLINE FunctionArgument *getArg(const Register &reg) {
-      for (auto arg : args) if (arg->reg == reg) return arg;
+      for (size_t i = 0; i < args.size(); ++i) {
+        FunctionArgument* arg = args[i];
+        if (arg->reg == reg)
+          return arg;
+      }
       return NULL;
     }
 
@@ -388,12 +425,18 @@ namespace ir {
     /*! Apply the given functor on all basic blocks */
     template <typename T>
     INLINE void foreachBlock(const T &functor) const {
-      for (auto block : blocks) functor(*block);
+      for (size_t i = 0; i < blocks.size(); ++i) {
+        BasicBlock* block = blocks[i];
+        functor(*block);
+      }
     }
     /*! Apply the given functor on all instructions */
     template <typename T>
     INLINE void foreachInstruction(const T &functor) const {
-      for (auto block : blocks) block->foreach(functor);
+      for (size_t i = 0; i < blocks.size(); ++i) {
+        BasicBlock* block = blocks[i];
+        block->foreach(functor);
+      }
     }
     /*! Does it use SLM */
     INLINE bool getUseSLM(void) const { return this->useSLM; }

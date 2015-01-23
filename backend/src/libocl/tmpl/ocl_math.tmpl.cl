@@ -19,6 +19,7 @@
 #include "ocl_float.h"
 #include "ocl_relational.h"
 #include "ocl_common.h"
+#include "ocl_integer.h"
 
 constant int __ocl_math_fastpath_flag = 1;
 
@@ -399,340 +400,161 @@ float __gen_ocl_scalbnf (float x, int n){
   return x*twom25;
 }
 
-
-__constant const float PIo2[] = {
-  1.5703125000e+00, /* 0x3fc90000 */
-  4.5776367188e-04, /* 0x39f00000 */
-  2.5987625122e-05, /* 0x37da0000 */
-  7.5437128544e-08, /* 0x33a20000 */
-  6.0026650317e-11, /* 0x2e840000 */
-  7.3896444519e-13, /* 0x2b500000 */
-  5.3845816694e-15, /* 0x27c20000 */
-  5.6378512969e-18, /* 0x22d00000 */
-  8.3009228831e-20, /* 0x1fc40000 */
-  3.2756352257e-22, /* 0x1bc60000 */
-  6.3331015649e-25, /* 0x17440000 */
+const __constant unsigned int two_over_pi[] = {
+0, 0, 0xA2F, 0x983, 0x6E4, 0xe44, 0x152, 0x9FC,
+0x275, 0x7D1, 0xF53, 0x4DD, 0xC0D, 0xB62,
+0x959, 0x93C, 0x439, 0x041, 0xFE5, 0x163,
 };
 
+// The main idea is from "Radian Reduction for Trigonometric Functions"
+// written by Mary H. Payne and Robert N. Hanek. Also another reference
+// is "A Continued-Fraction Analysis of Trigonometric Argument Reduction"
+// written by Roger Alan Smith, who gave the worst case in this paper.
+// for single float, worst x = 0x1.47d0fep34, and there are 29 bit
+// leading zeros in the fraction part of x*(2.0/pi). so we need at least
+// 29 (leading zero)+ 24 (fraction )+12 (integer) + guard bits. that is,
+// 65 + guard bits, as we calculate in 12*7 = 84bits, which means we have
+// about 19 guard bits. If we need further precision, we may need more
+// guard bits
+// Note we place two 0 in two_over_pi, which is used to handle input less
+// than 0x1.0p23
 
-int __kernel_rem_pio2f(float *x, float *y, int e0, int nx, int prec, const __constant int *ipio2)
-{
-  /* copied from fdlibm */
-const float
-zero   = 0.0,
-one    = 1.0,
-two8   =  2.5600000000e+02, /* 0x43800000 */
-twon8  =  3.9062500000e-03; /* 0x3b800000 */
+int payne_hanek(float x, float *y) {
+  union { float f; unsigned u;} ieee;
+  ieee.f = x;
+  unsigned u = ieee.u;
+  int k = ((u & 0x7f800000) >> 23)-127;
+  int ma = (u & 0x7fffff) | 0x800000;
+  unsigned  high, low;
+  high = (ma & 0xfff000) >> 12;
+  low = ma & 0xfff;
 
-  int init_jk[3]; /* initial value for jk */
-  int jz,jx,jv,jp,jk,carry,n,iq[20],i,j,k,m,q0,ih;
-  float z,fw,f[20],fq[20],q[20];
-  init_jk[0] = 4; init_jk[1] = 7; init_jk[2] = 9;
-    /* initialize jk*/
-  jk = init_jk[prec];
-  jp = jk;
+  // Two tune below macro, you need to fully understand the algorithm
+#define CALC_BLOCKS 7
+#define ZERO_BITS 2
 
-    /* determine jx,jv,q0, note that 3>q0 */
-  jx =  nx-1;
-  jv = (e0-3)/8; if(jv<0) jv=0;
-  q0 =  e0-8*(jv+1);
+  unsigned result[CALC_BLOCKS];
 
-    /* set up f[0] to f[jx+jk] where f[jx+jk] = ipio2[jv+jk] */
-  j = jv-jx; m = jx+jk;
-  for(i=0;i<=m;i++,j++) f[i] = (j<0)? zero : (float) ipio2[j];
+  // round down, note we need 2 bits integer precision
+  int index = (k-23-2) < 0 ? (k-23-2-11)/12 : (k-23-2)/12;
 
-    /* compute q[0],q[1],...q[jk] */
-  for (i=0;i<=jk;i++) {
-      for(j=0,fw=0.0;j<=jx;j++) fw += x[j]*f[jx+i-j]; q[i] = fw;
+  for (int i = 0; i < CALC_BLOCKS; i++) {
+    result[i] =  low * two_over_pi[index+i+ZERO_BITS] ;
+    result[i] +=  high * two_over_pi[index+i+1+ZERO_BITS];
   }
 
-  jz = jk;
-recompute:
-    /* distill q[] into iq[] reversingly */
-  for(i=0,j=jz,z=q[jz];j>0;i++,j--) {
-      fw    =  (float)((int)(twon8* z));
-      iq[i] =  (int)(z-two8*fw);
-      z     =  q[j-1]+fw;
+  for (int i = CALC_BLOCKS-1; i > 0; i--) {
+    int temp = result[i] >> 12;
+    result[i]  -= temp << 12;
+    result[i-1] += temp;
   }
+#undef CALC_BLOCKS
+#undef ZERO_BITS
 
-    /* compute n */
-  z  = __gen_ocl_scalbnf(z,q0);   /* actual value of z */
-  z -= (float)8.0*__gen_ocl_internal_floor(z*(float)0.125); /* trim off integer >= 8 */
-  n  = (int) z;
-  z -= (float)n;
-  ih = 0;
-  if(q0>0) {  /* need iq[jz-1] to determine n */
-      i  = (iq[jz-1]>>(8-q0)); n += i;
-      iq[jz-1] -= i<<(8-q0);
-      ih = iq[jz-1]>>(7-q0);
-  }
-  else if(q0==0) ih = iq[jz-1]>>8;
-  else if(z>=(float)0.5) ih=2;
+  // get number of integer digits in result[0], note we only consider 12 valid bits
+  // and also it means the fraction digits in result[0] is (12-intDigit)
 
-  if(ih>0) {  /* q > 0.5 */
-      n += 1; carry = 0;
-      for(i=0;i<jz ;i++) {  /* compute 1-q */
-    j = iq[i];
-    if(carry==0) {
-        if(j!=0) {
-      carry = 1; iq[i] = 0x100- j;
-        }
-    } else  iq[i] = 0xff - j;
-      }
-      if(q0>0) {    /* rare case: chance is 1 in 12 */
-          switch(q0) {
-          case 1:
-           iq[jz-1] &= 0x7f; break;
-        case 2:
-           iq[jz-1] &= 0x3f; break;
-          }
-      }
-      if(ih==2) {
-    z = one - z;
-    if(carry!=0) z -= __gen_ocl_scalbnf(one,q0);
-      }
-  }
+  int intDigit = index*(-12) + (k-23);
 
-    /* check if recomputation is needed */
-  if(z==zero) {
-      j = 0;
-      for (i=jz-1;i>=jk;i--) j |= iq[i];
-      if(j==0) { /* need recomputation */
-    for(k=1;iq[jk-k]==0;k++);   /* k = no. of terms needed */
+  // As the integer bits may be all included in result[0], and also maybe
+  // some bits in result[0], and some in result[1]. So we merge succesive bits,
+  // which makes easy coding.
 
-    for(i=jz+1;i<=jz+k;i++) {   /* add q[jz+1] to q[jz+k] */
-        f[jx+i] = (float) ipio2[jv+i];
-        for(j=0,fw=0.0;j<=jx;j++) fw += x[j]*f[jx+i-j];
-        q[i] = fw;
-    }
-    jz += k;
-    goto recompute;
-      }
-  }
+  unsigned b0 = (result[0] << 12) | result[1];
+  unsigned b1 = (result[2] << 12) | result[3];
+  unsigned b2 = (result[4] << 12) | result[5];
+  unsigned b3 = (result[6] << 12);
 
-    /* chop off zero terms */
-  if(z==(float)0.0) {
-      jz -= 1; q0 -= 8;
-      while(iq[jz]==0) { jz--; q0-=8;}
-  } else { /* break z into 8-bit if necessary */
-      z = __gen_ocl_scalbnf(z,-q0);
-      if(z>=two8) {
-    fw = (float)((int)(twon8*z));
-    iq[jz] = (int)(z-two8*fw);
-    jz += 1; q0 += 8;
-    iq[jz] = (int) fw;
-      } else iq[jz] = (int) z ;
-  }
+  unsigned intPart = b0 >> (24-intDigit);
 
-    /* convert integer "bit" chunk to floating-point value */
-  fw = __gen_ocl_scalbnf(one,q0);
-  for(i=jz;i>=0;i--) {
-      q[i] = fw*(float)iq[i]; fw*=twon8;
-  }
+  unsigned fract1 = ((b0 << intDigit) | (b1 >> (24-intDigit))) & 0xffffff;
+  unsigned fract2 = ((b1 << intDigit) | (b2 >> (24-intDigit))) & 0xffffff;
+  unsigned fract3 = ((b2 << intDigit) | (b3 >> (24-intDigit))) & 0xffffff;
 
-    /* compute PIo2[0,...,jp]*q[jz,...,0] */
-  for(i=jz;i>=0;i--) {
-      for(fw=0.0,k=0;k<=jp&&k<=jz-i;k++) fw += PIo2[k]*q[i+k];
-      fq[jz-i] = fw;
-  }
+  // larger than 0.5? which mean larger than pi/4, we need
+  // transform from [0,pi/2] to [-pi/4, pi/4] through -(1.0-fract)
+  int largerPiBy4 = ((fract1 & 0x800000) != 0);
+  int sign = largerPiBy4 ? 1 : 0;
+  intPart = largerPiBy4 ? (intPart+1) : intPart;
 
-    /* compress fq[] into y[] */
-  switch(prec) {
-      case 0:
-    fw = 0.0;
-    for (i=jz;i>=0;i--) fw += fq[i];
-    y[0] = (ih==0)? fw: -fw;
-    break;
-      case 1:
-      case 2:
-    fw = 0.0;
-    for (i=jz;i>=0;i--) fw += fq[i];
-    y[0] = (ih==0)? fw: -fw;
-    fw = fq[0]-fw;
-    for (i=1;i<=jz;i++) fw += fq[i];
-    y[1] = (ih==0)? fw: -fw;
-    break;
-      case 3: /* painful */
-    for (i=jz;i>0;i--) {
-        fw      = fq[i-1]+fq[i];
-        fq[i]  += fq[i-1]-fw;
-        fq[i-1] = fw;
-    }
-    for (i=jz;i>1;i--) {
-        fw      = fq[i-1]+fq[i];
-        fq[i]  += fq[i-1]-fw;
-        fq[i-1] = fw;
-    }
-    for (fw=0.0,i=jz;i>=2;i--) fw += fq[i];
-    if(ih==0) {
-        y[0] =  fq[0]; y[1] =  fq[1]; y[2] =  fw;
-    } else {
-        y[0] = -fq[0]; y[1] = -fq[1]; y[2] = -fw;
-    }
-  }
-  return n&7;
+  fract1 = largerPiBy4 ? (fract1 ^ 0x00ffffff) : fract1;
+  fract2 = largerPiBy4 ? (fract2 ^ 0x00ffffff) : fract2;
+  fract3 = largerPiBy4 ? (fract3 ^ 0x00ffffff) : fract3;
 
+  int leadingZero = (fract1 == 0);
+
+  // +1 is for the hidden bit 1 in floating-point format
+  int exponent = leadingZero ? -(24+1) : -(0+1);
+
+  fract1 = leadingZero ? fract2 : fract1;
+  fract2 = leadingZero ? fract3 : fract2;
+
+  // fract1 may have leading zeros, add it
+  int shift = clz(fract1)-8;
+  exponent += -shift;
+
+  float pio2 = 0x1.921fb6p+0;
+  unsigned fdigit = ((fract1 << shift) | (fract2 >> (24-shift))) & 0xffffff;
+
+  // we know that denormal number will not appear here
+  ieee.u = (sign << 31) | ((exponent+127) << 23) | (fdigit & 0x7fffff);
+  *y = ieee.f * pio2;
+  return intPart;
 }
 
-__constant const int npio2_hw[32] = {
-0x3fc90f00, 0x40490f00, 0x4096cb00, 0x40c90f00, 0x40fb5300, 0x4116cb00,
-0x412fed00, 0x41490f00, 0x41623100, 0x417b5300, 0x418a3a00, 0x4196cb00,
-0x41a35c00, 0x41afed00, 0x41bc7e00, 0x41c90f00, 0x41d5a000, 0x41e23100,
-0x41eec200, 0x41fb5300, 0x4203f200, 0x420a3a00, 0x42108300, 0x4216cb00,
-0x421d1400, 0x42235c00, 0x4229a500, 0x422fed00, 0x42363600, 0x423c7e00,
-0x4242c700, 0x42490f00
-};
+int argumentReduceSmall(float x, float * remainder) {
+  union {
+    float f;
+    unsigned u;
+  } ieee;
 
-__constant const int two_over_pi[22*9] = {
-0xA2, 0xF9, 0x83, 0x6E, 0x4E, 0x44, 0x15, 0x29, 0xFC,
-0x27, 0x57, 0xD1, 0xF5, 0x34, 0xDD, 0xC0, 0xDB, 0x62,
-0x95, 0x99, 0x3C, 0x43, 0x90, 0x41, 0xFE, 0x51, 0x63,
-0xAB, 0xDE, 0xBB, 0xC5, 0x61, 0xB7, 0x24, 0x6E, 0x3A,
-0x42, 0x4D, 0xD2, 0xE0, 0x06, 0x49, 0x2E, 0xEA, 0x09,
-0xD1, 0x92, 0x1C, 0xFE, 0x1D, 0xEB, 0x1C, 0xB1, 0x29,
-0xA7, 0x3E, 0xE8, 0x82, 0x35, 0xF5, 0x2E, 0xBB, 0x44,
-0x84, 0xE9, 0x9C, 0x70, 0x26, 0xB4, 0x5F, 0x7E, 0x41,
-0x39, 0x91, 0xD6, 0x39, 0x83, 0x53, 0x39, 0xF4, 0x9C,
-0x84, 0x5F, 0x8B, 0xBD, 0xF9, 0x28, 0x3B, 0x1F, 0xF8,
-0x97, 0xFF, 0xDE, 0x05, 0x98, 0x0F, 0xEF, 0x2F, 0x11,
-0x8B, 0x5A, 0x0A, 0x6D, 0x1F, 0x6D, 0x36, 0x7E, 0xCF,
-0x27, 0xCB, 0x09, 0xB7, 0x4F, 0x46, 0x3F, 0x66, 0x9E,
-0x5F, 0xEA, 0x2D, 0x75, 0x27, 0xBA, 0xC7, 0xEB, 0xE5,
-0xF1, 0x7B, 0x3D, 0x07, 0x39, 0xF7, 0x8A, 0x52, 0x92,
-0xEA, 0x6B, 0xFB, 0x5F, 0xB1, 0x1F, 0x8D, 0x5D, 0x08,
-0x56, 0x03, 0x30, 0x46, 0xFC, 0x7B, 0x6B, 0xAB, 0xF0,
-0xCF, 0xBC, 0x20, 0x9A, 0xF4, 0x36, 0x1D, 0xA9, 0xE3,
-0x91, 0x61, 0x5E, 0xE6, 0x1B, 0x08, 0x65, 0x99, 0x85,
-0x5F, 0x14, 0xA0, 0x68, 0x40, 0x8D, 0xFF, 0xD8, 0x80,
-0x4D, 0x73, 0x27, 0x31, 0x06, 0x06, 0x15, 0x56, 0xCA,
-0x73, 0xA8, 0xC9, 0x60, 0xE2, 0x7B, 0xC0, 0x8C, 0x6B,
-};
+  float twoByPi = 2.0f/3.14159265f;
+  float piBy2_1h = (float) 0xc90/0x1.0p11,
+        piBy2_1l = (float) 0xfda/0x1.0p23,
+        piBy2_2h = (float) 0xa22/0x1.0p35,
+        piBy2_2l = (float) 0x168/0x1.0p47,
+        piBy2_3h = (float) 0xc23/0x1.0p59,
+        piBy2_3l = (float) 0x4c4/0x1.0p71;
+
+  float y = (float)(int)(twoByPi * x + 0.5f);
+  ieee.f = y;
+  ieee.u = ieee.u & 0xfffff000;
+
+  float yh = ieee.f;
+  float yl = y - yh;
+  float rem = x - yh*piBy2_1h - yh*piBy2_1l - yl*piBy2_1h - yl*piBy2_1l;
+  rem = rem - yh*piBy2_2h - yh*piBy2_2l + yl*piBy2_2h + yl*piBy2_2l;
+  rem = rem - yh*piBy2_3h - yh*piBy2_3l - yl*piBy2_3h - yl*piBy2_3l;
+
+  *remainder = rem;
+  return (int)y;
+}
 
 
 int __ieee754_rem_pio2f(float x, float *y) {
-  /* copied from fdlibm */
-  float z,w,t,r,fn;
-  float tx[3];
-
-const float half_value = 5.0000000e-1;
-const float zero =  0.0000000000;
-const float two8 =  2.5600000000e+02;
-const float invpio2 =  6.3661980629e-01;
-const float pio2_1  =  1.5707855225e+00;
-const float pio2_1t =  1.0804334124e-05;
-const float pio2_2  =  1.0804273188e-05;
-const float pio2_2t =  6.0770999344e-11;
-const float pio2_3  =  6.0770943833e-11;
-const float pio2_3t =  6.1232342629e-17;
-  int e0,i,j,nx,n,ix,hx;
-
-  GEN_OCL_GET_FLOAT_WORD(hx,x);
-  ix = hx&0x7fffffff;
-  if(ix<=0x3f490fd8)   /* |x| ~<= pi/4 , no need for reduction */
-      {y[0] = x; y[1] = 0; return 0;}
-  if(ix<0x4016cbe4) {  /* |x| < 3pi/4, special case with n=+-1 */
-      if(hx>0) {
-    z = x - pio2_1;
-    if((ix&0xfffffff0)!=0x3fc90fd0) { /* 24+24 bit pi OK */
-        y[0] = z - pio2_1t;
-        y[1] = (z-y[0])-pio2_1t;
-    } else {    /* near pi/2, use 24+24+24 bit pi */
-        z -= pio2_2;
-        y[0] = z - pio2_2t;
-        y[1] = (z-y[0])-pio2_2t;
-    }
-    return 1;
-      } else {  /* negative x */
-    z = x + pio2_1;
-    if((ix&0xfffffff0)!=0x3fc90fd0) { /* 24+24 bit pi OK */
-        y[0] = z + pio2_1t;
-        y[1] = (z-y[0])+pio2_1t;
-    } else {    /* near pi/2, use 24+24+24 bit pi */
-        z += pio2_2;
-        y[0] = z + pio2_2t;
-        y[1] = (z-y[0])+pio2_2t;
-    }
-    return -1;
-      }
+  if (x < 4000.0f) {
+    return argumentReduceSmall(x, y);
+  } else {
+    return payne_hanek(x, y);
   }
-  if(ix<=0x43490f80) { /* |x| ~<= 2^7*(pi/2), medium size */
-      t  = __gen_ocl_fabs(x);
-      n  = (int) (t*invpio2+half_value);
-      fn = (float)n;
-      r  = t-fn*pio2_1;
-      w  = fn*pio2_1t;  /* 1st round good to 40 bit */
-      if(n<32&&(ix&0xffffff00)!=npio2_hw[n-1]) {
-    y[0] = r-w; /* quick check no cancellation */
-      } else {
-          uint high;
-          j  = ix>>23;
-          y[0] = r-w;
-    GEN_OCL_GET_FLOAT_WORD(high,y[0]);
-          i = j-((high>>23)&0xff);
-          if(i>8) {  /* 2nd iteration needed, good to 57 */
-        t  = r;
-        w  = fn*pio2_2;
-        r  = t-w;
-        w  = fn*pio2_2t-((t-r)-w);
-        y[0] = r-w;
-        GEN_OCL_GET_FLOAT_WORD(high,y[0]);
-        i = j-((high>>23)&0xff);
-        if(i>25)  { /* 3rd iteration need, 74 bits acc */
-          t  = r; /* will cover all possible cases */
-          w  = fn*pio2_3;
-          r  = t-w;
-          w  = fn*pio2_3t-((t-r)-w);
-          y[0] = r-w;
-        }
-    }
-      }
-      y[1] = (r-y[0])-w;
-      if(hx<0)  {y[0] = -y[0]; y[1] = -y[1]; return -n;}
-      else   return n;
-  }
-    /*
-     * all other (large) arguments
-     */
-  if(ix>=0x7f800000) {    /* x is inf or NaN */
-      y[0]=y[1]=x-x; return 0;
-  }
-    /* set z = scalbn(|x|,ilogb(x)-7) */
-  e0  = (ix>>23)-134;   /* e0 = ilogb(z)-7; */
-  GEN_OCL_SET_FLOAT_WORD(z, ix - ((int)(e0<<23)));
-  for(i=0;i<2;i++) {
-    tx[i] = (float)((int)(z));
-    z     = (z-tx[i])*two8;
-  }
-  tx[2] = z;
-  nx = 3;
-  while(tx[nx-1]==zero) nx--; /* skip zero term */
-  n  =  __kernel_rem_pio2f(tx,y,e0,nx,2,two_over_pi);
-  if(hx<0) {y[0] = -y[0]; y[1] = -y[1]; return -n;}
-  return n;
 }
 
-OVERLOADABLE float __kernel_sinf(float x, float y, int iy)
+OVERLOADABLE float __kernel_sinf(float x)
 {
   /* copied from fdlibm */
-const float
-half_value =  5.0000000000e-01,/* 0x3f000000 */
-S1  = -1.6666667163e-01, /* 0xbe2aaaab */
-S2  =  8.3333337680e-03, /* 0x3c088889 */
-S3  = -1.9841270114e-04, /* 0xb9500d01 */
-S4  =  2.7557314297e-06, /* 0x3638ef1b */
-S5  = -2.5050759689e-08, /* 0xb2d72f34 */
-S6  =  1.5896910177e-10; /* 0x2f2ec9d3 */
+  const float
+  half_value =  5.0000000000e-01,/* 0x3f000000 */
+  S1  = -1.6666667163e-01, /* 0xbe2aaaab */
+  S2  =  8.3333337680e-03, /* 0x3c088889 */
+  S3  = -1.9841270114e-04, /* 0xb9500d01 */
+  S4  =  2.7557314297e-06, /* 0x3638ef1b */
+  S5  = -2.5050759689e-08, /* 0xb2d72f34 */
+  S6  =  1.5896910177e-10; /* 0x2f2ec9d3 */
   float z,r,v;
-  int ix;
-  GEN_OCL_GET_FLOAT_WORD(ix,x);
-  ix &= 0x7fffffff;     /* high word of x */
-  if(ix<0x32000000)     /* |x| < 2**-27 */
-     {if((int)x==0) return x;}    /* generate inexact */
   z =  x*x;
   v =  z*x;
   r =  S2+z*(S3+z*(S4+z*(S5+z*S6)));
-  if(iy==0) return x+v*(S1+z*r);
-  else      return x-((z*(half_value*y-v*r)-y)-v*S1);
+  return x+v*(S1+z*r);
 }
 
 float __kernel_cosf(float x, float y)
@@ -746,19 +568,10 @@ float __kernel_cosf(float x, float y)
   C4  = -2.7557314297e-07, /* 0xb493f27c */
   C5  =  2.0875723372e-09, /* 0x310f74f6 */
   C6  = -1.1359647598e-11; /* 0xad47d74e */
-  const float pio2_hi = 0x1.92p0, pio2_mid = 0x1.fb4p-12, pio2_low = 0x1.4442d2p-24;
   float a,hz,z,r,qx;
   int ix;
   GEN_OCL_GET_FLOAT_WORD(ix,x);
   ix &= 0x7fffffff;     /* ix = |x|'s high word*/
-  if(ix<0x32000000) {     /* if x < 2**27 */
-      if(((int)x)==0) return one;   /* generate inexact */
-  }
-
-  if(x < 0.0f) { x= -x; y = -y; }
-  if(ix > 0x3f490fdb) { /* |x|>pi/4*/
-    return -__kernel_sinf(x-pio2_hi-pio2_mid-pio2_low, y, 1);
-  }
   z  = x*x;
   r  = z*(C1+z*(C2+z*(C3+z*(C4+z*(C5+z*C6)))));
   if(ix < 0x3e99999a)       /* if |x| < 0.3 */
@@ -775,29 +588,26 @@ OVERLOADABLE float sin(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_sin(x);
 
-  /* copied from fdlibm */
-  float y[2],z=0.0;
+  float y,z=0.0;
   int n, ix;
+
+  float negative = x < 0.0f? -1.0f : 1.0f;
+  x = negative * x;
 
   GEN_OCL_GET_FLOAT_WORD(ix,x);
 
-    /* |x| ~< pi/4 */
   ix &= 0x7fffffff;
-  if(ix <= 0x3f490fd8) return __kernel_sinf(x,z,0);
 
     /* sin(Inf or NaN) is NaN */
-  else if (ix>=0x7f800000) return x-x;
+  if (ix>=0x7f800000) return x-x;
 
     /* argument reduction needed */
   else {
-      n = __ieee754_rem_pio2f(x,y);
-      switch(n&3) {
-    case 0: return  __kernel_sinf(y[0],y[1],1);
-    case 1: return  __kernel_cosf(y[0],y[1]);
-    case 2: return -__kernel_sinf(y[0],y[1],1);
-    default:
-      return -__kernel_cosf(y[0],y[1]);
-      }
+      n = __ieee754_rem_pio2f(x,&y);
+      float s = __kernel_sinf(y);
+      float c = __kernel_cosf(y,0.0f);
+      float ret = (n&1) ? negative*c : negative*s;
+      return (n&3)> 1? -1.0f*ret : ret;
   }
 }
 
@@ -805,29 +615,32 @@ OVERLOADABLE float cos(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_cos(x);
 
-  /* copied from fdlibm */
-  float y[2],z=0.0;
+  float y,z=0.0;
   int n, ix;
-
+  x = __gen_ocl_fabs(x);
   GEN_OCL_GET_FLOAT_WORD(ix,x);
 
-    /* |x| ~< pi/4 */
   ix &= 0x7fffffff;
-  if(ix <= 0x3f490fd8) return __kernel_cosf(x,z);
 
     /* cos(Inf or NaN) is NaN */
-  else if (ix>=0x7f800000) return x-x;
+  if (ix>=0x7f800000) return x-x;
 
     /* argument reduction needed */
   else {
-      n = __ieee754_rem_pio2f(x,y);
-      switch(n&3) {
-    case 0: return  __kernel_cosf(y[0],y[1]);
-    case 1: return  -__kernel_sinf(y[0],y[1],1);
-    case 2: return -__kernel_cosf(y[0],y[1]);
-    default:
-      return __kernel_sinf(y[0],y[1],1);
-      }
+      n = __ieee754_rem_pio2f(x,&y);
+      n &= 3;
+      float c = __kernel_cosf(y, 0.0f);
+      float s = __kernel_sinf(y);
+      float v = (n&1) ? s : c;
+      /* n&3   return
+          0    cos(y)
+          1   -sin(y)
+          2   -cos(y)
+          3    sin(y)
+      */
+      int mask = (n>>1) ^ n;
+      float sign = (mask&1) ? -1.0f : 1.0f;
+      return sign * v;
   }
 }
 
@@ -908,46 +721,27 @@ float __kernel_tanf(float x, float y, int iy)
 
 OVERLOADABLE float tan(float x)
 {
-
     if (__ocl_math_fastpath_flag)
       return __gen_ocl_internal_fastpath_tan(x);
 
-  /* copied from fdlibm */
-        const float pio2_hi = 0x1.92p-0, pio2_mid = 0x1.fb4p-12, pio2_low = 0x1.4442d2p-24;
-        const float pio4  =  7.8539812565e-01;
-        float y[2],z=0.0;
-        int n, ix;
+    float y,z=0.0;
+    int n, ix;
+    float negative = x < 0.0f? -1.0f : 1.0f;
+    x = negative * x;
 
-        GEN_OCL_GET_FLOAT_WORD(ix,x);
+    GEN_OCL_GET_FLOAT_WORD(ix,x);
 
-    /* |x| ~< pi/4 */
-        ix &= 0x7fffffff;
-        if(ix <= 0x3f490fda) return __kernel_tanf(x,z,1);
+    ix &= 0x7fffffff;
 
     /* tan(Inf or NaN) is NaN */
-        else if (ix>=0x7f800000) return x-x;            /* NaN */
+    if (ix>=0x7f800000) return x-x;            /* NaN */
 
     /* argument reduction needed */
-      else {
-        n = __ieee754_rem_pio2f(x,y);
-
-        x = y[0];
-        float m = y[1];
-        int iy = 1-((n&1)<<1);
-        GEN_OCL_GET_FLOAT_WORD(ix,x);
-        float sign = 1.0f;
-        if(ix < 0) {
-          x = -x; m = -m;
-          sign = -1.0f;
-        }
-
-        if(x > pio4) {/* reduce x to less than pi/4 through (pi/2-x) */
-          float t = __kernel_tanf(pio2_hi-x+pio2_mid+pio2_low, -m, 1);
-          if(iy == -1) return sign*(-t); else return sign*1/t;
-        } else
-            return __kernel_tanf(y[0],y[1],1-((n&1)<<1)); /*   1 -- n even
+    else {
+      n = __ieee754_rem_pio2f(x,&y);
+      return negative * __kernel_tanf(y,0.0f,1-((n&1)<<1)); /*   1 -- n even
                                                               -1 -- n odd */
-      }
+    }
 }
 
 OVERLOADABLE float __gen_ocl_internal_cospi(float x) {
@@ -967,13 +761,13 @@ OVERLOADABLE float __gen_ocl_internal_cospi(float x) {
     return __kernel_cosf(m*M_PI_F, 0.0f);
    case 1:
    case 2:
-    return __kernel_sinf((0.5f-m)*M_PI_F, 0.0f, 0);
+    return __kernel_sinf((0.5f-m)*M_PI_F);
    case 3:
    case 4:
     return -__kernel_cosf((m-1.0f)*M_PI_F, 0.0f);
    case 5:
    case 6:
-    return __kernel_sinf((m-1.5f)*M_PI_F, 0.0f, 0);
+    return __kernel_sinf((m-1.5f)*M_PI_F);
    default:
     return __kernel_cosf((2.0f-m)*M_PI_F, 0.0f);
    }
@@ -994,18 +788,18 @@ OVERLOADABLE float __gen_ocl_internal_sinpi(float x) {
 
   switch(ix) {
    case 0:
-    return sign*__kernel_sinf(m*M_PI_F, 0.0f, 0);
+    return sign*__kernel_sinf(m*M_PI_F);
    case 1:
    case 2:
     return sign*__kernel_cosf((m-0.5f)*M_PI_F, 0.0f);
    case 3:
    case 4:
-    return -sign*__kernel_sinf((m-1.0f)*M_PI_F, 0.0f, 0);
+    return -sign*__kernel_sinf((m-1.0f)*M_PI_F);
    case 5:
    case 6:
     return -sign*__kernel_cosf((m-1.5f)*M_PI_F, 0.0f);
    default:
-    return -sign*__kernel_sinf((2.0f-m)*M_PI_F, 0.0f, 0);
+    return -sign*__kernel_sinf((2.0f-m)*M_PI_F);
    }
 
 }
@@ -1499,8 +1293,7 @@ union {float f; unsigned i;} u;
     return (float)(e-127);
   }
 }
-#define FP_ILOGB0 (-0x7FFFFFFF-1)
-#define FP_ILOGBNAN FP_ILOGB0
+
 OVERLOADABLE int ilogb(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_ilogb(x);
@@ -1528,7 +1321,33 @@ OVERLOADABLE float nan(uint code) {
   return NAN;
 }
 OVERLOADABLE float __gen_ocl_internal_tanpi(float x) {
-  return native_tan(x * M_PI_F);
+  float sign = 1.0f;
+  int ix;
+  if(isinf(x)) return NAN;
+  if(x < 0.0f) { x = -x; sign = -1.0f; }
+  GEN_OCL_GET_FLOAT_WORD(ix, x);
+  if(x> 0x1.0p24) return 0.0f;
+  float m = __gen_ocl_internal_floor(x);
+  ix = (int)m;
+  m = x-m;
+  int n = __gen_ocl_internal_floor(m*4.0f);
+  if(m == 0.5f) {
+    return (ix&0x1) == 0 ? sign*INFINITY : sign*-INFINITY;
+  }
+  if(m == 0.0f) {
+    return (ix&0x1) == 0 ? 0.0f : -0.0f;
+  }
+
+  switch(n) {
+    case 0:
+      return sign * __kernel_tanf(m*M_PI_F, 0.0f, 1);
+    case 1:
+      return sign * 1.0f/__kernel_tanf((0.5f-m)*M_PI_F, 0.0f, 1);
+    case 2:
+      return sign * 1.0f/__kernel_tanf((0.5f-m)*M_PI_F, 0.0f, 1);
+    default:
+      return sign * -1.0f*__kernel_tanf((1.0f-m)*M_PI_F, 0.0f, 1);
+  }
 }
 OVERLOADABLE float __gen_ocl_internal_cbrt(float x) {
   /* copied from fdlibm */
@@ -1833,63 +1652,6 @@ OVERLOADABLE float __gen_ocl_internal_atan2(float y, float x) {
 }
 
 OVERLOADABLE float __gen_ocl_internal_atan2pi(float y, float x) {
-  uint ix = as_uint(x), iy = as_uint(y),
-       pos_zero = 0, neg_zero = 0x80000000u,
-       pos_inf = 0x7f800000, neg_inf = 0xff800000u;
-  if(iy == pos_zero) {
-    if(ix == pos_zero)
-      return 0;
-    if(ix == neg_zero)
-      return 1;
-    if(x < 0)
-      return 1;
-    if(x > 0)
-      return 0;
-  }
-  if(iy == neg_zero) {
-    if(ix == pos_zero)
-      return -0.f;
-    if(ix == neg_zero)
-      return -1;
-    if(x < 0)
-      return -1;
-    if(x > 0)
-      return -0.f;
-  }
-  if((ix & 0x7fffffff) == 0) {
-    if(y < 0)
-      return -.5f;
-    if(y > 0)
-      return .5f;
-  }
-  if(ix == pos_inf) {
-    if(y > 0 && iy != pos_inf)
-      return 0;
-    if(y < 0 && iy != neg_inf)
-      return -0.f;
-  }
-  if(ix == neg_inf) {
-    if(y > 0 && iy != pos_inf)
-      return 1;
-    if(y < 0 && iy != neg_inf)
-      return -1;
-  }
-  if(iy == pos_inf) {
-    if(ix == pos_inf)
-      return 0.25f;
-    if(ix == neg_inf)
-      return 0.75f;
-    if(x >= 0 || x <= 0)
-      return 0.5f;
-  }
-  if(iy == neg_inf) {
-    if(ix == pos_inf)
-      return -0.25f;
-    if(ix == neg_inf)
-      return -0.75f;
-    if(x >= 0 || x <= 0)
-      return -0.5f;
-  }
   return __gen_ocl_internal_atan2(y, x) / M_PI_F;
 }
 OVERLOADABLE float __gen_ocl_internal_fabs(float x)  { return __gen_ocl_fabs(x); }
@@ -1901,7 +1663,6 @@ OVERLOADABLE float __gen_ocl_internal_round(float x) {
   return y;
 }
 OVERLOADABLE float __gen_ocl_internal_ceil(float x)  { return __gen_ocl_rndu(x); }
-OVERLOADABLE float powr(float x, float y) { return __gen_ocl_pow(x,y); }
 OVERLOADABLE float __gen_ocl_internal_rint(float x) {
   return __gen_ocl_rnde(x);
 }
@@ -1916,8 +1677,15 @@ OVERLOADABLE float __gen_ocl_internal_exp(float x) {
   float o_threshold = 8.8721679688e+01,  /* 0x42b17180 */
   u_threshold = -1.0397208405e+02,  /* 0xc2cff1b5 */
   twom100 = 7.8886090522e-31, 	 /* 2**-100=0x0d800000 */
-  ivln2	 =	1.4426950216e+00; /* 0x3fb8aa3b =1/ln2 */
-  float y,hi=0.0,lo=0.0,t;
+  ivln2	 =	1.4426950216e+00, /* 0x3fb8aa3b =1/ln2 */
+  one = 1.0,
+  huge = 1.0e+30,
+  P1 = 1.6666667163e-01, /* 0x3e2aaaab */
+  P2 = -2.7777778450e-03, /* 0xbb360b61 */
+  P3 = 6.6137559770e-05, /* 0x388ab355 */
+  P4 = -1.6533901999e-06, /* 0xb5ddea0e */
+  P5 =	4.1381369442e-08; /* 0x3331bb4c */
+  float y,hi=0.0,lo=0.0,c,t;
   int k=0,xsb;
   unsigned hx;
   float ln2HI_0 = 6.9313812256e-01;	/* 0x3f317180 */
@@ -1933,16 +1701,17 @@ OVERLOADABLE float __gen_ocl_internal_exp(float x) {
 
   /* filter out non-finite argument */
   if(hx >= 0x42b17218) {			/* if |x|>=88.721... */
-    // native_exp already handled this
-    return native_exp(x);
+    if(hx>0x7f800000)
+      return x+x;			/* NaN */
+    if(hx==0x7f800000)
+      return (xsb==0)? x:0.0; 	/* exp(+-inf)={inf,0} */
+    if(x > o_threshold) return huge*huge; /* overflow */
+    if(x < u_threshold) return twom100*twom100; /* underflow */
   }
-
   /* argument reduction */
   if(hx > 0x3eb17218) {		/* if  |x| > 0.5 ln2 */
     if(hx < 0x3F851592) {	/* and |x| < 1.5 ln2 */
-      hi = x-(xsb ==1 ? ln2HI_1 : ln2HI_0);
-      lo= xsb == 1? ln2LO_1 : ln2LO_0;
-      k = 1-xsb-xsb;
+      hi = x-(xsb ==1 ? ln2HI_1 : ln2HI_0); lo= xsb == 1? ln2LO_1 : ln2LO_0; k = 1-xsb-xsb;
     } else {
       float tmp = xsb == 1 ? half_1 : half_0;
       k  = ivln2*x+tmp;
@@ -1952,8 +1721,18 @@ OVERLOADABLE float __gen_ocl_internal_exp(float x) {
     }
     x  = hi - lo;
   }
+  else if(hx < 0x31800000)  { /* when |x|<2**-28 */
+    if(huge+x>one) return one+x;/* trigger inexact */
+  }
+  else k = 0;
 
-  y = native_exp(x);
+  /* x is now in primary range */
+  t  = x*x;
+  c  = x - t*(P1+t*(P2+t*(P3+t*(P4+t*P5))));
+  if(k==0)
+    return one-((x*c)/(c-(float)2.0)-x);
+  else
+    y = one-((lo-(x*c)/((float)2.0-c))-hi);
   if(k >= -125) {
     unsigned hy;
     GEN_OCL_GET_FLOAT_WORD(hy,y);
@@ -2630,7 +2409,6 @@ OVERLOADABLE float __gen_ocl_internal_remainder(float x, float p){
 }
 
 OVERLOADABLE float __gen_ocl_internal_ldexp(float x, int n) {
-  if(!__ocl_finitef(x)||x==(float)0.0) return x;
   x = __gen_ocl_scalbnf(x,n);
   return x;
 }
@@ -2668,10 +2446,10 @@ OVERLOADABLE float __gen_ocl_internal_exp10(float x){
   P[3] = 2.034649854009453E+000;
   P[4] = 2.650948748208892E+000;
   P[5] = 2.302585167056758E+000;
-  if( isinf(x))
-    return INFINITY;
 
-  if( x < -MAXL10 )return 0.0;
+  if( x < -MAXL10 ) return 0.0;
+
+  if( isinf(x))  return INFINITY;
   /* The following is necessary because range reduction blows up: */
   if( x == 0 )return 1.0;
 
@@ -2836,6 +2614,7 @@ OVERLOADABLE float ldexp(float x, int n) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_ldexp(x, n);
 
+  if (x == (float)0.0f) x = 0.0f;
   return __gen_ocl_internal_ldexp(x, n);
 }
 
@@ -2942,6 +2721,21 @@ OVERLOADABLE float __gen_ocl_internal_fdim(float x, float y) {
     return y;
   return x > y ? (x - y) : +0.f;
 }
+/*
+ * the pow/pown high precision implementation are copied from msun library.
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
 
 OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
   float z,ax,z_h,z_l,p_h,p_l;
@@ -2991,6 +2785,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
   }
    /* y==zero: x**0 = 1 */
   if(iy==0) return one;
+  /* pow(+1, y) returns 1 for any y, even a NAN */
   if(hx==0x3f800000) return one;
   /* +-NaN return x+y */
   if(ix > 0x7f800000 || iy > 0x7f800000)
@@ -3090,6 +2885,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
     GEN_OCL_SET_FLOAT_WORD(t_h,is+0x00400000+(k<<21));
     t_l = ax - (t_h-bp[k]);
     s_l = v*((u-s_h*t_h)-s_h*t_l);
+
     /* compute log(ax) */
     s2 = s*s;
     r = s2*s2*(L1+s2*(L2+s2*(L3+s2*(L4+s2*(L5+s2*L6)))));
@@ -3097,7 +2893,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
     s2  = s_h*s_h;
     t_h = 3.0f+s2+r;
     GEN_OCL_GET_FLOAT_WORD(is,t_h);
-    GEN_OCL_SET_FLOAT_WORD(t_h,is&0xfffff000);
+    GEN_OCL_SET_FLOAT_WORD(t_h,is&0xffffe000);
     t_l = r-((t_h-3.0f)-s2);
     /* u+v = s*(1+...) */
     u = s_h*t_h;
@@ -3105,7 +2901,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
     /* 2/(3log2)*(s+...) */
     p_h = u+v;
     GEN_OCL_GET_FLOAT_WORD(is,p_h);
-    GEN_OCL_SET_FLOAT_WORD(p_h,is&0xfffff000);
+    GEN_OCL_SET_FLOAT_WORD(p_h,is&0xffffe000);
     p_l = v-(p_h-u);
     z_h = cp_h*p_h;		/* cp_h+cp_l = 2/(3*log2) */
     z_l = cp_l*p_h+p_l*cp+dp_l[k];
@@ -3113,13 +2909,13 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
     t = (float)n;
     t1 = (((z_h+z_l)+dp_h[k])+t);
     GEN_OCL_GET_FLOAT_WORD(is,t1);
-    GEN_OCL_SET_FLOAT_WORD(t1,is&0xfffff000);
+    GEN_OCL_SET_FLOAT_WORD(t1,is&0xffffe000);
     t2 = z_l-(((t1-t)-dp_h[k])-z_h);
   }
 
   /* split up y into y1+y2 and compute (y1+y2)*(t1+t2) */
   GEN_OCL_GET_FLOAT_WORD(is,y);
-  GEN_OCL_SET_FLOAT_WORD(y1,is&0xfffff000);
+  GEN_OCL_SET_FLOAT_WORD(y1,is&0xffffe000);
   p_l = (y-y1)*t1+y*t2;
   p_h = y1*t1;
   z = p_l+p_h;
@@ -3167,6 +2963,209 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
   return sn*z;
 }
 
+float __gen_ocl_internal_pown(float x, int y) {
+  const float
+  bp[] = {1.0, 1.5,},
+  dp_h[] = { 0.0, 5.84960938e-01,}, /* 0x3f15c000 */
+  dp_l[] = { 0.0, 1.56322085e-06,}, /* 0x35d1cfdc */
+  zero    =  0.0,
+  one =  1.0,
+  two =  2.0,
+  two24 =  16777216.0,  /* 0x4b800000 */
+  huge  =  1.0e30,
+  tiny    =  1.0e-30,
+    /* poly coefs for (3/2)*(log(x)-2s-2/3*s**3 */
+  L1  =  6.0000002384e-01, /* 0x3f19999a */
+  L2  =  4.2857143283e-01, /* 0x3edb6db7 */
+  L3  =  3.3333334327e-01, /* 0x3eaaaaab */
+  L4  =  2.7272811532e-01, /* 0x3e8ba305 */
+  L5  =  2.3066075146e-01, /* 0x3e6c3255 */
+  L6  =  2.0697501302e-01, /* 0x3e53f142 */
+  P1   =  1.6666667163e-01, /* 0x3e2aaaab */
+  P2   = -2.7777778450e-03, /* 0xbb360b61 */
+  P3   =  6.6137559770e-05, /* 0x388ab355 */
+  P4   = -1.6533901999e-06, /* 0xb5ddea0e */
+  P5   =  4.1381369442e-08, /* 0x3331bb4c */
+  lg2  =  6.9314718246e-01, /* 0x3f317218 */
+  lg2_h  =  0x1.62ep-1,
+  lg2_l  =  0x1.0bfbe8p-15,
+  ovt =  4.2995665694e-08, /* -(128-log2(ovfl+.5ulp)) */
+  cp    =  9.6179670095e-01, /* 0x3f76384f =2/(3ln2) */
+  cp_h  =  9.6179199219e-01, /* 0x3f763800 =head of cp */
+  cp_l  =  4.7017383622e-06, /* 0x369dc3a0 =tail of cp_h */
+  ivln2    =  1.4426950216e+00, /* 0x3fb8aa3b =1/ln2 */
+  ivln2_h  =  1.4426879883e+00, /* 0x3fb8aa00 =16b 1/ln2*/
+  ivln2_l  =  7.0526075433e-06; /* 0x36eca570 =1/ln2 tail*/
+
+  float z,ax,z_h,z_l,p_h,p_l;
+  float y1,t1,t2,r,s,t,u,v,w;
+  int i,j,k,yisint,n;
+  int hx,ix,iy,is;
+
+  GEN_OCL_GET_FLOAT_WORD(hx,x);
+  ix = hx&0x7fffffff;
+  iy = y > 0 ? y&0x7fffffff : (-y)&0x7fffffff;
+    /* y==zero: x**0 = 1 */
+  if(y==0) return one;
+
+    /* +-NaN return NAN */
+  if(ix > 0x7f800000)
+    return NAN;
+
+    /* determine if y is an odd int
+     * yisint = 1 ... y is an odd int
+     * yisint = 2 ... y is an even int
+     */
+    yisint = y&1 ? 1 : 2;
+
+  if (y == 1) return x;
+  if (y == -1) return one/x;
+  if (y == 2) return x*x;
+
+  ax   = __gen_ocl_fabs(x);
+
+   /* special value of x */
+  if(ix==0x7f800000||ix==0||ix==0x3f800000){
+      z = ax;     /*x is +-0,+-inf,+-1*/
+      if(y<0) z = one/z; /* z = (1/|x|) */
+      if(hx<0) {
+      if(yisint==1)
+        z = -z;   /* (x<0)**odd = -(|x|**odd) */
+      }
+      return z;
+  }
+
+  float sn = one; /* s (sign of result -ve**odd) = -1 else = 1 */
+  if(((((unsigned)hx>>31)-1)|(yisint-1))==0)
+      sn = -one; /* (-ve)**(odd int) */
+
+    /* |y| is huge */
+  if(iy>0x08000000) { /* if |y| > 2**27 */
+    /* over/underflow if x is not close to one */
+      if(ix<0x3f7ffff8) return (y<0)? sn*huge*huge:tiny*tiny;
+      if(ix>0x3f800007) return (y>0)? sn*huge*huge:tiny*tiny;
+    /* now |1-x| is tiny <= 2**-20, suffice to compute
+     log(x) by x-x^2/2+x^3/3-x^4/4 */
+      t = ax-1;   /* t has 20 trailing zeros */
+      w = (t*t)*((float)0.5-t*((float)0.333333333333-t*(float)0.25));
+      u = ivln2_h*t;  /* ivln2_h has 16 sig. bits */
+      v = t*ivln2_l-w*ivln2;
+      t1 = u+v;
+      GEN_OCL_GET_FLOAT_WORD(is,t1);
+      GEN_OCL_SET_FLOAT_WORD(t1,is&0xfffff000);
+      t2 = v-(t1-u);
+  } else {
+    float s2,s_h,s_l,t_h,t_l;
+    n = 0;
+    /* take care subnormal number */
+//      if(ix<0x00800000)
+//    {ax *= two24; n -= 24; GEN_OCL_GET_FLOAT_WORD(ix,ax); }
+    n  += ((ix)>>23)-0x7f;
+    j  = ix&0x007fffff;
+    /* determine interval */
+    ix = j|0x3f800000;    /* normalize ix */
+    if(j<=0x1cc471) k=0;  /* |x|<sqrt(3/2) */
+    else if(j<0x5db3d7) k=1;  /* |x|<sqrt(3)   */
+    else {k=0;n+=1;ix -= 0x00800000;}
+    GEN_OCL_SET_FLOAT_WORD(ax,ix);
+
+    /* compute s = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5) */
+    u = ax-bp[k];   /* bp[0]=1.0, bp[1]=1.5 */
+    v = one/(ax+bp[k]);
+    s = u*v;
+    s_h = s;
+    GEN_OCL_GET_FLOAT_WORD(is,s_h);
+    GEN_OCL_SET_FLOAT_WORD(s_h,is&0xfffff000);
+
+    /* t_h=ax+bp[k] High */
+    GEN_OCL_SET_FLOAT_WORD(t_h, (((ix>>1)|0x20000000)+0x00400000+(k<<21)) &0xfffff000);
+    t_l = ax - (t_h-bp[k]);
+    s_l = v*((u-s_h*t_h)-s_h*t_l);
+
+
+    /* compute log(ax) */
+    s2 = s*s;
+    r = s2*s2*(L1+s2*(L2+s2*(L3+s2*(L4+s2*(L5+s2*L6)))));
+    r += s_l*(s_h+s);
+    s2  = s_h*s_h;
+    t_h = (float)3.0+s2+r;
+    GEN_OCL_GET_FLOAT_WORD(is,t_h);
+    GEN_OCL_SET_FLOAT_WORD(t_h,is&0xffffe000);
+    t_l = r-((t_h-(float)3.0)-s2);
+    /* u+v = s*(1+...) */
+    u = s_h*t_h;
+    v = s_l*t_h+t_l*s;
+    /* 2/(3log2)*(s+...) */
+    p_h = u+v;
+    GEN_OCL_GET_FLOAT_WORD(is,p_h);
+    GEN_OCL_SET_FLOAT_WORD(p_h,is&0xffffe000);
+    p_l = v-(p_h-u);
+    z_h = cp_h*p_h;   /* cp_h+cp_l = 2/(3*log2) */
+    z_l = cp_l*p_h+p_l*cp+dp_l[k];
+    /* log2(ax) = (s+..)*2/(3*log2) = n + dp_h + z_h + z_l */
+    t = (float)n;
+    t1 = (((z_h+z_l)+dp_h[k])+t);
+    GEN_OCL_GET_FLOAT_WORD(is,t1);
+    GEN_OCL_SET_FLOAT_WORD(t1,is&0xffffe000);
+    t2 = z_l-(((t1-t)-dp_h[k])-z_h);
+  }
+
+  /* split up y into y1+y2+y3 and compute (y1+y2+y3)*(t1+t2) */
+
+  float fy = (float)y;
+  float y3 = (float)(y-(int)fy);
+  GEN_OCL_GET_FLOAT_WORD(is,fy);
+  GEN_OCL_SET_FLOAT_WORD(y1,is&0xfffff000);
+
+  p_l = (fy-y1)*t1 + y3*t1 + fy*t2 + y3*t2;
+  p_h = y1*t1;
+  z = p_l+p_h;
+
+  GEN_OCL_GET_FLOAT_WORD(j,z);
+  if (j>0x43000000)       /* if z > 128 */
+      return sn*huge*huge;       /* overflow */
+  else if (j==0x43000000) {     /* if z == 128 */
+      if(p_l+ovt>z-p_h) return sn*huge*huge; /* overflow */
+  }
+  else if ((j&0x7fffffff)>0x43160000)   /* z <= -150 */
+      return sn*tiny*tiny;       /* underflow */
+  else if (j==0xc3160000){      /* z == -150 */
+      if(p_l<=z-p_h) return sn*tiny*tiny;    /* underflow */
+  }
+    /*
+     * compute 2**(p_h+p_l)
+     */
+  i = j&0x7fffffff;
+  k = (i>>23)-0x7f;
+  n = 0;
+  if(i>0x3f000000) {    /* if |z| > 0.5, set n = [z+0.5] */
+      n = j+(0x00800000>>(k+1));
+      k = ((n&0x7fffffff)>>23)-0x7f;  /* new k for n */
+      GEN_OCL_SET_FLOAT_WORD(t,n&~(0x007fffff>>k));
+      n = ((n&0x007fffff)|0x00800000)>>(23-k);
+      if(j<0) n = -n;
+      p_h -= t;
+
+      z -= n;
+  }
+
+  t = z;
+  GEN_OCL_GET_FLOAT_WORD(is,t);
+  GEN_OCL_SET_FLOAT_WORD(t,is&0xfffff000);
+  u = t*lg2_h;
+  v = (p_l-(t-p_h))*lg2+t*lg2_l;
+  z = u+v;
+  w = v-(z-u);
+  t  = z*z;
+  t1  = z - t*(P1+t*(P2+t*(P3+t*(P4+t*P5))));
+  r  = (z*t1)/(t1-two)-(w+z*w);
+  z  = one-(r-z);
+  GEN_OCL_GET_FLOAT_WORD(j,z);
+  j += (n<<23);
+  if((j>>23)<=0) z = __gen_ocl_scalbnf(z,n);  /* subnormal output */
+  else GEN_OCL_SET_FLOAT_WORD(z,j);
+  return sn*z;
+}
 
 OVERLOADABLE float hypot(float x, float y) {
   if (__ocl_math_fastpath_flag)
@@ -3216,6 +3215,8 @@ OVERLOADABLE float fract(float x, private float *p) { BODY; }
   int n,hx,hy,hz,ix,iy,sx,i,sy; \
   uint q,sxy; \
   Zero[0] = 0.0;Zero[1] = -0.0; \
+  if (x == 0.0f) { x = 0.0f; }; \
+  if (y == 0.0f) { y = 0.0f; }\
   GEN_OCL_GET_FLOAT_WORD(hx,x);GEN_OCL_GET_FLOAT_WORD(hy,y); \
   sxy = (hx ^ hy) & 0x80000000;sx = hx&0x80000000;sy = hy&0x80000000; \
   hx ^=sx; hy &= 0x7fffffff; \
@@ -3295,30 +3296,99 @@ OVERLOADABLE float remquo(float x, float y, local int *quo) { BODY; }
 OVERLOADABLE float remquo(float x, float y, private int *quo) { BODY; }
 #undef BODY
 
+OVERLOADABLE float powr(float x, float y) {
+  unsigned int hx, sx, hy, sy;
+
+  if (__ocl_math_fastpath_flag)
+    return __gen_ocl_pow(x,y);
+  else {
+    if (isnan(x) || isnan(y)) return NAN;
+    GEN_OCL_GET_FLOAT_WORD(hx,x);
+    GEN_OCL_GET_FLOAT_WORD(hy,y);
+    sx = (hx & 0x80000000) >> 31;
+    sy = (hy & 0x80000000) >> 31;
+
+    if ((hx&0x7fffffff) < 0x00800000) {	   /* x < 2**-126  */
+      x = 0.0f;/* Gen does not support subnormal number now */
+      hx = hx &0x80000000;
+    }
+    if ((hy&0x7fffffff) < 0x00800000) {	  /* y < 2**-126  */
+      y = 0.0;/* Gen does not support subnormal number now */
+      hy = hy &0x80000000;
+    }
+
+    // (x < 0) ** y = NAN (y!=0)
+    if ((sx && (hx & 0x7fffffff))) return NAN;
+
+    // +/-0 ** +/-0 = NAN
+    if ( !(hx&0x7fffffff) && !(hy&0x7fffffff)) return NAN;
+
+    // +inf ** +/-0 = NAN
+    if ( ((hx & 0x7f800000) ==0x7f800000) && !(hy&0x7fffffff)) return NAN;
+
+    // others except nan/inf/0 ** 0 = 1.0
+    if (!(hy&0x7fffffff)) return 1.0f;
+
+    // +1 ** inf = NAN; +1 ** finite = 1;
+    if (hx == 0x3f800000) {
+      return isinf(y) ? NAN : 1.0f;
+    }
+
+    if ( !(hx & 0x7fffffff)) {
+        // +/-0 ** y<0 = +inf
+        // +/-0 ** y>0 = +0
+      return sy ? INFINITY : 0.0f;
+    }
+
+    return __gen_ocl_internal_pow(x,y);
+  }
+}
+
 OVERLOADABLE float pown(float x, int n) {
-  if (x == 0.f && n == 0)
-    return 1.f;
-  if (x < 0.f && (n&1) )
-    return -powr(-x, n);
-  return powr(x, n);
+  if (__ocl_math_fastpath_flag) {
+    if (x == 0.f && n == 0)
+      return 1.f;
+    if (x < 0.f && (n&1) )
+      return -powr(-x, n);
+    return powr(x, n);
+  } else {
+    int ix;
+    GEN_OCL_GET_FLOAT_WORD(ix, x);
+    float sign = ix < 0 ? -1.0f : 1.0f;
+    if (x == 0.0f) x = sign * 0.0f;
+
+    return __gen_ocl_internal_pown(x, n);
+  }
 }
 
 OVERLOADABLE float pow(float x, float y) {
-  int n;
-  if (x == 0.f && y == 0.f)
-    return 1.f;
-  if (x >= 0.f)
-    return powr(x, y);
-  n = y;
-  if ((float)n == y)//is exact integer
-    return pown(x, n);
-  return NAN;
+  if (!__ocl_math_fastpath_flag)
+    return __gen_ocl_internal_pow(x,y);
+  else {
+    int n;
+    if (x == 0.f && y == 0.f)
+      return 1.f;
+    if (x >= 0.f)
+      return powr(x, y);
+    n = y;
+    if ((float)n == y)//is exact integer
+      return pown(x, n);
+    return NAN;
+  }
 }
 
 OVERLOADABLE float rootn(float x, int n) {
   float ax,re;
   int sign = 0;
+  int hx;
   if( n == 0 )return NAN;
+
+  GEN_OCL_GET_FLOAT_WORD(hx, x);
+  // Gen does not support denorm, flush to zero
+  if ((hx & 0x7fffffff) < 0x00800000) {
+    x = hx < 0 ? -0.0f : 0.0f;
+  }
+
   //rootn ( x, n )  returns a NaN for x < 0 and n is even.
   if( x < 0 && 0 == (n&1) )
     return NAN;

@@ -27,11 +27,13 @@
 #include "cl_thread.h"
 #include "CL/cl.h"
 #include "cl_gbe_loader.h"
+#include "cl_alloc.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/sysinfo.h>
 
 #ifndef CL_VERSION_1_2
 #define CL_DEVICE_BUILT_IN_KERNELS 0x103F
@@ -42,8 +44,8 @@ static struct _cl_device_id intel_ivb_gt2_device = {
   .max_compute_unit = 16,
   .max_thread_per_unit = 8,
   .sub_slice_count = 2,
-  .max_work_item_sizes = {1024, 1024, 1024},
-  .max_work_group_size = 1024,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen7_device.h"
 };
@@ -53,8 +55,8 @@ static struct _cl_device_id intel_ivb_gt1_device = {
   .max_compute_unit = 6,
   .max_thread_per_unit = 6,
   .sub_slice_count = 1,
-  .max_work_item_sizes = {512, 512, 512},
-  .max_work_group_size = 512,
+  .max_work_item_sizes = {256, 256, 256},
+  .max_work_group_size = 256,
   .max_clock_frequency = 1000,
 #include "cl_gen7_device.h"
 };
@@ -64,8 +66,8 @@ static struct _cl_device_id intel_baytrail_t_device = {
   .max_compute_unit = 4,
   .max_thread_per_unit = 8,
   .sub_slice_count = 1,
-  .max_work_item_sizes = {512, 512, 512},
-  .max_work_group_size = 512,
+  .max_work_item_sizes = {256, 256, 256},
+  .max_work_group_size = 256,
   .max_clock_frequency = 1000,
 #include "cl_gen7_device.h"
 };
@@ -76,8 +78,8 @@ static struct _cl_device_id intel_hsw_gt1_device = {
   .max_compute_unit = 10,
   .max_thread_per_unit = 7,
   .sub_slice_count = 1,
-  .max_work_item_sizes = {1024, 1024, 1024},
-  .max_work_group_size = 1024,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
 };
@@ -87,8 +89,8 @@ static struct _cl_device_id intel_hsw_gt2_device = {
   .max_compute_unit = 20,
   .max_thread_per_unit = 7,
   .sub_slice_count = 2,
-  .max_work_item_sizes = {1024, 1024, 1024},
-  .max_work_group_size = 1024,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
 };
@@ -98,8 +100,8 @@ static struct _cl_device_id intel_hsw_gt3_device = {
   .max_compute_unit = 40,
   .max_thread_per_unit = 7,
   .sub_slice_count = 4,
-  .max_work_item_sizes = {1024, 1024, 1024},
-  .max_work_group_size = 1024,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
 };
@@ -110,7 +112,7 @@ static struct _cl_device_id intel_brw_gt1_device = {
   .max_compute_unit = 12,
   .max_thread_per_unit = 7,
   .sub_slice_count = 2,
-  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
@@ -121,7 +123,7 @@ static struct _cl_device_id intel_brw_gt2_device = {
   .max_compute_unit = 24,
   .max_thread_per_unit = 7,
   .sub_slice_count = 3,
-  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
@@ -132,7 +134,7 @@ static struct _cl_device_id intel_brw_gt3_device = {
   .max_compute_unit = 48,
   .max_thread_per_unit = 7,
   .sub_slice_count = 6,
-  .max_work_item_sizes = {1024, 1024, 1024},
+  .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
 #include "cl_gen75_device.h"
@@ -407,20 +409,28 @@ brw_gt3_break:
   cl_buffer_mgr bufmgr = cl_driver_get_bufmgr(dummy);
 
   const size_t sz = 4096;
-  void* host_ptr = NULL;
-  int err = posix_memalign(&host_ptr, 4096, sz);
-  if (err == 0) {
+  void* host_ptr = cl_aligned_malloc(sz, 4096);;
+  if (host_ptr != NULL) {
     cl_buffer bo = cl_buffer_alloc_userptr(bufmgr, "CL memory object", host_ptr, sz, 0);
     if (bo == NULL)
       ret->host_unified_memory = CL_FALSE;
     else
       cl_buffer_unreference(bo);
-    free(host_ptr);
+    cl_free(host_ptr);
   }
   else
     ret->host_unified_memory = CL_FALSE;
   cl_driver_delete(dummy);
 #endif
+
+  struct sysinfo info;
+  if (sysinfo(&info) == 0) {
+    uint64_t two_gb = 2 * 1024 * 1024 * 1024ul; 
+    uint64_t totalram = info.totalram * info.mem_unit;
+    ret->global_mem_size = (totalram > two_gb) ? 
+                            two_gb : info.totalram;
+    ret->max_mem_alloc_size = ret->global_mem_size / 2;
+  }
 
   return ret;
 }
@@ -669,9 +679,9 @@ cl_get_kernel_max_wg_sz(cl_kernel kernel)
     if(thread_cnt > 64)
       thread_cnt = 64;
     work_group_size = thread_cnt * simd_width;
-    if(work_group_size > kernel->program->ctx->device->max_work_group_size)
-      work_group_size = kernel->program->ctx->device->max_work_group_size;
   }
+  if(work_group_size > kernel->program->ctx->device->max_work_group_size)
+    work_group_size = kernel->program->ctx->device->max_work_group_size;
   return work_group_size;
 }
 
