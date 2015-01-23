@@ -3,6 +3,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * New upstream release.
   * Add beignet-dbg package with debug symbols.
   * Update watch file.
+  * Refresh patches.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 23 Jan 2015 23:17:24 +0100
 
