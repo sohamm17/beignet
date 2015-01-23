@@ -21,7 +21,7 @@ License: MIT
 Files: debian/*
 Copyright: 2013 Simon Richter <sjr@debian.org>
            2014 Julian Wollrath <jwollrath@web.de>
-           © 2014 Andreas Beckmann <anbe@debian.org>
+           © 2014-2015 Andreas Beckmann <anbe@debian.org>
 License: LGPL-2.1+
 
 License: LGPL-2.1+
