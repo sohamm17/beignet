@@ -1,4 +1,8 @@
-Description: Respect CFLAGS,etc and be verbose
+Description: Set compiler flags
+
+Respect CFLAGS,CXXFLAGS,LDFLAGS (security hardening etc.)
+Be verbose
+Use -Bsymbolic to avoid jumping into mesa's LLVM (#768185)
 
 Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
 --- a/CMakeLists.txt
@@ -27,7 +31,7 @@ Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
  
  
 -set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${LLVM_LDFLAGS}")
-+set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined ${LLVM_LDFLAGS}")
++set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic -Wl,--no-undefined ${LLVM_LDFLAGS}")
  
  # XLib
  Find_Package(X11)
