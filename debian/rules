@@ -15,4 +15,4 @@ override_dh_auto_configure:
 	dh_auto_configure --buildsystem cmake
 
 override_dh_strip:
-	dh_strip --dbg-package=beignet-dbg
+	dh_strip --dbg-package=beignet-opencl-icd-dbg

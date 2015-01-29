@@ -23,11 +23,11 @@ Homepage: http://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
 Vcs-Browser: https://anonscm.debian.org/cgit/pkg-opencl/beignet.git
 
-Package: beignet
+Package: beignet-opencl-icd
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Conflicts: beignet0.0.1
-Replaces: beignet0.0.1
+Breaks: beignet0.0.1, beignet (<< 1.0.1~)
+Replaces: beignet0.0.1, beignet (<< 1.0.1~)
 Provides: opencl-icd
 Description: OpenCL library for Intel GPUs
  OpenCL (Open Computing Language) is a multivendor open standard for
@@ -41,7 +41,7 @@ Description: OpenCL library for Intel GPUs
 Package: beignet-dev
 Section: libdevel
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet (= ${binary:Version}), ${misc:Depends}
+Depends: beignet-opencl-icd (= ${binary:Version}), ${misc:Depends}
 Description: OpenCL library for Intel GPUs (development files)
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
@@ -50,11 +50,19 @@ Description: OpenCL library for Intel GPUs (development files)
  This package contains the development files for directly linking against
  the Intel implementation.
 
-Package: beignet-dbg
+Package: beignet-opencl-icd-dbg
 Section: debug
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet (= ${binary:Version}), ${misc:Depends}
+Depends: beignet-opencl-icd (= ${binary:Version}), ${misc:Depends}
 Description: OpenCL library for Intel GPUs (debug symbols)
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
  CPUs, GPUs and other processors.
+
+Package: beignet
+Section: oldlibs
+Architecture: all
+Depends: beignet-opencl-icd (>= ${source:Version}), beignet-opencl-icd (<< ${source:Version}.1~), ${misc:Depends}
+Description: OpenCL library for Intel GPUs - transitional dummy package
+ This is a transitional dummy package (the real package has been renamed
+ to beignet-opencl-icd).  It can safely be removed.
