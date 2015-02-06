@@ -10,6 +10,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Use -Bsymbolic to make sure we jump to our LLVM and not mesa's.
     (Closes: #768185)
   * Rename to beignet-opencl-icd for consistency.
+  * Add more debug output to builtin_pow test.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 23 Jan 2015 23:17:24 +0100
 
