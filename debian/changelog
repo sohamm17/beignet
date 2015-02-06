@@ -13,6 +13,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Add more debug output to builtin_pow test.
   * Fix bug in compiler_fill_image_1d_array test setup.
   * Return failure instead of aborting on cl_mem_allocate failure.
+  * Delete all generated files in clean target.
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 23 Jan 2015 23:17:24 +0100
 
