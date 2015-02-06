@@ -4,3 +4,4 @@ Utest-requires-deprecated-function-names.patch
 Link-against-terminfo.patch
 Enable-test-debug.patch
 fix-compiler_fill_image_1d_array.patch
+fail-gracefully-cl_mem_allocate.patch
