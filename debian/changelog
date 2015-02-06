@@ -16,6 +16,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Delete all generated files in clean target.
   * Drop OpenGL dependencies, as CL-GL sharing hasn't worked
     for several releases.
+  * Make -dev depend on ocl-icd-opencl-dev, and clarify description. 
 
  -- Andreas Beckmann <anbe@debian.org>  Fri, 23 Jan 2015 23:17:24 +0100
 
