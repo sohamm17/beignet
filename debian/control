@@ -6,15 +6,22 @@ Uploaders:
  Simon Richter <sjr@debian.org>,
  Rebecca N. Palmer <rebecca_palmer@zoho.com>,
  Andreas Beckmann <anbe@debian.org>,
-Build-Depends: debhelper (>= 9), cmake, pkg-config, python-minimal,
- ocl-icd-dev, ocl-icd-opencl-dev,
- libdrm-dev, libxfixes-dev, libxext-dev,
- llvm-dev (>= 1:3.4),
+Build-Depends:
+ debhelper (>= 9),
+ cmake,
  clang (>= 1:3.4),
  libclang-dev (>= 1:3.4),
- libtinfo-dev,
+ llvm-dev (>= 1:3.4),
+ ocl-icd-dev,
+ ocl-icd-opencl-dev,
+ pkg-config,
+ python-minimal,
+ libdrm-dev,
  libedit-dev,
- zlib1g-dev
+ libtinfo-dev,
+ libxext-dev,
+ libxfixes-dev,
+ zlib1g-dev,
 Standards-Version: 3.9.6
 Homepage: http://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
@@ -23,8 +30,8 @@ Vcs-Browser: https://anonscm.debian.org/cgit/pkg-opencl/beignet.git
 Package: beignet-opencl-icd
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Breaks: beignet0.0.1, beignet (<< 1.0.1~)
-Replaces: beignet0.0.1, beignet (<< 1.0.1~)
+Breaks: beignet0.0.1, beignet (<< 1.0.1)
+Replaces: beignet0.0.1, beignet (<< 1.0.1)
 Provides: opencl-icd
 Description: OpenCL library for Intel GPUs
  OpenCL (Open Computing Language) is a multivendor open standard for
@@ -38,8 +45,10 @@ Description: OpenCL library for Intel GPUs
 Package: beignet-dev
 Section: libdevel
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet-opencl-icd (= ${binary:Version}),
- ocl-icd-opencl-dev, ${misc:Depends}
+Depends:
+ beignet-opencl-icd (= ${binary:Version}),
+ ocl-icd-opencl-dev,
+ ${misc:Depends}
 Description: OpenCL library for Intel GPUs (development files)
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
@@ -50,7 +59,9 @@ Description: OpenCL library for Intel GPUs (development files)
 Package: beignet-opencl-icd-dbg
 Section: debug
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet-opencl-icd (= ${binary:Version}), ${misc:Depends}
+Depends:
+ beignet-opencl-icd (= ${binary:Version}),
+ ${misc:Depends}
 Description: OpenCL library for Intel GPUs (debug symbols)
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
@@ -58,8 +69,10 @@ Description: OpenCL library for Intel GPUs (debug symbols)
 
 Package: beignet
 Section: oldlibs
-Architecture: all
-Depends: beignet-opencl-icd (>= ${source:Version}), beignet-opencl-icd (<< ${source:Version}.1~), ${misc:Depends}
+Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Depends:
+ beignet-opencl-icd,
+ ${misc:Depends}
 Description: OpenCL library for Intel GPUs - transitional dummy package
  This is a transitional dummy package (the real package has been renamed
  to beignet-opencl-icd).  It can safely be removed.
