@@ -5,6 +5,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Add -dbg package with debug symbols.
   * Update watch file.
   * Refresh patches.
+  * llvm-search-order.patch: New. Prefer newer llvm versions.
 
   [ Rebecca N. Palmer ]
   * Use -Bsymbolic to make sure we jump to our LLVM and not mesa's.
