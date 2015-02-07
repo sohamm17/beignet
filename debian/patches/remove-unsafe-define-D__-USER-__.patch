@@ -1,0 +1,31 @@
+From 7da4f53e85091f913b311a3da34761bed94b2f1c Mon Sep 17 00:00:00 2001
+From: Andreas Beckmann <anbe@debian.org>
+Date: Sat, 7 Feb 2015 04:45:32 +0100
+Subject: [PATCH] remove unsafe define -D__$(USER)__
+
+funny things may happen with usernames like
+'asm', 'attribute', 'x86_64', 'i386', and so on
+
+this breaks on usernames with non-alnum chars ('-', '.')
+
+Signed-off-by: Andreas Beckmann <anbe@debian.org>
+---
+ CMakeLists.txt | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 01ec1d8..9c398e9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -45,8 +45,6 @@ if (NOT BEIGNET_INSTALL_DIR)
+   set (BEIGNET_INSTALL_DIR "${LIB_INSTALL_DIR}/beignet/")
+ endif (NOT BEIGNET_INSTALL_DIR)
+ 
+-ADD_DEFINITIONS(-D__$(USER)__)
+-
+ # Force Release with debug info
+ if (NOT CMAKE_BUILD_TYPE)
+   set (CMAKE_BUILD_TYPE RelWithDebInfo)
+-- 
+2.1.4
+

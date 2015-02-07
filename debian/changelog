@@ -6,6 +6,9 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Update watch file.
   * Refresh patches.
   * llvm-search-order.patch: New. Prefer newer llvm versions.
+  * remove-unsafe-define-D__-USER-__.patch: New. Drop unsafe -D__$(USER)__
+    flag. Breaks on non-alpha-numerical chars ('-', '.') and usernames like
+    'asm', 'attribute', 'i386', 'x86_64', ...
 
   [ Rebecca N. Palmer ]
   * Use -Bsymbolic to make sure we jump to our LLVM and not mesa's.
