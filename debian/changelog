@@ -1,4 +1,4 @@
-beignet (1.0.1-1) UNRELEASED; urgency=medium
+beignet (1.0.1-1) experimental; urgency=medium
 
   [ Andreas Beckmann ]
   * New upstream release.
@@ -11,7 +11,7 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
     'asm', 'attribute', 'i386', 'x86_64', ...
 
   [ Rebecca N. Palmer ]
-  * Use -Bsymbolic to make sure we jump to our LLVM and not mesa's.
+  * Use -Bsymbolic to make sure we jump to our LLVM and not MESA's.
     (Closes: #768185)
   * Rename to beignet-opencl-icd for consistency.
   * Add more debug output to builtin_pow test.
@@ -19,10 +19,10 @@ beignet (1.0.1-1) UNRELEASED; urgency=medium
   * Return failure instead of aborting on cl_mem_allocate failure.
   * Delete all generated files in clean target.
   * Drop OpenGL dependencies, as CL-GL sharing hasn't worked
-    for several releases.
+    for several releases and was now dropped upstream.  (Closes: #712862)
   * Make -dev depend on ocl-icd-opencl-dev, and clarify description. 
 
- -- Andreas Beckmann <anbe@debian.org>  Fri, 23 Jan 2015 23:17:24 +0100
+ -- Andreas Beckmann <anbe@debian.org>  Sat, 07 Feb 2015 12:48:16 +0100
 
 beignet (1.0.0-1) experimental; urgency=medium
 
