@@ -39,8 +39,8 @@ Description: OpenCL library for Intel GPUs
  CPUs, GPUs and other processors.
  .
  This package contains the shared library for the Intel implementation,
- which supports the integrated GPUs of Ivy Bridge, Haswell and Broadwell
- processors.
+ which supports the integrated GPUs of Ivy Bridge, Bay Trail, Haswell and
+ Broadwell processors.
 
 Package: beignet-dev
 Section: libdevel
@@ -66,6 +66,8 @@ Description: OpenCL library for Intel GPUs (debug symbols)
  OpenCL (Open Computing Language) is a multivendor open standard for
  general-purpose parallel programming of heterogeneous systems that include
  CPUs, GPUs and other processors.
+ .
+ This package contains the debugging symbols for the Intel implementation.
 
 Package: beignet
 Section: oldlibs
