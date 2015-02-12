@@ -7,3 +7,4 @@ fix-compiler_fill_image_1d_array.patch
 fail-gracefully-cl_mem_allocate.patch
 llvm-search-order.patch
 remove-unsafe-define-D__-USER-__.patch
+force-llvm-3.5.patch
