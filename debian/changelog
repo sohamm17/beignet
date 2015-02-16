@@ -3,7 +3,7 @@ beignet (1.0.1-2) experimental; urgency=medium
   * Force LLVM 3.5 to fix FTBFS in Ubuntu.
   * Document that Bay Trail is supported, clarify descriptions.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 12 Feb 2015 12:13:38 +0000
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 16 Feb 2015 09:52:55 +0000
 
 beignet (1.0.1-1) experimental; urgency=medium
 
@@ -27,14 +27,14 @@ beignet (1.0.1-1) experimental; urgency=medium
   * Delete all generated files in clean target.
   * Drop OpenGL dependencies, as CL-GL sharing hasn't worked
     for several releases and was now dropped upstream.  (Closes: #712862)
-  * Make -dev depend on ocl-icd-opencl-dev, and clarify description. 
+  * Make -dev depend on ocl-icd-opencl-dev, and clarify description.
 
  -- Andreas Beckmann <anbe@debian.org>  Sat, 07 Feb 2015 12:48:16 +0100
 
 beignet (1.0.0-1) experimental; urgency=medium
 
   [ Andreas Beckmann ]
-  * New upstream release.
+  * New upstream release.  (Closes: #769403)
     - Fix tgamma, pow, pown, erf, erfc  (Closes: #768090)
     - Drop upstream patches.
     - Refresh patches.
@@ -45,7 +45,7 @@ beignet (1.0.0-1) experimental; urgency=medium
   * Upload to experimental.
 
   [ Rebecca N. Palmer ]
-  * Re-enable GBE_DEBUG (lost when debhelper switched to 
+  * Re-enable GBE_DEBUG (lost when debhelper switched to
     None build type)
   * Enable extra debug output in tests
   * Document in the description what hardware this supports.
