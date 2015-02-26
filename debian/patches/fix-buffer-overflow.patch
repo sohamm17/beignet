@@ -1,0 +1,31 @@
+Description: Correct the error llvm link msg copy
+
+in function genProgramLinkFromLLVM.
+
+Use strncpy to avoid overflow and need return errSize.
+
+Origin: upstream 1c24f07213bcf302ffd6cc751f575dba10f1518d
+Author: Yang Rong <rong.r.yang@intel.com>, Rebecca Palmer <rebecca_palmer@zoho.com>
+
+diff --git a/backend/src/backend/gen_program.cpp b/backend/src/backend/gen_program.cpp
+index 6ad5eef..1b296fb 100644
+--- a/backend/src/backend/gen_program.cpp
++++ b/backend/src/backend/gen_program.cpp
+@@ -384,10 +384,9 @@ namespace gbe {
+                                  &errMsg);
+       if (errMsg.c_str() != NULL) {
+         if (err != NULL && errSize != NULL && stringSize > 0u) {
+-          if(errMsg.length() < stringSize )
+-            stringSize = errMsg.length();
+-          strcpy(err, errMsg.c_str());
+-          err[stringSize+1] = '\0';
++          strncpy(err, errMsg.c_str(), stringSize-1);
++          err[stringSize-1] = '\0';
++          *errSize = strlen(err);
+         }
+       }
+     }
+-- 
+cgit v0.10.2
+
+
