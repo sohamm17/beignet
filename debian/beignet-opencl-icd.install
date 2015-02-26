@@ -1,2 +1,2 @@
 etc/OpenCL
-usr/lib/beignet
+usr/lib/*/beignet
