@@ -46,7 +46,7 @@ Description: OpenCL library for Intel GPUs
 Package: beignet-dev
 Section: libdevel
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Multi-Arch: same
+Multi-Arch: foreign
 Depends:
  beignet-opencl-icd (= ${binary:Version}),
  ocl-icd-opencl-dev,
