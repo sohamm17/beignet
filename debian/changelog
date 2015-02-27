@@ -1,8 +1,12 @@
 beignet (1.0.1-3) experimental; urgency=medium
 
+  [ Rebecca N. Palmer ]
   * Fix two crashes on unsupported hardware.  (Closes: #779213)
   * Fix buffer overflow in error handling.
   * Enable multiarch.
+
+  [ Andreas Beckmann ]
+  * Ensure proper removal of the pre-multiarch intel-beignet.icd.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 26 Feb 2015 14:39:00 +0000
 

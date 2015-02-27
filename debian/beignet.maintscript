@@ -1,0 +1,1 @@
+rm_conffile /etc/OpenCL/vendors/intel-beignet.icd 1.0.1-3~
