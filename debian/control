@@ -74,7 +74,7 @@ Description: OpenCL library for Intel GPUs (debug symbols)
 
 Package: beignet
 Section: oldlibs
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Architecture: all
 Depends:
  beignet-opencl-icd,
  ${misc:Depends}
