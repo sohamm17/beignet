@@ -1,6 +1,7 @@
 beignet (1.0.1-4) UNRELEASED; urgency=medium
 
   * Make transitional dummy arch:all.
+  * Enable building on hurd-i386 and x32.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 07 Mar 2015 22:17:11 +0000
 

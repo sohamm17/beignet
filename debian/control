@@ -28,7 +28,7 @@ Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
 Vcs-Browser: https://anonscm.debian.org/cgit/pkg-opencl/beignet.git
 
 Package: beignet-opencl-icd
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64 hurd-i386 x32
 Multi-Arch: same
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Breaks: beignet0.0.1, beignet (<< 1.0.1)
@@ -45,7 +45,7 @@ Description: OpenCL library for Intel GPUs
 
 Package: beignet-dev
 Section: libdevel
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64 hurd-i386 x32
 Multi-Arch: foreign
 Depends:
  beignet-opencl-icd (= ${binary:Version}),
@@ -60,7 +60,7 @@ Description: OpenCL library for Intel GPUs (development files)
 
 Package: beignet-opencl-icd-dbg
 Section: debug
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
+Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64 hurd-i386 x32
 Multi-Arch: same
 Depends:
  beignet-opencl-icd (= ${binary:Version}),
