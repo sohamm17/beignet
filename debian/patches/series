@@ -12,3 +12,4 @@ fixcrash-24b2ad.patch
 fixcrash-779213.patch
 fix-buffer-overflow.patch
 Enable-multiarch.patch
+support-kfreebsd.patch
