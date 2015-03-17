@@ -621,7 +621,11 @@ namespace gbe {
     if (!retVal)
       return false;
 
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
     llvm::Module *module = Act->takeModule();
+#else
+    llvm::Module *module = Act->takeModule().release();
+#endif
 
     *out_module = module;
     return true;
@@ -672,7 +676,7 @@ namespace gbe {
       const std::string unsupportedOptions("-cl-denorms-are-zero, -cl-strict-aliasing, -cl-opt-disable,"
                        "-cl-no-signed-zeros, -cl-fp32-correctly-rounded-divide-sqrt");
 
-      const std::string uncompatiblePCHOptions = ("-cl-single-precision-constant, -cl-fast-relaxed-math, -cl-std=CL1.1");
+      const std::string uncompatiblePCHOptions = ("-cl-single-precision-constant, -cl-fast-relaxed-math, -cl-std=CL1.1, -cl-finite-math-only");
       const std::string fastMathOption = ("-cl-fast-relaxed-math");
       while (end != std::string::npos) {
         end = optionStr.find(' ', start);

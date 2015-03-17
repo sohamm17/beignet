@@ -814,7 +814,8 @@ namespace ir {
       const RegisterFamily family = getFamily(this->type);
       if (UNLIKELY(checkSpecialRegForWrite(dst[0], fn, whyNot) == false))
         return false;
-      if (UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
+      if (opcode != OP_CBIT &&
+          UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
         return false;
       for (uint32_t srcID = 0; srcID < srcNum; ++srcID)
         if (UNLIKELY(checkRegisterData(family, src[srcID], fn, whyNot) == false))
@@ -871,7 +872,6 @@ namespace ir {
         if (UNLIKELY(checkRegisterData(family, regID, fn, whyNot) == false))
           return false;
       }
-      CHECK_TYPE(this->type, allButBool);
       return true;
     }
 
@@ -887,7 +887,6 @@ namespace ir {
       for (uint32_t srcID = 0; srcID < 2; ++srcID)
         if (UNLIKELY(checkRegisterData(family, src[srcID], fn, whyNot) == false))
           return false;
-      CHECK_TYPE(this->type, allButBool);
       return true;
     }
 

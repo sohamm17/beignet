@@ -38,11 +38,7 @@
 #include "sys/cvar.hpp"
 #include "src/GBEConfig.h"
 #include "llvm/llvm_gen_backend.hpp"
-#if LLVM_VERSION_MINOR >= 5
-#include "llvm/Linker/Linker.h"
-#else
-#include "llvm/Linker.h"
-#endif
+#include "llvm-c/Linker.h"
 
 using namespace llvm;
 
@@ -67,18 +63,20 @@ namespace gbe
     }
     assert(findBC);
 
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
     oclLib = getLazyIRFileModule(FilePath, Err, ctx);
+#else
+    oclLib = getLazyIRFileModule(FilePath, Err, ctx).release();
+#endif
     if (!oclLib) {
       printf("Fatal Error: ocl lib can not be opened\n");
       return NULL;
     }
 
-    if (strictMath) {
-      llvm::GlobalVariable* mathFastFlag = oclLib->getGlobalVariable("__ocl_math_fastpath_flag");
-      assert(mathFastFlag);
-      Type* intTy = IntegerType::get(ctx, 32);
-      mathFastFlag->setInitializer(ConstantInt::get(intTy, 0));
-    }
+    llvm::GlobalVariable* mathFastFlag = oclLib->getGlobalVariable("__ocl_math_fastpath_flag");
+    assert(mathFastFlag);
+    Type* intTy = IntegerType::get(ctx, 32);
+    mathFastFlag->setInitializer(ConstantInt::get(intTy, strictMath ? 0 : 1));
 
     return oclLib;
   }
@@ -110,20 +108,26 @@ namespace gbe
         if (!newMF) {
           newMF = src.getFunction(fnName);
           if (!newMF) {
-	    printf("Can not find the lib: %s\n", fnName.c_str());
-	    return false;
+            printf("Can not find the lib: %s\n", fnName.c_str());
+            return false;
           }
-	  fromSrc = true;
+          fromSrc = true;
         }
 
         std::string ErrInfo;// = "Not Materializable";
         if (!fromSrc && newMF->isMaterializable()) {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
           if (newMF->Materialize(&ErrInfo)) {
             printf("Can not materialize the function: %s, because %s\n", fnName.c_str(), ErrInfo.c_str());
             return false;
           }
+#else
+          if (std::error_code EC = newMF->materialize()) {
+            printf("Can not materialize the function: %s, because %s\n", fnName.c_str(), EC.message().c_str());
+            return false;
+          }
+#endif
         }
-
         if (!materializedFuncCall(src, lib, *newMF, MFS))
           return false;
 
@@ -209,12 +213,21 @@ namespace gbe
       }
       std::string ErrInfo;// = "Not Materializable";
       if (newMF->isMaterializable()) {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
         if (newMF->Materialize(&ErrInfo)) {
           printf("Can not materialize the function: %s, because %s\n", fnName.c_str(), ErrInfo.c_str());
           delete clonedLib;
           return NULL;
         }
       }
+#else
+        if (std::error_code EC = newMF->materialize()) {
+          printf("Can not materialize the function: %s, because %s\n", fnName.c_str(), EC.message().c_str());
+          delete clonedLib;
+          return NULL;
+        }
+      }
+#endif
 
       if (!materializedFuncCall(*mod, *clonedLib, *newMF, materializedFuncs)) {
         delete clonedLib;
@@ -226,10 +239,10 @@ namespace gbe
 
     /* We use beignet's bitcode as dst because it will have a lot of
        lazy functions which will not be loaded. */
-    std::string errorMsg;
-    if(Linker::LinkModules(clonedLib, mod, Linker::DestroySource, &errorMsg)) {
+    char* errorMsg;
+    if(LLVMLinkModules(wrap(clonedLib), wrap(mod), LLVMLinkerDestroySource, &errorMsg)) {
       delete clonedLib;
-      printf("Fatal Error: link the bitcode error:\n%s\n", errorMsg.c_str());
+      printf("Fatal Error: link the bitcode error:\n%s\n", errorMsg);
       return NULL;
     }
 

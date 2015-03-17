@@ -266,6 +266,7 @@ cl_mem_allocate(enum cl_mem_type type,
   mem->magic = CL_MAGIC_MEM_HEADER;
   mem->flags = flags;
   mem->is_userptr = 0;
+  mem->offset = 0;
 
   if (sz != 0) {
     /* Pinning will require stricter alignment rules */
@@ -279,15 +280,21 @@ cl_mem_allocate(enum cl_mem_type type,
 #ifdef HAS_USERPTR
     if (ctx->device->host_unified_memory) {
       int page_size = getpagesize();
+      int cacheline_size = 0;
+      cl_get_device_info(ctx->device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
+
       /* currently only cl buf is supported, will add cl image support later */
       if (type == CL_MEM_BUFFER_TYPE) {
         if (flags & CL_MEM_USE_HOST_PTR) {
           assert(host_ptr != NULL);
           /* userptr not support tiling */
           if (!is_tiled) {
-            if ((((unsigned long)host_ptr | sz) & (page_size - 1)) == 0) {
+            if (ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr) {
+              void* aligned_host_ptr = (void*)(((unsigned long)host_ptr) & (~(page_size - 1)));
+              mem->offset = host_ptr - aligned_host_ptr;
               mem->is_userptr = 1;
-              mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", host_ptr, sz, 0);
+              size_t aligned_sz = ALIGN((mem->offset + sz), page_size);
+              mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", aligned_host_ptr, aligned_sz, 0);
             }
           }
         }
@@ -514,6 +521,8 @@ cl_mem_new_sub_buffer(cl_mem buffer,
   mem->ref_n = 1;
   mem->magic = CL_MAGIC_MEM_HEADER;
   mem->flags = flags;
+  mem->offset = buffer->offset;
+  mem->is_userptr = buffer->is_userptr;
   sub_buf->parent = (struct _cl_mem_buffer*)buffer;
 
   cl_mem_add_ref(buffer);
@@ -1061,16 +1070,19 @@ cl_mem_delete(cl_mem mem)
   }
 
   /* Remove it from the list */
-  assert(mem->ctx);
-  pthread_mutex_lock(&mem->ctx->buffer_lock);
-    if (mem->prev)
-      mem->prev->next = mem->next;
-    if (mem->next)
-      mem->next->prev = mem->prev;
-    if (mem->ctx->buffers == mem)
-      mem->ctx->buffers = mem->next;
-  pthread_mutex_unlock(&mem->ctx->buffer_lock);
-  cl_context_delete(mem->ctx);
+  if (mem->ctx) {
+    pthread_mutex_lock(&mem->ctx->buffer_lock);
+      if (mem->prev)
+        mem->prev->next = mem->next;
+      if (mem->next)
+        mem->next->prev = mem->prev;
+      if (mem->ctx->buffers == mem)
+        mem->ctx->buffers = mem->next;
+    pthread_mutex_unlock(&mem->ctx->buffer_lock);
+    cl_context_delete(mem->ctx);
+  } else {
+    assert((mem->prev == 0) && (mem->next == 0));
+  }
 
   /* Someone still mapped, unmap */
   if(mem->map_ref > 0) {
@@ -1115,7 +1127,9 @@ cl_mem_delete(cl_mem mem)
     cl_buffer_unreference(mem->bo);
   }
 
-  if (mem->is_userptr && (mem->flags & CL_MEM_ALLOC_HOST_PTR))
+  if (mem->is_userptr &&
+      (mem->flags & CL_MEM_ALLOC_HOST_PTR) &&
+      (mem->type != CL_MEM_SUBBUFFER_TYPE))
     cl_free(mem->host_ptr);
 
   cl_free(mem);
@@ -1600,27 +1614,43 @@ cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image
       ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_TO_3D,
           cl_internal_copy_image_2d_to_3d_str, (size_t)cl_internal_copy_image_2d_to_3d_str_size, NULL);
     } else if(dst_image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+      extern char cl_internal_copy_image_2d_to_2d_array_str[];
+      extern size_t cl_internal_copy_image_2d_to_2d_array_str_size;
 
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_TO_2D_ARRAY,
+          cl_internal_copy_image_2d_to_2d_array_str, (size_t)cl_internal_copy_image_2d_to_2d_array_str_size, NULL);
     }
   } else if(src_image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
     if(dst_image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+      extern char cl_internal_copy_image_1d_array_to_1d_array_str[];
+      extern size_t cl_internal_copy_image_1d_array_to_1d_array_str_size;
 
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_1D_ARRAY_TO_1D_ARRAY,
+          cl_internal_copy_image_1d_array_to_1d_array_str,
+          (size_t)cl_internal_copy_image_1d_array_to_1d_array_str_size, NULL);
     }
   } else if(src_image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
     if(dst_image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+      extern char cl_internal_copy_image_2d_array_to_2d_array_str[];
+      extern size_t cl_internal_copy_image_2d_array_to_2d_array_str_size;
 
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_ARRAY_TO_2D_ARRAY,
+          cl_internal_copy_image_2d_array_to_2d_array_str,
+          (size_t)cl_internal_copy_image_2d_array_to_2d_array_str_size, NULL);
     } else if(dst_image->image_type == CL_MEM_OBJECT_IMAGE2D) {
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      extern char cl_internal_copy_image_2d_array_to_2d_str[];
+      extern size_t cl_internal_copy_image_2d_array_to_2d_str_size;
+
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_ARRAY_TO_2D,
+          cl_internal_copy_image_2d_array_to_2d_str,
+          (size_t)cl_internal_copy_image_2d_array_to_2d_str_size, NULL);
     } else if(dst_image->image_type == CL_MEM_OBJECT_IMAGE3D) {
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      extern char cl_internal_copy_image_2d_array_to_3d_str[];
+      extern size_t cl_internal_copy_image_2d_array_to_3d_str_size;
+
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_ARRAY_TO_3D,
+          cl_internal_copy_image_2d_array_to_3d_str,
+          (size_t)cl_internal_copy_image_2d_array_to_3d_str_size, NULL);
     }
   } else if(src_image->image_type == CL_MEM_OBJECT_IMAGE3D) {
     if(dst_image->image_type == CL_MEM_OBJECT_IMAGE2D) {
@@ -1636,8 +1666,11 @@ cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image
       ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_3D_TO_3D,
           cl_internal_copy_image_3d_to_3d_str, (size_t)cl_internal_copy_image_3d_to_3d_str_size, NULL);
     } else if(dst_image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
-      cl_mem_copy_image_to_image(dst_origin, src_origin, region, dst_image, src_image);
-      return CL_SUCCESS;
+      extern char cl_internal_copy_image_3d_to_2d_array_str[];
+      extern size_t cl_internal_copy_image_3d_to_2d_array_str_size;
+
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_3D_TO_2D_ARRAY,
+          cl_internal_copy_image_3d_to_2d_array_str, (size_t)cl_internal_copy_image_3d_to_2d_array_str_size, NULL);
     }
   }
 
@@ -1679,6 +1712,10 @@ cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image,
   uint32_t intel_fmt, bpp;
   cl_image_format fmt;
   size_t origin0, region0;
+  size_t kn_dst_offset;
+  int align16 = 0;
+  size_t align_size = 1;
+  size_t w_saved;
 
   if(region[1] == 1) local_sz[1] = 1;
   if(region[2] == 1) local_sz[2] = 1;
@@ -1689,24 +1726,48 @@ cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image,
   /* We use one kernel to copy the data. The kernel is lazily created. */
   assert(image->base.ctx == buffer->ctx);
 
-  fmt.image_channel_order = CL_R;
-  fmt.image_channel_data_type = CL_UNSIGNED_INT8;
   intel_fmt = image->intel_fmt;
   bpp = image->bpp;
-  image->intel_fmt = cl_image_get_intel_format(&fmt);
-  image->w = image->w * image->bpp;
-  image->bpp = 1;
+  w_saved = image->w;
   region0 = region[0] * bpp;
-  origin0 = src_origin[0] * bpp;
+  kn_dst_offset = dst_offset;
+  if((image->image_type == CL_MEM_OBJECT_IMAGE2D) && ((image->w * image->bpp) % 16 == 0) &&
+      ((src_origin[0] * bpp) % 16 == 0) && (region0 % 16 == 0) && (dst_offset % 16 == 0)){
+    fmt.image_channel_order = CL_RGBA;
+    fmt.image_channel_data_type = CL_UNSIGNED_INT32;
+    align16 = 1;
+    align_size = 16;
+  }
+  else{
+    fmt.image_channel_order = CL_R;
+    fmt.image_channel_data_type = CL_UNSIGNED_INT8;
+    align_size = 1;
+  }
+  image->intel_fmt = cl_image_get_intel_format(&fmt);
+  image->w = (image->w * image->bpp) / align_size;
+  image->bpp = align_size;
+  region0 = (region[0] * bpp) / align_size;
+  origin0 = (src_origin[0] * bpp) / align_size;
+  kn_dst_offset /= align_size;
   global_sz[0] = ((region0 + local_sz[0] - 1) / local_sz[0]) * local_sz[0];
 
   /* setup the kernel and run. */
   if(image->image_type == CL_MEM_OBJECT_IMAGE2D) {
+    if(align16){
+      extern char cl_internal_copy_image_2d_to_buffer_align16_str[];
+      extern size_t cl_internal_copy_image_2d_to_buffer_align16_str_size;
+
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_TO_BUFFER_ALIGN16,
+                cl_internal_copy_image_2d_to_buffer_align16_str,
+                (size_t)cl_internal_copy_image_2d_to_buffer_align16_str_size, NULL);
+    }
+    else{
       extern char cl_internal_copy_image_2d_to_buffer_str[];
       extern size_t cl_internal_copy_image_2d_to_buffer_str_size;
 
       ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_IMAGE_2D_TO_BUFFER,
           cl_internal_copy_image_2d_to_buffer_str, (size_t)cl_internal_copy_image_2d_to_buffer_str_size, NULL);
+    }
   }else if(image->image_type == CL_MEM_OBJECT_IMAGE3D) {
     extern char cl_internal_copy_image_3d_to_buffer_str[];
     extern size_t cl_internal_copy_image_3d_to_buffer_str_size;
@@ -1728,7 +1789,7 @@ cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image,
   cl_kernel_set_arg(ker, 5, sizeof(cl_int), &origin0);
   cl_kernel_set_arg(ker, 6, sizeof(cl_int), &src_origin[1]);
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &src_origin[2]);
-  cl_kernel_set_arg(ker, 8, sizeof(cl_int), &dst_offset);
+  cl_kernel_set_arg(ker, 8, sizeof(cl_int), &kn_dst_offset);
 
   ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
 
@@ -1736,7 +1797,7 @@ fail:
 
   image->intel_fmt = intel_fmt;
   image->bpp = bpp;
-  image->w = image->w / bpp;
+  image->w = w_saved;
 
   return ret;
 }
@@ -1853,6 +1914,10 @@ cl_mem_unmap_gtt(cl_mem mem)
 LOCAL void*
 cl_mem_map_auto(cl_mem mem, int write)
 {
+  //if mem is not created from userptr, the offset should be always zero.
+  if (!mem->is_userptr)
+    assert(mem->offset == 0);
+
   if (IS_IMAGE(mem) && cl_mem_image(mem)->tiling != CL_NO_TILE)
     return cl_mem_map_gtt(mem);
   else {
