@@ -1,6 +1,7 @@
-beignet (1.0.1-4) UNRELEASED; urgency=medium
+beignet (1.0.2-1) UNRELEASED; urgency=medium
 
   [ Andreas Beckmann ]
+  * New upstream release.
   * Ignore git submodule definitions while importing upstream tarballs.
 
   [ Rebecca N. Palmer ]
@@ -8,7 +9,7 @@ beignet (1.0.1-4) UNRELEASED; urgency=medium
   * Enable building on hurd-i386 and x32.
   * Fix FTBFS on kfreebsd-*.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 07 Mar 2015 22:17:11 +0000
+ -- Andreas Beckmann <anbe@debian.org>  Tue, 17 Mar 2015 23:29:43 +0100
 
 beignet (1.0.1-3) experimental; urgency=medium
 
