@@ -8,12 +8,12 @@
 # LLVM_FOUND       - True if llvm found.
 if (LLVM_INSTALL_DIR)
   find_program(LLVM_CONFIG_EXECUTABLE
-               NAMES llvm-config-33 llvm-config-3.3 llvm-config-35 llvm-config-3.5 llvm-config-34 llvm-config-3.4 llvm-config
+               NAMES llvm-config-35 llvm-config-3.5 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
                DOC "llvm-config executable"
                PATHS ${LLVM_INSTALL_DIR} NO_DEFAULT_PATH)
 else (LLVM_INSTALL_DIR)
   find_program(LLVM_CONFIG_EXECUTABLE
-               NAMES llvm-config-33 llvm-config-3.3 llvm-config-35 llvm-config-3.5 llvm-config-34 llvm-config-3.4 llvm-config
+               NAMES llvm-config-35 llvm-config-3.5 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
                DOC "llvm-config executable")
 endif (LLVM_INSTALL_DIR)
 
@@ -22,6 +22,11 @@ if (LLVM_CONFIG_EXECUTABLE)
 else (LLVM_CONFIG_EXECUTABLE)
   message(FATAL_ERROR "Could NOT find LLVM executable, please add -DLLVM_INSTALL_DIR=/path/to/llvm-config/ in cmake command")
 endif (LLVM_CONFIG_EXECUTABLE)
+
+SET(LLVM_STABLE_VERSION_MAJOR "3")
+SET(LLVM_STABLE_VERSION_MINOR "5")
+SET(LLVM_STABLE_VERSION_NODOT "${LLVM_STABLE_VERSION_MAJOR}${LLVM_STABLE_VERSION_MINOR}")
+SET(LLVM_STABLE_VERSION "${LLVM_STABLE_VERSION_MAJOR}.${LLVM_STABLE_VERSION_MINOR}")
 
 if (LLVM_FIND_VERSION_MAJOR AND LLVM_FIND_VERSION_MINOR)
   SET(LLVM_FIND_VERSION_NODOT "${LLVM_FIND_VERSION_MAJOR}${LLVM_FIND_VERSION_MINOR}")
@@ -33,11 +38,12 @@ if (LLVM_FIND_VERSION_MAJOR AND LLVM_FIND_VERSION_MINOR)
   if (LLVM_VERSION_NODOT VERSION_LESS LLVM_FIND_VERSION_NODOT)
     message(FATAL_ERROR "imcompatible LLVM version ${LLVM_VERSION} required ${LLVM_FIND_VERSION}")
   else (LLVM_VERSION_NODOT VERSION_LESS LLVM_FIND_VERSION_NODOT)
-    if (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_FIND_VERSION_NODOT)
-      message(STATUS "find stable LLVM version ${LLVM_VERSION}")
-    else (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_FIND_VERSION_NODOT)
-      message(STATUS "find unstable LLVM version ${LLVM_VERSION}")
-    endif (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_FIND_VERSION_NODOT)
+    if (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_STABLE_VERSION_NODOT)
+      message(STATUS "Found stable LLVM version ${LLVM_VERSION}")
+    else (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_STABLE_VERSION_NODOT)
+      message(STATUS "\tWarning: found unstable LLVM version ${LLVM_VERSION}")
+      message(STATUS "\tWarning: Stable version is ${LLVM_STABLE_VERSION}")
+    endif (LLVM_VERSION_NODOT VERSION_EQUAL LLVM_STABLE_VERSION_NODOT)
     add_definitions("-DLLVM_${LLVM_VERSION_NODOT}")
   endif (LLVM_VERSION_NODOT VERSION_LESS LLVM_FIND_VERSION_NODOT)
 endif (LLVM_FIND_VERSION_MAJOR AND LLVM_FIND_VERSION_MINOR)

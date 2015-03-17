@@ -100,7 +100,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/ConstantsScanner.h"
-#include "llvm/Analysis/FindUsedTypes.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/Passes.h"
@@ -571,8 +570,6 @@ namespace gbe
     INLINE void newRegister(Value *value, Value *key = NULL, bool uniform = false);
     /*! get the register for a llvm::Constant */
     ir::Register getConstantRegister(Constant *c, uint32_t index = 0);
-    /*! get constant pointer */
-    ir::Register getConstantPointerRegister(ConstantExpr *ce, uint32_t index = 0);
     /*! Return a valid register from an operand (can use LOADI to make one) */
     INLINE ir::Register getRegister(Value *value, uint32_t index = 0);
     /*! Create a new immediate from a constant */
@@ -624,7 +621,7 @@ namespace gbe
 #undef DECL_VISIT_FN
 
     // Emit unary instructions from gen native function
-    void emitUnaryCallInst(CallInst &I, CallSite &CS, ir::Opcode opcode);
+    void emitUnaryCallInst(CallInst &I, CallSite &CS, ir::Opcode opcode, ir::Type = ir::TYPE_FLOAT);
     // Emit unary instructions from gen native function
     void emitAtomicInst(CallInst &I, CallSite &CS, ir::AtomicOps opcode);
 
@@ -652,6 +649,8 @@ namespace gbe
                   Value *llvmValue, const ir::Register ptr,
                   const ir::AddressSpace addrSpace, Type * elemType, bool isLoad, ir::BTI bti,
                   bool dwAligned);
+    // handle load of dword/qword with unaligned address
+    void emitUnalignedDQLoadStore(Value *llvmPtr, Value *llvmValues, ir::AddressSpace addrSpace, ir::BTI &binding, bool isLoad, bool dwAligned);
     void visitInstruction(Instruction &I) {NOT_SUPPORTED;}
     private:
       ir::ImmediateIndex processConstantImmIndexImpl(Constant *CPV, int32_t index = 0u);
@@ -1043,150 +1042,7 @@ namespace gbe
   ir::ImmediateIndex GenWriter::processConstantImmIndex(Constant *CPV, int32_t index) {
     if (dyn_cast<ConstantExpr>(CPV) == NULL)
       return processConstantImmIndexImpl(CPV, index);
-
-    if (dyn_cast<ConstantExpr>(CPV)) {
-      ConstantExpr *ce = dyn_cast<ConstantExpr>(CPV);
-
-      if (!isScalarType(ce->getType())) {
-        VectorType *vecType = cast<VectorType>(ce->getType());
-        GBE_ASSERT(ce->getOpcode() == Instruction::BitCast);
-        GBE_ASSERT(isScalarType(vecType->getElementType()));
-        ir::Type elemType = getType(ctx, vecType->getElementType());
-
-        const ir::ImmediateIndex immIndex = processConstantImmIndex(ce->getOperand(0), -1);
-        const ir::Immediate imm = ctx.getImmediate(immIndex);
-        GBE_ASSERT(vecType->getNumElements() == imm.getElemNum() &&
-                   getTypeByteSize(unit, vecType->getElementType()) == imm.getTypeSize());
-        return ctx.processImm(ir::IMM_BITCAST, immIndex, elemType);
-      }
-      ir::Type type = getType(ctx, ce->getType());
-      switch (ce->getOpcode()) {
-        default:
-          ce->dump();
-          GBE_ASSERT(0 && "unsupported ce opcode.\n");
-        case Instruction::FPTrunc:
-        case Instruction::Trunc:
-        {
-          const ir::ImmediateIndex immIndex = processConstantImmIndex(ce->getOperand(0), -1);
-          return ctx.processImm(ir::IMM_TRUNC, immIndex, type);
-        }
-        case Instruction::BitCast:
-        {
-          const ir::ImmediateIndex immIndex = processConstantImmIndex(ce->getOperand(0), -1);
-          if (type == ir::TYPE_LARGE_INT)
-            return immIndex;
-          return ctx.processImm(ir::IMM_BITCAST, immIndex, type);
-        }
-        case Instruction::FPToUI:
-        case Instruction::FPToSI:
-        case Instruction::SIToFP:
-        case Instruction::UIToFP:
-        case Instruction::SExt:
-        case Instruction::ZExt:
-        case Instruction::FPExt:
-        {
-          const ir::ImmediateIndex immIndex = processConstantImmIndex(ce->getOperand(0), -1);
-          switch (ce->getOpcode()) {
-            default:
-              GBE_ASSERT(0);
-            case Instruction::FPToUI: return ctx.processImm(ir::IMM_FPTOUI, immIndex, type);
-            case Instruction::FPToSI: return ctx.processImm(ir::IMM_FPTOSI, immIndex, type);
-            case Instruction::SIToFP: return ctx.processImm(ir::IMM_SITOFP, immIndex, type);
-            case Instruction::UIToFP: return ctx.processImm(ir::IMM_UITOFP, immIndex, type);
-            case Instruction::SExt:  return ctx.processImm(ir::IMM_SEXT, immIndex, type);
-            case Instruction::ZExt:  return ctx.processImm(ir::IMM_ZEXT, immIndex, type);
-            case Instruction::FPExt: return ctx.processImm(ir::IMM_FPEXT, immIndex, type);
-          }
-        }
-
-        case Instruction::ExtractElement:
-        case Instruction::FCmp:
-        case Instruction::ICmp:
-        case Instruction::FAdd:
-        case Instruction::Add:
-        case Instruction::Sub:
-        case Instruction::FSub:
-        case Instruction::Mul:
-        case Instruction::FMul:
-        case Instruction::SDiv:
-        case Instruction::UDiv:
-        case Instruction::FDiv:
-        case Instruction::SRem:
-        case Instruction::FRem:
-        case Instruction::Shl:
-        case Instruction::AShr:
-        case Instruction::LShr:
-        case Instruction::And:
-        case Instruction::Or:
-        case Instruction::Xor: {
-          const ir::ImmediateIndex lhs  = processConstantImmIndex(ce->getOperand(0), -1);
-          const ir::ImmediateIndex rhs  = processConstantImmIndex(ce->getOperand(1), -1);
-          switch (ce->getOpcode()) {
-          default:
-            //ce->dump();
-            GBE_ASSERTM(0, "Unsupported constant expression.\n");
-
-          case Instruction::ExtractElement:
-            return ctx.processImm(ir::IMM_EXTRACT, lhs, rhs, type);
-          case Instruction::Add:
-          case Instruction::FAdd:
-            return ctx.processImm(ir::IMM_ADD, lhs, rhs, type);
-          case Instruction::FSub:
-          case Instruction::Sub:
-            return ctx.processImm(ir::IMM_SUB, lhs, rhs, type);
-          case Instruction::Mul:
-          case Instruction::FMul:
-            return ctx.processImm(ir::IMM_MUL, lhs, rhs, type);
-          case Instruction::SDiv:
-          case Instruction::FDiv:
-            return ctx.processImm(ir::IMM_DIV, lhs, rhs, type);
-          case Instruction::SRem:
-          case Instruction::FRem:
-            return ctx.processImm(ir::IMM_REM, lhs, rhs, type);
-          case Instruction::Shl:
-            return ctx.processImm(ir::IMM_SHL, lhs, rhs, type);
-          case Instruction::AShr:
-            return ctx.processImm(ir::IMM_ASHR, lhs, rhs, type);
-          case Instruction::LShr:
-            return ctx.processImm(ir::IMM_LSHR, lhs, rhs, type);
-          case Instruction::And:
-            return ctx.processImm(ir::IMM_AND, lhs, rhs, type);
-          case Instruction::Or:
-            return ctx.processImm(ir::IMM_OR, lhs, rhs, type);
-          case Instruction::Xor:
-            return ctx.processImm(ir::IMM_XOR, lhs, rhs, type);
-          case Instruction::FCmp:
-          case Instruction::ICmp:
-            switch (ce->getPredicate()) {
-              default:
-                NOT_SUPPORTED;
-              case ICmpInst::ICMP_EQ:
-              case ICmpInst::FCMP_OEQ: return ctx.processImm(ir::IMM_OEQ, lhs, rhs, type);
-              case ICmpInst::ICMP_NE:
-              case ICmpInst::FCMP_ONE: return ctx.processImm(ir::IMM_ONE, lhs, rhs, type);
-              case ICmpInst::ICMP_ULE:
-              case ICmpInst::ICMP_SLE:
-              case ICmpInst::FCMP_OLE: return ctx.processImm(ir::IMM_OLE, lhs, rhs, type);
-              case ICmpInst::ICMP_UGE:
-              case ICmpInst::ICMP_SGE:
-              case ICmpInst::FCMP_OGE: return ctx.processImm(ir::IMM_OGE, lhs, rhs, type);
-              case ICmpInst::ICMP_ULT:
-              case ICmpInst::ICMP_SLT:
-              case ICmpInst::FCMP_OLT: return ctx.processImm(ir::IMM_OLT, lhs, rhs, type);
-              case ICmpInst::ICMP_UGT:
-              case ICmpInst::ICMP_SGT:
-              case ICmpInst::FCMP_OGT: return ctx.processImm(ir::IMM_OGT, lhs, rhs, type);
-              case ICmpInst::FCMP_ORD: return ctx.processImm(ir::IMM_ORD, lhs, rhs, type);
-              case ICmpInst::FCMP_TRUE:
-                Value *cv = ConstantInt::get(ce->getType(), 1);
-                return ctx.newImmediate(cv);
-            }
-            break;
-          }
-          break;
-        }
-      }
-    }
+    CPV->dump();
     GBE_ASSERT(0 && "unsupported constant.\n");
     return ctx.newImmediate((uint32_t)0);
   }
@@ -1230,64 +1086,6 @@ namespace gbe
     };
   }
 
-  ir::Register GenWriter::getConstantPointerRegister(ConstantExpr *expr, uint32_t elemID) {
-    Value* val = expr->getOperand(0);
-
-    if (expr->isCast()) {
-      ir::Register pointer_reg;
-      if(isa<ConstantExpr>(val)) {
-        // try to get the real pointer register, for case like:
-        // store i64 ptrtoint (i8 addrspace(3)* getelementptr inbounds ...
-        // in which ptrtoint and getelementptr are ConstantExpr.
-        pointer_reg = getConstantPointerRegister(dyn_cast<ConstantExpr>(val), elemID);
-      } else {
-        pointer_reg = regTranslator.getScalar(val, elemID);
-      }
-      // if ptrToInt request another type other than 32bit, convert as requested
-      ir::Type dstType = getType(ctx, expr->getType());
-      ir::Type srcType = getType(ctx, val->getType());
-      if(srcType != dstType && dstType != ir::TYPE_S32) {
-        ir::Register tmp = ctx.reg(getFamily(dstType));
-        ctx.CVT(dstType, srcType, tmp, pointer_reg);
-        return tmp;
-      }
-      return pointer_reg;
-    }
-    else if (expr->getOpcode() == Instruction::GetElementPtr) {
-      uint32_t constantOffset = 0;
-
-      Value *pointer = val;
-      CompositeType* CompTy = cast<CompositeType>(pointer->getType());
-      for(uint32_t op=1; op<expr->getNumOperands(); ++op) {
-        int32_t TypeIndex;
-        ConstantInt* ConstOP = dyn_cast<ConstantInt>(expr->getOperand(op));
-        if (ConstOP == NULL)
-          goto error;
-        TypeIndex = ConstOP->getZExtValue();
-        GBE_ASSERT(TypeIndex >= 0);
-        constantOffset += getGEPConstOffset(unit, CompTy, TypeIndex);
-        CompTy = dyn_cast<CompositeType>(CompTy->getTypeAtIndex(TypeIndex));
-      }
-
-      ir::Register pointer_reg;
-      if(isa<ConstantExpr>(pointer))
-        pointer_reg = getConstantPointerRegister(dyn_cast<ConstantExpr>(pointer), elemID);
-      else
-        pointer_reg = regTranslator.getScalar(pointer, elemID);
-
-      ir::Register offset_reg = ctx.reg(ir::RegisterFamily::FAMILY_DWORD);
-      ctx.LOADI(ir::Type::TYPE_S32, offset_reg, ctx.newIntegerImmediate(constantOffset, ir::Type::TYPE_S32));
-      ir::Register reg = ctx.reg(ir::RegisterFamily::FAMILY_DWORD);
-      ctx.ADD(ir::Type::TYPE_S32, reg, pointer_reg, offset_reg);
-      return reg;
-    }
-
-error:
-    expr->dump();
-    GBE_ASSERT(0 && "Unsupported constant expression");
-    return regTranslator.getScalar(val, elemID);
-  }
-
   ir::Register GenWriter::getConstantRegister(Constant *c, uint32_t elemID) {
     GBE_ASSERT(c != NULL);
     if(isa<GlobalValue>(c)) {
@@ -1308,15 +1106,6 @@ error:
       }
       ctx.LOADI(dstType, reg, immIndex);
       return reg;
-    }
-
-    if(isa<ConstantExpr>(c)) {
-      // Check whether this is a constant drived from a pointer.
-      Constant *itC = c;
-      while(isa<ConstantExpr>(itC))
-        itC = dyn_cast<ConstantExpr>(itC)->getOperand(0);
-      if (itC->getType()->isPointerTy())
-        return getConstantPointerRegister(dyn_cast<ConstantExpr>(c), elemID);
     }
 
     const ir::ImmediateIndex immIndex = this->newImmediate(c, elemID);
@@ -1467,7 +1256,12 @@ error:
     /* First find the meta data belong to this function. */
     for(uint i = 0; i < clKernelMetaDatas->getNumOperands(); i++) {
       node = clKernelMetaDatas->getOperand(i);
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
       if (node->getOperand(0) == &F) break;
+#else
+      auto *V = cast<ValueAsMetadata>(node->getOperand(0));
+      if (V && V->getValue() == &F) break;
+#endif
       node = NULL;
     }
 
@@ -1484,9 +1278,15 @@ error:
 
       if (attrName->getString() == "reqd_work_group_size") {
         GBE_ASSERT(attrNode->getNumOperands() == 4);
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
         ConstantInt *x = dyn_cast<ConstantInt>(attrNode->getOperand(1));
         ConstantInt *y = dyn_cast<ConstantInt>(attrNode->getOperand(2));
         ConstantInt *z = dyn_cast<ConstantInt>(attrNode->getOperand(3));
+#else
+        ConstantInt *x = mdconst::extract<ConstantInt>(attrNode->getOperand(1));
+        ConstantInt *y = mdconst::extract<ConstantInt>(attrNode->getOperand(2));
+        ConstantInt *z = mdconst::extract<ConstantInt>(attrNode->getOperand(3));
+#endif
         GBE_ASSERT(x && y && z);
         reqd_wg_sz[0] = x->getZExtValue();
         reqd_wg_sz[1] = y->getZExtValue();
@@ -1521,9 +1321,15 @@ error:
         functionAttributes += " ";
       } else if (attrName->getString() == "work_group_size_hint") {
         GBE_ASSERT(attrNode->getNumOperands() == 4);
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
         ConstantInt *x = dyn_cast<ConstantInt>(attrNode->getOperand(1));
         ConstantInt *y = dyn_cast<ConstantInt>(attrNode->getOperand(2));
         ConstantInt *z = dyn_cast<ConstantInt>(attrNode->getOperand(3));
+#else
+        ConstantInt *x = mdconst::extract<ConstantInt>(attrNode->getOperand(1));
+        ConstantInt *y = mdconst::extract<ConstantInt>(attrNode->getOperand(2));
+        ConstantInt *z = mdconst::extract<ConstantInt>(attrNode->getOperand(3));
+#endif
         GBE_ASSERT(x && y && z);
         hint_wg_sz[0] = x->getZExtValue();
         hint_wg_sz[1] = y->getZExtValue();
@@ -1561,8 +1367,11 @@ error:
       for (; I != E; ++I, ++argID) {
         const std::string &argName = I->getName().str();
         Type *type = I->getType();
-
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
         llvmInfo.addrSpace = (cast<ConstantInt>(addrSpaceNode->getOperand(1 + argID)))->getZExtValue();
+#else
+        llvmInfo.addrSpace = (mdconst::extract<ConstantInt>(addrSpaceNode->getOperand(1 + argID)))->getZExtValue();
+#endif
         llvmInfo.typeName = (cast<MDString>(typeNameNode->getOperand(1 + argID)))->getString();
         llvmInfo.accessQual = (cast<MDString>(accessQualNode->getOperand(1 + argID)))->getString();
         llvmInfo.typeQual = (cast<MDString>(typeQualNode->getOperand(1 + argID)))->getString();
@@ -2212,9 +2021,11 @@ error:
       case CallingConv::PTX_Kernel:
 #else
       case CallingConv::C:
+      case CallingConv::Fast:
 #endif
         break;
-      default: GBE_ASSERTM(false, "Unsupported calling convention");
+      default:
+        GBE_ASSERTM(false, "Unsupported calling convention");
     }
 
     ctx.startFunction(F.getName());
@@ -2342,8 +2153,6 @@ error:
   }
 
   void GenWriter::emitICmpInst(ICmpInst &I) {
-    GBE_ASSERT(I.getOperand(0)->getType() != Type::getInt1Ty(I.getContext()));
-
     // Get the element type and the number of elements
     Type *operandType = I.getOperand(0)->getType();
     const ir::Type type = getType(ctx, operandType);
@@ -2477,12 +2286,12 @@ error:
       case Instruction::PtrToInt:
       case Instruction::IntToPtr:
       {
-        Constant *CPV = dyn_cast<Constant>(srcValue);
-        if (CPV == NULL) {
+        Type *dstType = dstValue->getType();
+        Type *srcType = srcValue->getType();
+
+        if (getTypeByteSize(unit, dstType) == getTypeByteSize(unit, srcType))
+        {
 #if GBE_DEBUG
-          Type *dstType = dstValue->getType();
-          Type *srcType = srcValue->getType();
-          GBE_ASSERT(getTypeByteSize(unit, dstType) == getTypeByteSize(unit, srcType));
 #endif /* GBE_DEBUG */
           regTranslator.newValueProxy(srcValue, dstValue);
         } else
@@ -2525,12 +2334,13 @@ error:
       {
         Value *dstValue = &I;
         Value *srcValue = I.getOperand(0);
-        Constant *CPV = dyn_cast<Constant>(srcValue);
-        if (CPV != NULL) {
-          const ir::ImmediateIndex index = ctx.newImmediate(CPV);
-          const ir::Immediate imm = ctx.getImmediate(index);
-          const ir::Register reg = this->getRegister(dstValue);
-          ctx.LOADI(imm.getType(), reg, index);
+        Type *dstType = dstValue->getType();
+        Type *srcType = srcValue->getType();
+
+        if (getTypeByteSize(unit, dstType) != getTypeByteSize(unit, srcType)) {
+          const ir::Register dst = this->getRegister(&I);
+          const ir::Register src = this->getRegister(srcValue);
+          ctx.CVT(getType(ctx, dstType), getType(ctx, srcType), dst, src);
         }
       }
       break;
@@ -2986,7 +2796,7 @@ error:
     };
   }
 
-  void GenWriter::emitUnaryCallInst(CallInst &I, CallSite &CS, ir::Opcode opcode) {
+  void GenWriter::emitUnaryCallInst(CallInst &I, CallSite &CS, ir::Opcode opcode, ir::Type type) {
     CallSite::arg_iterator AI = CS.arg_begin();
 #if GBE_DEBUG
     CallSite::arg_iterator AE = CS.arg_end();
@@ -2994,7 +2804,7 @@ error:
     GBE_ASSERT(AI != AE);
     const ir::Register src = this->getRegister(*AI);
     const ir::Register dst = this->getRegister(&I);
-    ctx.ALU1(opcode, ir::TYPE_FLOAT, dst, src);
+    ctx.ALU1(opcode, type, dst, src);
   }
 
   void GenWriter::emitAtomicInst(CallInst &I, CallSite &CS, ir::AtomicOps opcode) {
@@ -3229,7 +3039,7 @@ error:
           }
           case GEN_OCL_FBH: this->emitUnaryCallInst(I,CS,ir::OP_FBH); break;
           case GEN_OCL_FBL: this->emitUnaryCallInst(I,CS,ir::OP_FBL); break;
-          case GEN_OCL_CBIT: this->emitUnaryCallInst(I,CS,ir::OP_CBIT); break;
+          case GEN_OCL_CBIT: this->emitUnaryCallInst(I,CS,ir::OP_CBIT, getUnsignedType(ctx, (*AI)->getType())); break;
           case GEN_OCL_ABS:
           {
             const ir::Register src = this->getRegister(*AI);
@@ -3859,6 +3669,67 @@ error:
     }
     GBE_ASSERT(bti.count <= MAX_MIXED_POINTER);
   }
+  // handle load of dword/qword with unaligned address
+  void GenWriter::emitUnalignedDQLoadStore(Value *llvmPtr, Value *llvmValues, ir::AddressSpace addrSpace, ir::BTI &binding, bool isLoad, bool dwAligned)
+  {
+    Type *llvmType = llvmValues->getType();
+    const ir::Type type = getType(ctx, llvmType);
+    unsigned byteSize = getTypeByteSize(unit, llvmType);
+    const ir::Register ptr = this->getRegister(llvmPtr);
+
+    Type *elemType = llvmType;
+    unsigned elemNum = 1;
+    if (!isScalarType(llvmType)) {
+      VectorType *vectorType = cast<VectorType>(llvmType);
+      elemType = vectorType->getElementType();
+      elemNum = vectorType->getNumElements();
+    }
+
+    vector<ir::Register> tupleData;
+    for (uint32_t elemID = 0; elemID < elemNum; ++elemID) {
+      ir::Register reg;
+      if(regTranslator.isUndefConst(llvmValues, elemID)) {
+        Value *v = Constant::getNullValue(elemType);
+        reg = this->getRegister(v);
+      } else
+        reg = this->getRegister(llvmValues, elemID);
+
+      tupleData.push_back(reg);
+    }
+    const ir::Tuple tuple = ctx.arrayTuple(&tupleData[0], elemNum);
+
+    vector<ir::Register> byteTupleData;
+    for (uint32_t elemID = 0; elemID < byteSize; ++elemID) {
+      byteTupleData.push_back(ctx.reg(ir::FAMILY_BYTE));
+    }
+    const ir::Tuple byteTuple = ctx.arrayTuple(&byteTupleData[0], byteSize);
+
+    if (isLoad) {
+      ctx.LOAD(ir::TYPE_U8, byteTuple, ptr, addrSpace, byteSize, dwAligned, binding);
+      ctx.BITCAST(type, ir::TYPE_U8, tuple, byteTuple, elemNum, byteSize);
+    } else {
+      ctx.BITCAST(ir::TYPE_U8, type, byteTuple, tuple, byteSize, elemNum);
+      // FIXME: byte scatter does not handle correctly vector store, after fix that,
+      //        we can directly use on store instruction like:
+      //        ctx.STORE(ir::TYPE_U8, byteTuple, ptr, addrSpace, byteSize, dwAligned, binding);
+      const ir::RegisterFamily pointerFamily = ctx.getPointerFamily();
+      for (uint32_t elemID = 0; elemID < byteSize; elemID++) {
+        const ir::Register reg = byteTupleData[elemID];
+        ir::Register addr;
+        if (elemID == 0)
+          addr = ptr;
+        else {
+          const ir::Register offset = ctx.reg(pointerFamily);
+          ir::ImmediateIndex immIndex;
+          immIndex = ctx.newImmediate(int32_t(elemID));
+          addr = ctx.reg(pointerFamily);
+          ctx.LOADI(ir::TYPE_S32, offset, immIndex);
+          ctx.ADD(ir::TYPE_S32, addr, ptr, offset);
+        }
+       ctx.STORE(type, addr, addrSpace, dwAligned, binding, reg);
+      }
+    }
+  }
 
   extern int OCL_SIMD_WIDTH;
   template <bool isLoad, typename T>
@@ -3874,6 +3745,19 @@ error:
     ir::BTI binding;
     gatherBTI(&I, binding);
 
+    Type *scalarType = llvmType;
+    if (!isScalarType(llvmType)) {
+      VectorType *vectorType = cast<VectorType>(llvmType);
+      scalarType = vectorType->getElementType();
+    }
+
+    if (!dwAligned
+       && (scalarType == IntegerType::get(I.getContext(), 64)
+          || scalarType == IntegerType::get(I.getContext(), 32))
+       ) {
+      emitUnalignedDQLoadStore(llvmPtr, llvmValues, addrSpace, binding, isLoad, dwAligned);
+      return;
+    }
     // Scalar is easy. We neednot build register tuples
     if (isScalarType(llvmType) == true) {
       const ir::Type type = getType(ctx, llvmType);

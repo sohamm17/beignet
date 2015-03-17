@@ -33,12 +33,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/DataLayout.h"
 #endif  /* LLVM_VERSION_MINOR <= 2 */
-
-#if LLVM_VERSION_MINOR >= 5
-#include "llvm/Linker/Linker.h"
-#else
-#include "llvm/Linker.h"
-#endif
+#include "llvm-c/Linker.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/Support/raw_ostream.h"
@@ -253,9 +248,15 @@ namespace gbe {
     llvm::StringRef llvm_bin_str(binary_content);
     llvm::LLVMContext& c = llvm::getGlobalContext();
     llvm::SMDiagnostic Err;
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
+    std::unique_ptr<llvm::MemoryBuffer> memory_buffer = llvm::MemoryBuffer::getMemBuffer(llvm_bin_str, "llvm_bin_str");
+    acquireLLVMContextLock();
+    llvm::Module* module = llvm::parseIR(memory_buffer->getMemBufferRef(), Err, c).release();
+#else
     llvm::MemoryBuffer* memory_buffer = llvm::MemoryBuffer::getMemBuffer(llvm_bin_str, "llvm_bin_str");
     acquireLLVMContextLock();
     llvm::Module* module = llvm::ParseIR(memory_buffer, Err, c);
+#endif
     releaseLLVMContextLock();
     if(module == NULL){
       GBE_ASSERT(0);
@@ -371,23 +372,19 @@ namespace gbe {
   {
 #ifdef GBE_COMPILER_AVAILABLE
     using namespace gbe;
-    std::string errMsg;
+    char* errMsg;
     if(((GenProgram*)dst_program)->module == NULL){
       ((GenProgram*)dst_program)->module = llvm::CloneModule((llvm::Module*)((GenProgram*)src_program)->module);
       errSize = 0;
     }else{
       llvm::Module* src = (llvm::Module*)((GenProgram*)src_program)->module;
       llvm::Module* dst = (llvm::Module*)((GenProgram*)dst_program)->module;
-      llvm::Linker::LinkModules( dst,
-                                 src,
-                                 llvm::Linker::PreserveSource,
-                                 &errMsg);
-      if (errMsg.c_str() != NULL) {
+
+      if (LLVMLinkModules(wrap(dst), wrap(src), LLVMLinkerPreserveSource, &errMsg)) {
         if (err != NULL && errSize != NULL && stringSize > 0u) {
-          if(errMsg.length() < stringSize )
-            stringSize = errMsg.length();
-          strcpy(err, errMsg.c_str());
-          err[stringSize+1] = '\0';
+          strncpy(err, errMsg, stringSize-1);
+          err[stringSize-1] = '\0';
+          *errSize = strlen(err);
         }
       }
     }

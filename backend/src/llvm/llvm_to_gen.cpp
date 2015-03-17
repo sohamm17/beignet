@@ -80,7 +80,9 @@ namespace gbe
   {
     FunctionPassManager FPM(&mod);
 
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
+    FPM.add(new DataLayoutPass());
+#elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR == 5
     FPM.add(new DataLayoutPass(DL));
 #else
     FPM.add(new DataLayout(DL));
@@ -111,7 +113,9 @@ namespace gbe
   {
     llvm::PassManager MPM;
 
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
+    MPM.add(new DataLayoutPass());
+#elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR == 5
     MPM.add(new DataLayoutPass(DL));
 #else
     MPM.add(new DataLayout(DL));
@@ -230,7 +234,11 @@ namespace gbe
       cl_mod = reinterpret_cast<Module*>(const_cast<void*>(module));
     } else if (fileName){
       llvm::LLVMContext& c = llvm::getGlobalContext();
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
+      cl_mod = parseIRFile(fileName, Err, c).release();
+#else
       cl_mod = ParseIRFile(fileName, Err, c);
+#endif
     }
 
     if (!cl_mod) return false;
@@ -258,7 +266,9 @@ namespace gbe
     runFuntionPass(mod, libraryInfo, DL);
     runModulePass(mod, libraryInfo, DL, optLevel, strictMath);
     llvm::PassManager passes;
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
+    passes.add(new DataLayoutPass());
+#elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR == 5
     passes.add(new DataLayoutPass(DL));
 #else
     passes.add(new DataLayout(DL));
@@ -268,18 +278,23 @@ namespace gbe
     passes.add(createFunctionInliningPass(200000));
     passes.add(createScalarReplAggregatesPass(64, true, -1, -1, 64));
     passes.add(createLoadStoreOptimizationPass());
-    passes.add(createRemoveGEPPass(unit));
     passes.add(createConstantPropagationPass());
-    passes.add(createLowerSwitchPass());
     passes.add(createPromoteMemoryToRegisterPass());
     if(optLevel > 0)
-      passes.add(createGVNPass());                  // Remove redundancies
+      passes.add(createGVNPass());                 // Remove redundancies
     passes.add(createPrintfParserPass());
-    passes.add(createScalarizePass());        // Expand all vector ops
-    passes.add(createLegalizePass());
-    passes.add(createDeadInstEliminationPass());  // Remove simplified instructions
+    passes.add(createExpandConstantExprPass());    // expand ConstantExpr
+    passes.add(createScalarizePass());             // Expand all vector ops
+    passes.add(createExpandLargeIntegersPass());   // legalize large integer operation
+    passes.add(createInstructionCombiningPass());  // legalize will generate some silly instructions
+    passes.add(createConstantPropagationPass());   // propagate constant after scalarize/legalize
+    passes.add(createExpandConstantExprPass());    // constant prop may generate ConstantExpr
+    passes.add(createPromoteIntegersPass());       // align integer size to power of two
+    passes.add(createRemoveGEPPass(unit));         // Constant prop may generate gep
+    passes.add(createDeadInstEliminationPass());   // Remove simplified instructions
     passes.add(createCFGSimplificationPass());     // Merge & remove BBs
-    passes.add(createScalarizePass());        // Expand all vector ops
+    passes.add(createLowerSwitchPass());           // simplify cfg will generate switch-case instruction
+    passes.add(createScalarizePass());             // Expand all vector ops
 
     if(OCL_OUTPUT_CFG)
       passes.add(createCFGPrinterPass());

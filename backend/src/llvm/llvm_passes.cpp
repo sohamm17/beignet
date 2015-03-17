@@ -59,7 +59,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/ConstantsScanner.h"
-#include "llvm/Analysis/FindUsedTypes.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/Passes.h"
@@ -119,7 +118,11 @@ namespace gbe
       uint32_t ops = md.getNumOperands();
       for(uint32_t x = 0; x < ops; x++) {
         MDNode* node = md.getOperand(x);
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
         Value * op = node->getOperand(0);
+#else
+        Value * op = cast<ValueAsMetadata>(node->getOperand(0))->getValue();
+#endif
         if(op == &F) bKernel = true;
       }
     }
@@ -343,9 +346,11 @@ namespace gbe
           }
         }
 
-        BinaryOperator* tmpMul = 
-          BinaryOperator::Create(Instruction::Mul, newConstSize, operand,
-              "", GEPInst);
+        Value* tmpMul = operand;
+        if (size != 1) {
+          tmpMul = BinaryOperator::Create(Instruction::Mul, newConstSize, operand,
+                                         "", GEPInst);
+        }
         currentAddrInst = 
           BinaryOperator::Create(Instruction::Add, currentAddrInst, tmpMul,
               "", GEPInst);
@@ -355,14 +360,16 @@ namespace gbe
       CompTy = dyn_cast<CompositeType>(CompTy->getTypeAtIndex(TypeIndex));
     }
 
-    //insert addition of new offset before GEPInst
-    Constant* newConstOffset = 
-      ConstantInt::get(IntegerType::get(GEPInst->getContext(), 
-            ptrSize),
-          constantOffset);
-    currentAddrInst = 
-      BinaryOperator::Create(Instruction::Add, currentAddrInst, 
-          newConstOffset, "", GEPInst);
+    //insert addition of new offset before GEPInst when it is not zero
+    if (constantOffset != 0) {
+      Constant* newConstOffset =
+        ConstantInt::get(IntegerType::get(GEPInst->getContext(),
+              ptrSize),
+            constantOffset);
+      currentAddrInst =
+        BinaryOperator::Create(Instruction::Add, currentAddrInst,
+            newConstOffset, "", GEPInst);
+    }
 
     //convert offset to ptr type (nop)
     IntToPtrInst* intToPtrInst = 

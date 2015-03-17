@@ -115,7 +115,7 @@ namespace gbe
   uint32_t getGenType(ir::Type type) {
     using namespace ir;
     switch (type) {
-      case TYPE_BOOL: return GEN_TYPE_UW;
+      case TYPE_BOOL: return GEN_TYPE_W;
       case TYPE_S8: return GEN_TYPE_B;
       case TYPE_U8: return GEN_TYPE_UB;
       case TYPE_S16: return GEN_TYPE_W;
@@ -187,6 +187,20 @@ namespace gbe
            this->opcode == SEL_OP_BYTE_GATHER  ||
            this->opcode == SEL_OP_SAMPLE ||
            this->opcode == SEL_OP_DWORD_GATHER;
+  }
+
+  bool SelectionInstruction::modAcc(void) const {
+    return this->opcode == SEL_OP_I64SUB ||
+           this->opcode == SEL_OP_I64ADD ||
+           this->opcode == SEL_OP_MUL_HI ||
+           this->opcode == SEL_OP_HADD ||
+           this->opcode == SEL_OP_RHADD ||
+           this->opcode == SEL_OP_I64MUL ||
+           this->opcode == SEL_OP_I64_MUL_HI ||
+           this->opcode == SEL_OP_I64MADSAT ||
+           this->opcode == SEL_OP_I64DIV ||
+           this->opcode == SEL_OP_I64REM ||
+           this->opcode == SEL_OP_MACH;
   }
 
   bool SelectionInstruction::isWrite(void) const {
@@ -1839,7 +1853,7 @@ namespace gbe
       case TYPE_U8:  return GenRegister::immuw(imm.getIntegerValue() * sign);
       case TYPE_S8:  return GenRegister::immw((int8_t)imm.getIntegerValue() * sign);
       case TYPE_DOUBLE: return GenRegister::immdf(imm.getDoubleValue() * sign);
-      case TYPE_BOOL: return GenRegister::immuw(-imm.getIntegerValue());  //return 0xffff when true
+      case TYPE_BOOL: return GenRegister::immw((imm.getIntegerValue() == 0) ? 0 : -1);  //return 0xffff when true
       default: NOT_SUPPORTED; return GenRegister::immuw(0);
     }
   }
@@ -1939,10 +1953,14 @@ namespace gbe
   /*! Unary instruction patterns */
   DECL_PATTERN(UnaryInstruction)
   {
-    static ir::Type getType(const ir::Opcode opcode, const ir::Type insnType) {
+    static ir::Type getType(const ir::Opcode opcode, const ir::Type insnType, bool isSrc = false) {
+
+      if (opcode == ir::OP_CBIT)
+        return isSrc ? insnType : ir::TYPE_U32;
+
       if (insnType == ir::TYPE_S64 || insnType == ir::TYPE_U64 || insnType == ir::TYPE_S8 || insnType == ir::TYPE_U8)
         return insnType;
-      if (opcode == ir::OP_FBH || opcode == ir::OP_FBL || opcode == ir::OP_CBIT)
+      if (opcode == ir::OP_FBH || opcode == ir::OP_FBL)
         return ir::TYPE_U32;
       if (insnType == ir::TYPE_S16 || insnType == ir::TYPE_U16)
         return insnType;
@@ -1954,8 +1972,8 @@ namespace gbe
     INLINE bool emitOne(Selection::Opaque &sel, const ir::UnaryInstruction &insn, bool &markChildren) const {
       const ir::Opcode opcode = insn.getOpcode();
       const ir::Type insnType = insn.getType();
-      const GenRegister dst = sel.selReg(insn.getDst(0), getType(opcode, insnType));
-      const GenRegister src = sel.selReg(insn.getSrc(0), getType(opcode, insnType));
+      const GenRegister dst = sel.selReg(insn.getDst(0), getType(opcode, insnType, false));
+      const GenRegister src = sel.selReg(insn.getSrc(0), getType(opcode, insnType, true));
       sel.push();
         if (sel.isScalarReg(insn.getDst(0)) == true) {
           sel.curr.execWidth = 1;
