@@ -3,6 +3,7 @@ beignet (1.0.2-1) experimental; urgency=medium
   [ Andreas Beckmann ]
   * New upstream release.
   * Ignore git submodule definitions while importing upstream tarballs.
+  * Add licence information for unused libva convenience copy.
 
   [ Rebecca N. Palmer ]
   * Enable building on hurd-i386 and x32.
