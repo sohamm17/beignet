@@ -1,8 +1,0 @@
-beignet is currently compiled with these options:
-  -mfpmath=sse -msse2 -msse3 -mssse3 -msse4.1
-this may generate code failing with SIGILL on older CPUs not supporting these sse levels
-(needs verification on i386 and amd64 platforms)
-even though beignet will not support these ancient hardware anyway ...
-... it should not crash if the icd is loaded to check for platform support there
-
-maybe switch to more conservative compiler options for the the routines needed for testing platform support
