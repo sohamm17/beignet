@@ -8,6 +8,7 @@ beignet (1.0.2-1) UNRELEASED; urgency=medium
   * Enable building on hurd-i386 and x32.
   * Fix FTBFS on kfreebsd-*.
   * Drop patches applied upstream, refresh others.
+  * Drop no longer needed Utest-requires-deprecated-function-names.patch.
 
  -- Andreas Beckmann <anbe@debian.org>  Tue, 17 Mar 2015 23:29:43 +0100
 
