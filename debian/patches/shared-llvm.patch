@@ -1,0 +1,22 @@
+Description: Dynamically link to libllvm
+
+Trying to do libclang as well fails with many undefined symbols,
+probably due to #698247
+
+Author: Rebecca Palmer <rebecca_palmer@zoho.com>
+
+--- beignet-1.0.2.orig/CMake/FindLLVM.cmake
++++ beignet-1.0.2/CMake/FindLLVM.cmake
+@@ -93,11 +93,7 @@ execute_process(
+   OUTPUT_STRIP_TRAILING_WHITESPACE
+ )
+ 
+-execute_process(
+-  COMMAND ${LLVM_CONFIG_EXECUTABLE} --libs
+-  OUTPUT_VARIABLE LLVM_MODULE_LIBS
+-  OUTPUT_STRIP_TRAILING_WHITESPACE
+-)
++set(LLVM_MODULE_LIBS "-lLLVM-${LLVM_VERSION}")
+ 
+ if (LLVM_VERSION_NODOT VERSION_GREATER 34)
+ execute_process(

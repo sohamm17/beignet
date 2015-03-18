@@ -16,6 +16,7 @@ beignet (1.0.2-1) UNRELEASED; urgency=medium
   * Fix crash if /dev/dri/card0 is inaccessible.
   * Enable standard-compliant precision by default.
   * Simplify LLVM/Clang version selection.
+  * Dynamically link to libllvm.
 
  -- Andreas Beckmann <anbe@debian.org>  Tue, 17 Mar 2015 23:29:43 +0100
 

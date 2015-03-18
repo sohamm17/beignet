@@ -7,3 +7,4 @@ support-kfreebsd.patch
 reduce-notfound-output.patch
 fail-gracefully-no-hardware.patch
 default-to-full-precision.patch
+shared-llvm.patch
