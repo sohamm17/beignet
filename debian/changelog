@@ -11,6 +11,8 @@ beignet (1.0.2-1) UNRELEASED; urgency=medium
   * Drop no longer needed Utest-requires-deprecated-function-names.patch.
   * Stop using -msse*, to allow at least returning a useful error on
     old unsupported hardware.
+  * Give a single helpful error message, not many confusing ones,
+    on unsupported hardware.
 
  -- Andreas Beckmann <anbe@debian.org>  Tue, 17 Mar 2015 23:29:43 +0100
 

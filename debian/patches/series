@@ -4,3 +4,4 @@ Link-against-terminfo.patch
 Enable-test-debug.patch
 force-llvm-3.5.patch
 support-kfreebsd.patch
+reduce-notfound-output.patch
