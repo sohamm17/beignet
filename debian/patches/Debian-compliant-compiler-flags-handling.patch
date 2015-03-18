@@ -2,7 +2,6 @@ Description: Set compiler flags
 
 Respect CFLAGS,CXXFLAGS,LDFLAGS (security hardening etc.)
 Be verbose
-Use -Bsymbolic to avoid jumping into mesa's LLVM (#768185)
 
 Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
 --- a/CMakeLists.txt
@@ -13,9 +12,9 @@ Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
  
 -SET(CMAKE_VERBOSE_MAKEFILE "false")
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
- if (NOT LIB_INSTALL_DIR)
-   set (LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib")
-@@ -66,8 +65,8 @@ elseif (COMPILER STREQUAL "CLANG")
+ INCLUDE (GNUInstallDirs OPTIONAL)
+ # support old CMake without GNUInstallDirs
+@@ -79,8 +78,8 @@ elseif (COMPILER STREQUAL "CLANG")
  elseif (COMPILER STREQUAL "ICC")
    set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -wd2928 -Wall -fPIC -fstrict-aliasing -fp-model fast -msse4.1 -Wl,-E")
  endif ()
@@ -26,12 +25,4 @@ Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
  set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
  set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
  set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
-@@ -88,7 +87,7 @@ ELSE (USE_STANDALONE_GBE_COMPILER STREQU
- ENDIF (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
- 
- 
--set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${LLVM_LDFLAGS}")
-+set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic -Wl,--no-undefined ${LLVM_LDFLAGS}")
- 
- # XLib
- Find_Package(X11)
+
