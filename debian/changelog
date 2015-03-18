@@ -5,7 +5,6 @@ beignet (1.0.2-1) UNRELEASED; urgency=medium
   * Ignore git submodule definitions while importing upstream tarballs.
 
   [ Rebecca N. Palmer ]
-  * Make transitional dummy arch:all.
   * Enable building on hurd-i386 and x32.
   * Fix FTBFS on kfreebsd-*.
 
