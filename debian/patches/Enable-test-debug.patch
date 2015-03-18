@@ -201,7 +201,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  export OCL_GBE_PATH=@LOCAL_GBE_OBJECT_DIR@
  export OCL_INTERP_PATH=@LOCAL_INTERP_OBJECT_DIR@
 +obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
-+export OCL_STRICT_CONFORMANCE=1
++export OCL_STRICT_CONFORMANCE=0
 +obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
 --- a/utests/utest_generator.py
 +++ b/utests/utest_generator.py
