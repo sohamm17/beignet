@@ -1,0 +1,231 @@
+Description: Check drm_intel_gem_bo_context_exec return code
+
+runtime Enhance the error handling when flush gpgpu command queue.
+Beignet uses drm_intel_gem_bo_context_exec() to flush command queue to
+linux drm driver layer. We need to check the return value of that function,
+as it may fail when the application uses very large array.
+
+Origin: upstream http://lists.freedesktop.org/archives/beignet/2015-April/005491.html
+Bug-Debian: https://bugs.debian.org/781875
+
+diff --git a/src/cl_command_queue.c b/src/cl_command_queue.c
+index be6def1..da71fb7 100644
+--- a/src/cl_command_queue.c
++++ b/src/cl_command_queue.c
+@@ -216,14 +216,15 @@ error:
+   return err;
+ }
+ 
+-LOCAL void
++LOCAL int
+ cl_command_queue_flush_gpgpu(cl_command_queue queue, cl_gpgpu gpgpu)
+ {
+   size_t global_wk_sz[3];
+   size_t outbuf_sz = 0;
+   void* printf_info = cl_gpgpu_get_printf_info(gpgpu, global_wk_sz, &outbuf_sz);
+ 
+-  cl_gpgpu_flush(gpgpu);
++  if (cl_gpgpu_flush(gpgpu) < 0)
++    return CL_OUT_OF_RESOURCES;
+ 
+   if (printf_info && interp_get_printf_num(printf_info)) {
+     void *index_addr = cl_gpgpu_map_printf_buffer(gpgpu, 0);
+@@ -244,13 +245,15 @@ cl_command_queue_flush_gpgpu(cl_command_queue queue, cl_gpgpu gpgpu)
+     global_wk_sz[0] = global_wk_sz[1] = global_wk_sz[2] = 0;
+     cl_gpgpu_set_printf_info(gpgpu, NULL, global_wk_sz);
+   }
++  return CL_SUCCESS;
+ }
+ 
+ LOCAL cl_int
+ cl_command_queue_flush(cl_command_queue queue)
+ {
++  int err;
+   GET_QUEUE_THREAD_GPGPU(queue);
+-  cl_command_queue_flush_gpgpu(queue, gpgpu);
++  err = cl_command_queue_flush_gpgpu(queue, gpgpu);
+   // As we don't have a deadicate timer thread to take care the possible
+   // event which has a call back function registerred and the event will
+   // be released at the call back function, no other function will access
+@@ -258,10 +261,10 @@ cl_command_queue_flush(cl_command_queue queue)
+   // and all the corresponding buffers which is really bad.
+   if (queue->last_event && queue->last_event->user_cb)
+     cl_event_update_status(queue->last_event, 1);
+-  if (queue->current_event)
+-    cl_event_flush(queue->current_event);
++  if (queue->current_event && err == CL_SUCCESS)
++    err = cl_event_flush(queue->current_event);
+   cl_invalid_thread_gpgpu(queue);
+-  return CL_SUCCESS;
++  return err;
+ }
+ 
+ LOCAL cl_int
+diff --git a/src/cl_command_queue.h b/src/cl_command_queue.h
+index 47dae4a..91c941c 100644
+--- a/src/cl_command_queue.h
++++ b/src/cl_command_queue.h
+@@ -80,7 +80,7 @@ extern cl_int cl_command_queue_set_report_buffer(cl_command_queue, cl_mem);
+ extern cl_int cl_command_queue_flush(cl_command_queue);
+ 
+ /* Flush for the specified gpgpu */
+-extern void cl_command_queue_flush_gpgpu(cl_command_queue, cl_gpgpu);
++extern int cl_command_queue_flush_gpgpu(cl_command_queue, cl_gpgpu);
+ 
+ /* Wait for the completion of the command queue */
+ extern cl_int cl_command_queue_finish(cl_command_queue);
+diff --git a/src/cl_driver.h b/src/cl_driver.h
+index 3f54a27..b2510de 100644
+--- a/src/cl_driver.h
++++ b/src/cl_driver.h
+@@ -204,7 +204,7 @@ typedef void (cl_gpgpu_batch_end_cb)(cl_gpgpu, int32_t flush_mode);
+ extern cl_gpgpu_batch_end_cb *cl_gpgpu_batch_end;
+ 
+ /* Flush the command buffer */
+-typedef void (cl_gpgpu_flush_cb)(cl_gpgpu);
++typedef int (cl_gpgpu_flush_cb)(cl_gpgpu);
+ extern cl_gpgpu_flush_cb *cl_gpgpu_flush;
+ 
+ /* new a event for a batch buffer */
+diff --git a/src/cl_enqueue.c b/src/cl_enqueue.c
+index d51592c..e858d5e 100644
+--- a/src/cl_enqueue.c
++++ b/src/cl_enqueue.c
+@@ -471,8 +471,7 @@ cl_int cl_enqueue_handle(cl_event event, enqueue_data* data)
+     case EnqueueNDRangeKernel:
+     case EnqueueFillBuffer:
+     case EnqueueFillImage:
+-      cl_event_flush(event);
+-      return CL_SUCCESS;
++      return cl_event_flush(event);
+     case EnqueueNativeKernel:
+       return cl_enqueue_native_kernel(data);
+     case EnqueueMigrateMemObj:
+diff --git a/src/cl_event.c b/src/cl_event.c
+index bba14ba..b4734b2 100644
+--- a/src/cl_event.c
++++ b/src/cl_event.c
+@@ -46,16 +46,18 @@ cl_event_is_gpu_command_type(cl_command_type type)
+   }
+ }
+ 
+-void cl_event_flush(cl_event event)
++int cl_event_flush(cl_event event)
+ {
++  int err = CL_SUCCESS;
+   assert(event->gpgpu_event != NULL);
+   if (event->gpgpu) {
+-    cl_command_queue_flush_gpgpu(event->queue, event->gpgpu);
++    err = cl_command_queue_flush_gpgpu(event->queue, event->gpgpu);
+     cl_gpgpu_delete(event->gpgpu);
+     event->gpgpu = NULL;
+   }
+   cl_gpgpu_event_flush(event->gpgpu_event);
+   event->queue->last_event = event;
++  return err;
+ }
+ 
+ cl_event cl_event_new(cl_context ctx, cl_command_queue queue, cl_command_type type, cl_bool emplict)
+diff --git a/src/cl_event.h b/src/cl_event.h
+index 9bb2ac8..e3cd2b2 100644
+--- a/src/cl_event.h
++++ b/src/cl_event.h
+@@ -103,6 +103,6 @@ cl_int cl_event_insert_user_event(user_event** p_u_ev, cl_event event);
+ /* remove the user event */
+ cl_int cl_event_remove_user_event(user_event** p_u_ev, cl_event event);
+ /* flush the event's pending gpgpu batch buffer and notify driver this gpgpu event has been flushed. */
+-void cl_event_flush(cl_event event);
++cl_int cl_event_flush(cl_event event);
+ #endif /* __CL_EVENT_H__ */
+ 
+diff --git a/src/intel/intel_batchbuffer.c b/src/intel/intel_batchbuffer.c
+index dcc8d98..be104bb 100644
+--- a/src/intel/intel_batchbuffer.c
++++ b/src/intel/intel_batchbuffer.c
+@@ -52,6 +52,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <assert.h>
++#include <errno.h>
+ 
+ LOCAL int
+ intel_batchbuffer_reset(intel_batchbuffer_t *batch, size_t sz)
+@@ -102,14 +103,15 @@ intel_batchbuffer_terminate(intel_batchbuffer_t *batch)
+   batch->buffer = NULL;
+ }
+ 
+-LOCAL void
++LOCAL int
+ intel_batchbuffer_flush(intel_batchbuffer_t *batch)
+ {
+   uint32_t used = batch->ptr - batch->map;
+   int is_locked = batch->intel->locked;
++  int err = 0;
+ 
+   if (used == 0)
+-    return;
++    return 0;
+ 
+   if ((used & 4) == 0) {
+     *(uint32_t*) batch->ptr = 0;
+@@ -131,14 +133,15 @@ intel_batchbuffer_flush(intel_batchbuffer_t *batch)
+      * I915_EXEC_ENABLE_SLM when it drm accept the patch */
+     flag |= (1<<13);
+   }
+-  drm_intel_gem_bo_context_exec(batch->buffer, batch->intel->ctx, used, flag);
++  if (drm_intel_gem_bo_context_exec(batch->buffer, batch->intel->ctx, used, flag) < 0) {
++    fprintf(stderr, "drm_intel_gem_bo_context_exec() failed: %s\n", strerror(errno));
++    err = -1;
++  }
+ 
+   if (!is_locked)
+     intel_driver_unlock_hardware(batch->intel);
+ 
+-  // Can't release buffer here. gpgpu only can be delete only when the batch buffer is complete.
+-  // Remain the buffer for gpgpu delete check.
+-  //intel_batchbuffer_terminate(batch);
++  return err;
+ }
+ 
+ LOCAL void 
+diff --git a/src/intel/intel_batchbuffer.h b/src/intel/intel_batchbuffer.h
+index 0071be6..0544e9a 100644
+--- a/src/intel/intel_batchbuffer.h
++++ b/src/intel/intel_batchbuffer.h
+@@ -98,7 +98,7 @@ extern void intel_batchbuffer_emit_reloc(intel_batchbuffer_t*,
+                                          uint32_t delta);
+ extern void intel_batchbuffer_init(intel_batchbuffer_t*, struct intel_driver*);
+ extern void intel_batchbuffer_terminate(intel_batchbuffer_t*);
+-extern void intel_batchbuffer_flush(intel_batchbuffer_t*);
++extern int intel_batchbuffer_flush(intel_batchbuffer_t*);
+ extern int intel_batchbuffer_reset(intel_batchbuffer_t*, size_t sz);
+ 
+ static INLINE uint32_t
+diff --git a/src/intel/intel_gpgpu.c b/src/intel/intel_gpgpu.c
+index 177ac04..3bb494e 100644
+--- a/src/intel/intel_gpgpu.c
++++ b/src/intel/intel_gpgpu.c
+@@ -853,19 +853,12 @@ intel_gpgpu_batch_reset(intel_gpgpu_t *gpgpu, size_t sz)
+   return intel_batchbuffer_reset(gpgpu->batch, sz);
+ }
+ 
+-static void
+-intel_gpgpu_flush_batch_buffer(intel_batchbuffer_t *batch)
+-{
+-  assert(batch);
+-  intel_batchbuffer_flush(batch);
+-}
+-
+-static void
++static int
+ intel_gpgpu_flush(intel_gpgpu_t *gpgpu)
+ {
+   if (!gpgpu->batch || !gpgpu->batch->buffer)
+-    return;
+-  intel_gpgpu_flush_batch_buffer(gpgpu->batch);
++    return 0;
++  return intel_batchbuffer_flush(gpgpu->batch);
+   /* FIXME:
+      Remove old assert here for binded buffer offset 0 which
+      tried to guard possible NULL buffer pointer check in kernel, as
+
