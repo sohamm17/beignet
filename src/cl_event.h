@@ -78,8 +78,10 @@ cl_event cl_event_new(cl_context, cl_command_queue, cl_command_type, cl_bool);
 void cl_event_delete(cl_event);
 /* Add one more reference to this object */
 void cl_event_add_ref(cl_event);
-/* Rigister a user callback function for specific commond execution status */
+/* Register a user callback function for specific commond execution status */
 cl_int cl_event_set_callback(cl_event, cl_int, EVENT_NOTIFY, void *);
+/* Execute the event's callback if the event's status supersedes the callback's status. Free the callback if specified */
+void cl_event_call_callback(cl_event event, cl_int status, cl_bool free_cb);
 /* Check events wait list for enqueue commonds */
 cl_int cl_event_check_waitlist(cl_uint, const cl_event *, cl_event *, cl_context);
 /* Wait the all events in wait list complete */
@@ -101,6 +103,6 @@ cl_int cl_event_insert_user_event(user_event** p_u_ev, cl_event event);
 /* remove the user event */
 cl_int cl_event_remove_user_event(user_event** p_u_ev, cl_event event);
 /* flush the event's pending gpgpu batch buffer and notify driver this gpgpu event has been flushed. */
-void cl_event_flush(cl_event event);
+cl_int cl_event_flush(cl_event event);
 #endif /* __CL_EVENT_H__ */
 

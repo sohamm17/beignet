@@ -633,13 +633,71 @@ namespace gbe
                       SelectionDAG *dag0, SelectionDAG *dag1,
                       GenRegister &src0, GenRegister &src1,
                       ir::Type type, bool &inverse);
+
+    /* Get current block IP register according to label width. */
+    GenRegister getBlockIP() {
+      return ctx.isDWLabel() ? selReg(ir::ocl::dwblockip) : selReg(ir::ocl::blockip);
+    }
+
+    /* Get proper label immediate gen register from label value. */
+    GenRegister getLabelImmReg(uint32_t labelValue) {
+      return ctx.isDWLabel() ? GenRegister::immud(labelValue) : GenRegister::immuw(labelValue);
+    }
+
+    /* Get proper label immediate gen register from label. */
+    GenRegister getLabelImmReg(ir::LabelIndex label) {
+      return getLabelImmReg(label.value());
+    }
+
+    /* Set current label register to a label value. */
+    void setBlockIP(GenRegister blockip, uint32_t labelValue) {
+      if (!ctx.isDWLabel())
+        MOV(GenRegister::retype(blockip, GEN_TYPE_UW), GenRegister::immuw(labelValue));
+      else
+        MOV(GenRegister::retype(blockip, GEN_TYPE_UD), GenRegister::immud(labelValue));
+    }
+
+    /* Generate comparison instruction to compare block ip address and specified label register.*/
+    void cmpBlockIP(uint32_t cond,
+                    GenRegister blockip,
+                    GenRegister labelReg) {
+      if (!ctx.isDWLabel())
+        CMP(cond,
+            GenRegister::retype(blockip, GEN_TYPE_UW),
+            labelReg,
+            GenRegister::retype(GenRegister::null(),
+            GEN_TYPE_UW));
+      else
+        CMP(cond,
+            GenRegister::retype(blockip, GEN_TYPE_UD),
+            labelReg,
+            GenRegister::retype(GenRegister::null(),
+            GEN_TYPE_UD));
+    }
+
+    void cmpBlockIP(uint32_t cond,
+                    GenRegister blockip,
+                    uint32_t labelValue) {
+      if (!ctx.isDWLabel())
+        CMP(cond,
+            GenRegister::retype(blockip, GEN_TYPE_UW),
+            GenRegister::immuw(labelValue),
+            GenRegister::retype(GenRegister::null(),
+            GEN_TYPE_UW));
+      else
+        CMP(cond,
+            GenRegister::retype(blockip, GEN_TYPE_UD),
+            GenRegister::immud(labelValue),
+            GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+    }
+
     /*! Use custom allocators */
     GBE_CLASS(Opaque);
     friend class SelectionBlock;
     friend class SelectionInstruction;
   private:
     /*! Auxiliary label for if/endif. */ 
-    uint16_t currAuxLabel;
+    uint32_t currAuxLabel;
     bool bHas32X32Mul;
     INLINE ir::LabelIndex newAuxLabel()
     {
@@ -1020,7 +1078,7 @@ namespace gbe
 
   void Selection::Opaque::LABEL(ir::LabelIndex index) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_LABEL, 0, 0);
-    insn->index = uint16_t(index);
+    insn->index = index.value();
   }
 
   void Selection::Opaque::BARRIER(GenRegister src, GenRegister fence, uint32_t barrierType) {
@@ -1038,7 +1096,7 @@ namespace gbe
   int Selection::Opaque::JMPI(Reg src, ir::LabelIndex index, ir::LabelIndex origin) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_JMPI, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(index);
+    insn->index = index.value();
     insn->extra.longjmp = abs(index - origin) > 800;
     return insn->extra.longjmp ? 2 : 1;
   }
@@ -1046,28 +1104,28 @@ namespace gbe
   void Selection::Opaque::BRD(Reg src, ir::LabelIndex jip) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_BRD, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(jip);
+    insn->index = jip.value();
   }
 
   void Selection::Opaque::BRC(Reg src, ir::LabelIndex jip, ir::LabelIndex uip) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_BRC, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(jip);
-    insn->index1 = uint16_t(uip);
+    insn->index = jip.value();
+    insn->index1 = uip.value();
   }
 
   void Selection::Opaque::IF(Reg src, ir::LabelIndex jip, ir::LabelIndex uip) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_IF, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(jip);
-    insn->index1 = uint16_t(uip);
+    insn->index = jip.value();
+    insn->index1 = uip.value();
   }
 
   void Selection::Opaque::ELSE(Reg src, ir::LabelIndex jip, ir::LabelIndex elseLabel) {
 
     SelectionInstruction *insn = this->appendInsn(SEL_OP_ELSE, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(jip);
+    insn->index = jip.value();
     this->LABEL(elseLabel);
   }
 
@@ -1079,13 +1137,13 @@ namespace gbe
     this->LABEL(this->block->endifLabel);
     SelectionInstruction *insn = this->appendInsn(SEL_OP_ENDIF, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(this->block->endifLabel);
+    insn->index = this->block->endifLabel.value();
   }
 
   void Selection::Opaque::WHILE(Reg src, ir::LabelIndex jip) {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_WHILE, 0, 1);
     insn->src(0) = src;
-    insn->index = uint16_t(jip);
+    insn->index = jip.value();
   }
 
   void Selection::Opaque::CMP(uint32_t conditional, Reg src0, Reg src1, Reg dst) {
@@ -1687,7 +1745,7 @@ namespace gbe
         if (this->ctx.getIFENDIFFix() &&
             this->block->insnList.size() != 0 &&
             this->block->insnList.size() % 1000 == 0 &&
-            (uint16_t)this->block->endifLabel != 0) {
+            this->block->endifLabel.value() != 0) {
           ir::LabelIndex jip = this->block->endifLabel;
           this->ENDIF(GenRegister::immd(0), jip);
           this->push();
@@ -2001,7 +2059,7 @@ namespace gbe
                 if (sel.getRegisterFamily(insn.getDst(0)) == ir::FAMILY_BOOL &&
                     dag->isUsed) {
                 sel.curr.physicalFlag = 0;
-                sel.curr.flagIndex = (uint16_t)(insn.getDst(0));
+                sel.curr.flagIndex = insn.getDst(0).value();
                 sel.curr.modFlag = 1;
               }
               sel.MOV(dst, src);
@@ -2110,6 +2168,7 @@ namespace gbe
       GenRegister src0 = sel.selReg(insn.getSrc(0), type);
       GenRegister src1 = sel.selReg(insn.getSrc(1), type);
       const uint32_t simdWidth = sel.curr.execWidth;
+      const bool isUniform = simdWidth == 1;
       const RegisterFamily family = getFamily(type);
       uint32_t function = (op == OP_DIV)?
                           GEN_MATH_FUNCTION_INT_DIV_QUOTIENT :
@@ -2118,16 +2177,11 @@ namespace gbe
       //bytes and shorts must be converted to int for DIV and REM per GEN restriction
       if((family == FAMILY_WORD || family == FAMILY_BYTE)) {
         GenRegister tmp0, tmp1;
-        ir::Register reg = sel.reg(FAMILY_DWORD, simdWidth == 1);
-
-        tmp0 = GenRegister::udxgrf(simdWidth, reg);
-        tmp0 = GenRegister::retype(tmp0, GEN_TYPE_D);
+        ir::Register reg = sel.reg(FAMILY_DWORD, isUniform);
+        tmp0 = sel.selReg(reg, ir::TYPE_S32);
         sel.MOV(tmp0, src0);
-
-        tmp1 = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
-        tmp1 = GenRegister::retype(tmp1, GEN_TYPE_D);
+        tmp1 = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_S32);
         sel.MOV(tmp1, src1);
-
         sel.MATH(tmp0, function, tmp0, tmp1);
         GenRegister unpacked;
         if(family == FAMILY_WORD) {
@@ -2209,7 +2263,7 @@ namespace gbe
                    insn.getOpcode() == OP_OR ||
                    insn.getOpcode() == OP_XOR);
         sel.curr.physicalFlag = 0;
-        sel.curr.flagIndex = (uint16_t)(insn.getDst(0));
+        sel.curr.flagIndex = insn.getDst(0).value();
         sel.curr.modFlag = 1;
       }
 
@@ -2782,7 +2836,7 @@ namespace gbe
           if (!sel.isScalarReg(insn.getDst(0)) && sel.regDAG[insn.getDst(0)]->isUsed) {
             sel.curr.modFlag = 1;
             sel.curr.physicalFlag = 0;
-            sel.curr.flagIndex = (uint16_t) insn.getDst(0);
+            sel.curr.flagIndex = insn.getDst(0).value();
           }
           sel.MOV(dst, imm.getIntegerValue() ? GenRegister::immuw(0xffff) : GenRegister::immuw(0));
         break;
@@ -2899,10 +2953,10 @@ namespace gbe
     {
       using namespace ir;
       GBE_ASSERT(bti.count == 1);
-      const uint32_t simdWidth = sel.isScalarReg(insn.getValue(0)) ? 1 : sel.ctx.getSimdWidth();
+      const uint32_t isUniform = sel.isScalarReg(insn.getValue(0));
       GBE_ASSERT(insn.getValueNum() == 1);
 
-      if(simdWidth == 1) {
+      if(isUniform) {
         GenRegister dst = sel.selReg(insn.getValue(0), ir::TYPE_U32);
         sel.push();
           sel.curr.noMask = 1;
@@ -2913,7 +2967,7 @@ namespace gbe
 
       GenRegister dst = GenRegister::retype(sel.selReg(insn.getValue(0)), GEN_TYPE_F);
       // get dword based address
-      GenRegister addrDW = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+      GenRegister addrDW = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
       sel.push();
         if (sel.isScalarReg(addr.reg())) {
@@ -2946,26 +3000,27 @@ namespace gbe
                         const uint32_t elemSize,
                         GenRegister address,
                         GenRegister dst,
-                        uint32_t simdWidth,
+                        bool isUniform,
                         uint8_t bti) const
     {
       using namespace ir;
-        Register tmpReg = sel.reg(FAMILY_DWORD, simdWidth == 1);
-        GenRegister tmpAddr = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
-        GenRegister tmpData = GenRegister::udxgrf(simdWidth, tmpReg);
+        Register tmpReg = sel.reg(FAMILY_DWORD, isUniform);
+        GenRegister tmpAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+        GenRegister tmpData = sel.selReg(tmpReg, ir::TYPE_U32);
         // Get dword aligned addr
         sel.push();
-          if (simdWidth == 1) {
+          if (isUniform) {
             sel.curr.noMask = 1;
+            sel.curr.execWidth = 1;
           }
           sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0xfffffffc));
         sel.pop();
         sel.push();
-          if (simdWidth == 1)
+          if (isUniform)
             sel.curr.noMask = 1;
           sel.UNTYPED_READ(tmpAddr, &tmpData, 1, bti);
 
-          if (simdWidth == 1)
+          if (isUniform)
             sel.curr.execWidth = 1;
           // Get the remaining offset from aligned addr
           sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0x3));
@@ -2988,8 +3043,7 @@ namespace gbe
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
-      const uint32_t simdWidth = sel.isScalarReg(insn.getValue(0)) ?
-                                 1 : sel.ctx.getSimdWidth();
+      const bool isUniform = sel.isScalarReg(insn.getValue(0));
       RegisterFamily family = getFamily(insn.getValueType());
 
       vector<GenRegister> dst(valueNum);
@@ -3003,8 +3057,8 @@ namespace gbe
       vector<GenRegister> tmp2(tmpRegNum);
       vector<Register> tmpReg(tmpRegNum);
       for(uint32_t i = 0; i < tmpRegNum; i++) {
-        tmpReg[i] = sel.reg(FAMILY_DWORD);
-        tmp2[i] = tmp[i] = GenRegister::udxgrf(simdWidth, tmpReg[i]);
+        tmpReg[i] = sel.reg(FAMILY_DWORD, isUniform);
+        tmp2[i] = tmp[i] = sel.selReg(tmpReg[i], ir::TYPE_U32);
       }
 
       readDWord(sel, tmp, tmp2, address, tmpRegNum, bti);
@@ -3023,18 +3077,18 @@ namespace gbe
                            vector<GenRegister> &tmp,
                            uint32_t effectDataNum,
                            const GenRegister &address,
-                           uint32_t simdWidth) const
+                           bool isUniform) const
     {
       using namespace ir;
       GBE_ASSERT(effectData.size() == effectDataNum);
       GBE_ASSERT(tmp.size() == effectDataNum + 1);
       sel.push();
-        Register alignedFlag = sel.reg(FAMILY_BOOL);
-        GenRegister shiftL = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
-        Register shiftHReg = sel.reg(FAMILY_DWORD);
-        GenRegister shiftH = GenRegister::udxgrf(simdWidth, shiftHReg);
+        Register alignedFlag = sel.reg(FAMILY_BOOL, isUniform);
+        GenRegister shiftL = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+        Register shiftHReg = sel.reg(FAMILY_DWORD, isUniform);
+        GenRegister shiftH = sel.selReg(shiftHReg, ir::TYPE_U32);
         sel.push();
-          if (simdWidth == 1)
+          if (isUniform)
             sel.curr.noMask = 1;
           sel.AND(shiftL, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(0x3));
           sel.SHL(shiftL, shiftL, GenRegister::immud(0x3));
@@ -3042,20 +3096,20 @@ namespace gbe
           sel.curr.physicalFlag = 0;
           sel.curr.modFlag = 1;
           sel.curr.predicate = GEN_PREDICATE_NONE;
-          sel.curr.flagIndex = (uint16_t)alignedFlag;
+          sel.curr.flagIndex = alignedFlag.value();
           sel.CMP(GEN_CONDITIONAL_NEQ, GenRegister::unpacked_uw(shiftHReg), GenRegister::immuw(32));
         sel.pop();
 
         sel.curr.noMask = 1;
         for(uint32_t i = 0; i < effectDataNum; i++) {
-          GenRegister tmpH = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+          GenRegister tmpH = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
           GenRegister tmpL = effectData[i];
           sel.SHR(tmpL, tmp[i], shiftL);
           sel.push();
             // Only need to consider the tmpH when the addr is not aligned.
             sel.curr.modFlag = 0;
             sel.curr.physicalFlag = 0;
-            sel.curr.flagIndex = (uint16_t)alignedFlag;
+            sel.curr.flagIndex = alignedFlag.value();
             sel.curr.predicate = GEN_PREDICATE_NORMAL;
             sel.SHL(tmpH, tmp[i + 1], shiftH);
             sel.OR(effectData[i], tmpL, tmpH);
@@ -3074,9 +3128,11 @@ namespace gbe
       const uint32_t valueNum = insn.getValueNum();
       const uint32_t simdWidth = sel.isScalarReg(insn.getValue(0)) ?
                                  1 : sel.ctx.getSimdWidth();
+      const bool isUniform = simdWidth == 1;
       RegisterFamily family = getFamily(insn.getValueType());
 
       if(valueNum > 1) {
+        GBE_ASSERT(!isUniform && "vector load should not be uniform. Something went wrong.");
         vector<GenRegister> dst(valueNum);
         const uint32_t typeSize = getFamilySize(family);
 
@@ -3088,11 +3144,11 @@ namespace gbe
         vector<GenRegister> tmp2(effectDataNum + 1);
         vector<GenRegister> effectData(effectDataNum);
         for(uint32_t i = 0; i < effectDataNum + 1; i++)
-          tmp2[i] = tmp[i] = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+          tmp2[i] = tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
-        GenRegister alignedAddr = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+        GenRegister alignedAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
         sel.push();
-          if (simdWidth == 1)
+          if (isUniform)
             sel.curr.noMask = 1;
           sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(~0x3));
         sel.pop();
@@ -3105,7 +3161,7 @@ namespace gbe
           vector<GenRegister> t2(tmp2.begin() + pos, tmp2.begin() + pos + width);
           if (pos != 0) {
             sel.push();
-              if (simdWidth == 1)
+              if (isUniform)
                 sel.curr.noMask = 1;
               sel.ADD(alignedAddr, alignedAddr, GenRegister::immud(pos * 4));
             sel.pop();
@@ -3116,9 +3172,9 @@ namespace gbe
         } while(remainedReg);
 
         for(uint32_t i = 0; i < effectDataNum; i++)
-          effectData[i] = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+          effectData[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
-        getEffectByteData(sel, effectData, tmp, effectDataNum, address, simdWidth);
+        getEffectByteData(sel, effectData, tmp, effectDataNum, address, isUniform);
 
         for(uint32_t i = 0; i < effectDataNum; i++) {
           unsigned int elemNum = (valueNum - i * (4 / typeSize)) > 4/typeSize ?
@@ -3133,13 +3189,13 @@ namespace gbe
 
         for (int x = 0; x < bti.count; x++) {
           if (x > 0)
-            tmp = sel.selReg(sel.reg(family, simdWidth == 1), insn.getValueType());
+            tmp = sel.selReg(sel.reg(family, isUniform), insn.getValueType());
 
           GenRegister addr = getRelativeAddress(sel, address, bti.bti[x]);
-          readByteAsDWord(sel, elemSize, addr, tmp, simdWidth, bti.bti[x]);
+          readByteAsDWord(sel, elemSize, addr, tmp, isUniform, bti.bti[x]);
           if (x > 0) {
             sel.push();
-              if (simdWidth == 1) {
+              if (isUniform) {
                 sel.curr.noMask = 1;
                 sel.curr.execWidth = 1;
               }
@@ -3168,7 +3224,9 @@ namespace gbe
 
       sel.push();
         sel.curr.noMask = 1;
-        GenRegister temp = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+        if (GenRegister::hstride_size(address) == 0)
+          sel.curr.execWidth = 1;
+        GenRegister temp = sel.selReg(sel.reg(ir::FAMILY_DWORD, sel.curr.execWidth == 1), ir::TYPE_U32);
         sel.ADD(temp, address, GenRegister::negate(sel.selReg(sel.ctx.getSurfaceBaseReg(bti), ir::TYPE_U32)));
       sel.pop();
       return temp;
@@ -3188,7 +3246,8 @@ namespace gbe
       GBE_ASSERT(insn.getAddressSpace() == MEM_GLOBAL ||
                  insn.getAddressSpace() == MEM_CONSTANT ||
                  insn.getAddressSpace() == MEM_PRIVATE ||
-                 insn.getAddressSpace() == MEM_LOCAL);
+                 insn.getAddressSpace() == MEM_LOCAL ||
+                 insn.getAddressSpace() == MEM_MIXED);
       //GBE_ASSERT(sel.isScalarReg(insn.getValue(0)) == false);
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(type);
@@ -3261,10 +3320,10 @@ namespace gbe
                          const ir::StoreInstruction &insn,
                          const uint32_t elemSize,
                          GenRegister addr,
-                         uint32_t bti) const
+                         uint32_t bti,
+                         bool isUniform) const
     {
       using namespace ir;
-      const uint32_t simdWidth = sel.ctx.getSimdWidth();
       uint32_t valueNum = insn.getValueNum();
 
       if(valueNum > 1) {
@@ -3282,7 +3341,7 @@ namespace gbe
         uint32_t tmpRegNum = typeSize*valueNum / 4;
         vector<GenRegister> tmp(tmpRegNum);
         for(uint32_t i = 0; i < tmpRegNum; i++) {
-          tmp[i] = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
+          tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
           sel.PACK_BYTE(tmp[i], value.data() + i * 4/typeSize, typeSize, 4/typeSize);
         }
 
@@ -3290,23 +3349,31 @@ namespace gbe
       } else {
         const GenRegister value = sel.selReg(insn.getValue(0));
         GBE_ASSERT(insn.getValueNum() == 1);
-        const GenRegister tmp = GenRegister::udxgrf(simdWidth, sel.reg(FAMILY_DWORD));
-        if (elemSize == GEN_BYTE_SCATTER_WORD) {
-          sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UW));
-        } else if (elemSize == GEN_BYTE_SCATTER_BYTE) {
-          sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UB));
-        }
+        const GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+        sel.push();
+          if (isUniform) {
+            sel.curr.noMask = 1;
+            sel.curr.execWidth = 1;
+          }
+
+          if (elemSize == GEN_BYTE_SCATTER_WORD)
+            sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UW));
+          else if (elemSize == GEN_BYTE_SCATTER_BYTE)
+            sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UB));
+        sel.pop();
         sel.BYTE_SCATTER(addr, tmp, elemSize, bti);
       }
     }
 
-    INLINE GenRegister getRelativeAddress(Selection::Opaque &sel, GenRegister address, uint8_t bti) const {
+    INLINE GenRegister getRelativeAddress(Selection::Opaque &sel, GenRegister address, uint8_t bti, bool isUniform) const {
       if(bti == 0xfe)
         return address;
 
       sel.push();
         sel.curr.noMask = 1;
-        GenRegister temp = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+        if (isUniform)
+          sel.curr.execWidth = 1;
+        GenRegister temp = sel.selReg(sel.reg(ir::FAMILY_DWORD, isUniform), ir::TYPE_U32);
         sel.ADD(temp, address, GenRegister::negate(sel.selReg(sel.ctx.getSurfaceBaseReg(bti), ir::TYPE_U32)));
       sel.pop();
       return temp;
@@ -3319,15 +3386,17 @@ namespace gbe
       const uint32_t elemSize = getByteScatterGatherSize(type);
       GenRegister address = sel.selReg(insn.getAddress(), ir::TYPE_U32);
 
+      const bool isUniform = sel.isScalarReg(insn.getAddress()) && sel.isScalarReg(insn.getValue(0));
+
       BTI bti = insn.getBTI();
       for (int x = 0; x < bti.count; x++) {
-        GenRegister temp = getRelativeAddress(sel, address, bti.bti[x]);
+        GenRegister temp = getRelativeAddress(sel, address, bti.bti[x], isUniform);
         if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
           this->emitWrite64(sel, insn, temp, bti.bti[x]);
         else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
           this->emitUntypedWrite(sel, insn, temp,  bti.bti[x]);
         else {
-          this->emitByteScatter(sel, insn, elemSize, temp, bti.bti[x]);
+          this->emitByteScatter(sel, insn, elemSize, temp, bti.bti[x], isUniform);
         }
       }
       return true;
@@ -3377,7 +3446,7 @@ namespace gbe
           sel.curr.noMask = 1;
         sel.curr.physicalFlag = 0;
         sel.curr.modFlag = 1;
-        sel.curr.flagIndex = (uint16_t)dst;
+        sel.curr.flagIndex = dst.value();
         sel.curr.grfFlag = needStoreBool; // indicate whether we need to allocate grf to store this boolean.
         if (type == TYPE_S64 || type == TYPE_U64) {
           GenRegister tmp[3];
@@ -3791,7 +3860,7 @@ namespace gbe
         }
         sel.curr.inversePredicate ^= inverse;
         sel.curr.physicalFlag = 0;
-        sel.curr.flagIndex = (uint16_t) pred;
+        sel.curr.flagIndex = pred.value();
         sel.curr.predicate = GEN_PREDICATE_NORMAL;
         // FIXME in general, if the flag is a uniform flag.
         // we should treat that flag as extern flag, as we
@@ -3860,10 +3929,10 @@ namespace gbe
     {
       using namespace ir;
       const LabelIndex label = insn.getLabelIndex();
-      const GenRegister src0 = sel.selReg(ocl::blockip);
-      const GenRegister src1 = GenRegister::immuw(label);
+      const GenRegister src0 = sel.getBlockIP();
+      const GenRegister src1 = sel.getLabelImmReg(label);
       const uint32_t simdWidth = sel.ctx.getSimdWidth();
-      GBE_ASSERTM(label < GEN_MAX_LABEL, "We reached the maximum label number which is reserved for barrier handling");
+      GBE_ASSERTM(label < sel.ctx.getMaxLabel(), "We reached the maximum label number which is reserved for barrier handling");
       sel.LABEL(label);
 
       if(!insn.getParent()->needIf)
@@ -3884,8 +3953,7 @@ namespace gbe
       sel.push();
         sel.curr.noMask = 1;
         sel.curr.predicate = GEN_PREDICATE_NONE;
-        sel.CMP(GEN_CONDITIONAL_LE, GenRegister::retype(src0, GEN_TYPE_UW), src1,
-                GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+        sel.cmpBlockIP(GEN_CONDITIONAL_LE, src0, src1);
       sel.pop();
 
       if (sel.block->hasBarrier) {
@@ -3895,11 +3963,10 @@ namespace gbe
         // this block, as it will always excute with all lanes activated.
         sel.push();
           sel.curr.predicate = GEN_PREDICATE_NORMAL;
-          sel.MOV(GenRegister::retype(src0, GEN_TYPE_UW), GenRegister::immuw(GEN_MAX_LABEL));
+          sel.setBlockIP(src0, sel.ctx.getMaxLabel());
           sel.curr.predicate = GEN_PREDICATE_NONE;
           sel.curr.noMask = 1;
-          sel.CMP(GEN_CONDITIONAL_EQ, GenRegister::retype(src0, GEN_TYPE_UW), GenRegister::immuw(GEN_MAX_LABEL),
-                  GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+          sel.cmpBlockIP(GEN_CONDITIONAL_EQ, src0, sel.ctx.getMaxLabel());
           if (simdWidth == 8)
             sel.curr.predicate = GEN_PREDICATE_ALIGN1_ALL8H;
           else if (simdWidth == 16)
@@ -3914,7 +3981,7 @@ namespace gbe
         // FIXME, if the last BRA is unconditional jump, we don't need to update the label here.
         sel.push();
          sel.curr.predicate = GEN_PREDICATE_NORMAL;
-         sel.MOV(GenRegister::retype(src0, GEN_TYPE_UW), GenRegister::immuw((uint16_t)label));
+         sel.setBlockIP(src0, label.value());
         sel.pop();
       }
       else {
@@ -4191,7 +4258,7 @@ namespace gbe
                            ir::LabelIndex src) const
     {
       using namespace ir;
-      const GenRegister ip = sel.selReg(ocl::blockip, TYPE_U16);
+      const GenRegister ip = sel.getBlockIP();
 
       // We will not emit any jump if we must go the next block anyway
       const BasicBlock *curr = insn.getParent();
@@ -4204,9 +4271,9 @@ namespace gbe
           // as if there is no backward jump latter, then obviously everything will work fine.
           // If there is backward jump latter, then all the pcip will be updated correctly there.
           sel.curr.physicalFlag = 0;
-          sel.curr.flagIndex = (uint16_t) pred;
+          sel.curr.flagIndex = pred.value();
           sel.curr.predicate = GEN_PREDICATE_NORMAL;
-          sel.MOV(ip, GenRegister::immuw(uint16_t(dst)));
+          sel.setBlockIP(ip, dst.value());
           sel.curr.predicate = GEN_PREDICATE_NONE;
           if (!sel.block->hasBarrier && !sel.block->removeSimpleIfEndif)
             sel.ENDIF(GenRegister::immd(0), nextLabel);
@@ -4216,7 +4283,7 @@ namespace gbe
         // Update the PcIPs
         const LabelIndex jip = sel.ctx.getLabelIndex(&insn);
         if(insn.getParent()->needEndif)
-          sel.MOV(ip, GenRegister::immuw(uint16_t(dst)));
+          sel.setBlockIP(ip, dst.value());
 
         if (!sel.block->hasBarrier && !sel.block->removeSimpleIfEndif) {
           if(insn.getParent()->needEndif && !insn.getParent()->needIf)
@@ -4242,7 +4309,8 @@ namespace gbe
                             ir::LabelIndex src) const
     {
       using namespace ir;
-      const GenRegister ip = sel.selReg(ocl::blockip, TYPE_U16);
+      //const GenRegister ip = sel.selReg(ocl::blockip, TYPE_U16);
+      const GenRegister ip = sel.getBlockIP();
       const Function &fn = sel.ctx.getFunction();
       const BasicBlock &bb = fn.getBlock(src);
       const LabelIndex jip = sel.ctx.getLabelIndex(&insn);
@@ -4257,13 +4325,13 @@ namespace gbe
         // block. Next instruction will properly update the IPs of the lanes
         // that actually take the branch
         const LabelIndex next = bb.getNextBlock()->getLabelIndex();
-        sel.MOV(ip, GenRegister::immuw(uint16_t(next)));
+        sel.setBlockIP(ip, next.value());
         GBE_ASSERT(jip == dst);
         sel.push();
           sel.curr.physicalFlag = 0;
-          sel.curr.flagIndex = (uint16_t) pred;
+          sel.curr.flagIndex = pred.value();
           sel.curr.predicate = GEN_PREDICATE_NORMAL;
-          sel.MOV(ip, GenRegister::immuw(uint16_t(dst)));
+          sel.setBlockIP(ip, dst.value());
           sel.block->endifOffset = -1;
           sel.curr.predicate = GEN_PREDICATE_NONE;
           if (!sel.block->hasBarrier && !sel.block->removeSimpleIfEndif)
@@ -4280,7 +4348,7 @@ namespace gbe
         const LabelIndex next = bb.getNextBlock()->getLabelIndex();
         // Update the PcIPs
         if(insn.getParent()->needEndif)
-          sel.MOV(ip, GenRegister::immuw(uint16_t(dst)));
+        sel.setBlockIP(ip, dst.value());
         sel.block->endifOffset = -1;
         if (!sel.block->hasBarrier && !sel.block->removeSimpleIfEndif) {
           if(insn.getParent()->needEndif && !insn.getParent()->needIf)

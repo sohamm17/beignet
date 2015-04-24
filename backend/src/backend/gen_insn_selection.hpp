@@ -44,7 +44,6 @@ namespace gbe
   /*! Translate IR compare to Gen compare */
   uint32_t getGenCompare(ir::Opcode opcode);
 
-  #define GEN_MAX_LABEL 0xFFFF
 
   /*! Selection opcodes properly encoded from 0 to n for fast jump tables
    *  generations
@@ -140,9 +139,9 @@ namespace gbe
     /*! Number of sources */
     uint8_t srcNum:4;
     /*! To store various indices */
-    uint16_t index;
+    uint32_t index;
     /*! For BRC/IF to store the UIP */
-    uint16_t index1;
+    uint32_t index1;
     /*! instruction ID used for vector allocation. */
     uint32_t ID;
     /*! Variable sized. Destinations and sources go here */
