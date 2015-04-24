@@ -2,10 +2,7 @@ Enhance-debug-output.patch
 Debian-compliant-compiler-flags-handling.patch
 Link-against-terminfo.patch
 Enable-test-debug.patch
-find-versioned-llvm.patch
 support-kfreebsd.patch
 reduce-notfound-output.patch
-fail-gracefully-no-hardware.patch
 default-to-full-precision.patch
 shared-llvm.patch
-781875-dont-ignore-OOM.patch

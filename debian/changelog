@@ -1,3 +1,10 @@
+beignet (1.0.3-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+  * Drop patches applied upstream.
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 24 Apr 2015 21:16:12 +0100
+
 beignet (1.0.2-2) experimental; urgency=medium
 
   * Check drm_intel_gem_bo_context_exec return code. (Closes: #781875)
