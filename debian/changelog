@@ -2,6 +2,7 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Drop patches applied upstream, refresh others.
+  * Fix bug in builtin_pow test.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 24 Apr 2015 21:16:12 +0100
 
