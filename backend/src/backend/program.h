@@ -70,6 +70,7 @@ enum gbe_get_arg_info_value {
 #define BTI_MAX_WRITE_IMAGE_ARGS  8
 #define BTI_WORKAROUND_IMAGE_OFFSET 128
 #define BTI_MAX_ID 253
+#define BTI_LOCAL 0xfe
 
 /*! Constant buffer values (ie values to setup in the constant buffer) */
 enum gbe_curbe_type {
@@ -96,6 +97,7 @@ enum gbe_curbe_type {
   GBE_CURBE_KERNEL_ARGUMENT,
   GBE_CURBE_EXTRA_ARGUMENT,
   GBE_CURBE_BLOCK_IP,
+  GBE_CURBE_DW_BLOCK_IP,
   GBE_CURBE_THREAD_NUM,
   GBE_CURBE_ZERO,
   GBE_CURBE_ONE,

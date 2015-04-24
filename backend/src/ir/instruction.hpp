@@ -58,6 +58,7 @@ namespace ir {
     MEM_LOCAL,      //!< Local memory (thread group memory)
     MEM_CONSTANT,   //!< Immutable global memory
     MEM_PRIVATE,    //!< Per thread private memory
+    MEM_MIXED,      //!< mixed address space pointer.
     MEM_INVALID
   };
 
@@ -88,7 +89,7 @@ namespace ir {
   std::ostream &operator<< (std::ostream &out, AddressSpace addrSpace);
 
   /*! A label is identified with an unsigned short */
-  TYPE_SAFE(LabelIndex, uint16_t)
+  TYPE_SAFE(LabelIndex, uint32_t)
 
   /*! Function class contains the register file and the register tuple. Any
    *  information related to the registers may therefore require a function
@@ -103,7 +104,7 @@ namespace ir {
   ///////////////////////////////////////////////////////////////////////////
 
   /*! Stores instruction internal data and opcode */
-  class ALIGNED(sizeof(uint64_t)*2) InstructionBase
+  class ALIGNED(sizeof(uint64_t)*4) InstructionBase
   {
   public:
     /*! Initialize the instruction from a 8 bytes stream */
@@ -117,7 +118,7 @@ namespace ir {
     /*! Get the instruction opcode */
     INLINE Opcode getOpcode(void) const { return opcode; }
   protected:
-    enum { opaqueSize = sizeof(uint64_t)*2-sizeof(uint8_t) };
+    enum { opaqueSize = sizeof(uint64_t)*4-sizeof(uint8_t) };
     Opcode opcode;               //!< Idendifies the instruction
     char opaque[opaqueSize];     //!< Remainder of it
     GBE_CLASS(InstructionBase);  //!< Use internal allocators
