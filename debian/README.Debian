@@ -9,6 +9,3 @@ This slows down some of the math functions as they cannot use the
 (lower-precision) native instructions: most only moderately (eg. ~30%
 for sin/cos) but ~10-fold for pow and rootn (though not pown or sqrt).
 Applications that prefer speed to precision may use the native_* functions.
-
-The tgamma function is implemented as exp(lgamma) and is hence
-precision non-compliant for large outputs.
