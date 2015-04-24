@@ -19,11 +19,14 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
      ir::Unit *unit = new ir::Unit();
 --- beignet-1.0.2.orig/docs/Beignet.mdwn
 +++ beignet-1.0.2/docs/Beignet.mdwn
-@@ -169,8 +169,10 @@ Known Issues
+@@ -183,11 +183,10 @@ Known Issues
  * Precision issue.
    Currently Gen does not provide native support of high precision math functions
    required by OpenCL. We provide a software version to achieve high precision,
--  which you can turn on through `export OCL_STRICT_CONFORMANCE=1`.
+-  which you can turn on through
+-
+-  `# export OCL_STRICT_CONFORMANCE=1`.
+-
 -  But be careful, this would make your CL kernel run a little longer.
 +  controlled by the OCL_STRICT_CONFORMANCE environment variable. Default is
 +  1 (high-precision) in Debian beignet but 0 (high-speed) in upstream beignet.
