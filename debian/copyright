@@ -82,23 +82,23 @@ License: MIT
 License: BSD-3-clause
  LunarGLASS: An Open Modular Shader Compiler Architecture
  Copyright (C) 2010-2014 LunarG, Inc.
-.
+ .
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions
  are met:
-.
+ .
      Redistributions of source code must retain the above copyright
      notice, this list of conditions and the following disclaimer.
-.
+ .
      Redistributions in binary form must reproduce the above
      copyright notice, this list of conditions and the following
      disclaimer in the documentation and/or other materials provided
      with the distribution.
-.
+ .
      Neither the name of LunarG Inc. nor the names of its
      contributors may be used to endorse or promote products derived
      from this software without specific prior written permission.
-.
+ .
  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
@@ -116,13 +116,13 @@ License: gpuocelot
  This code is derived from the ControlTree.h and ControlTree.cpp of
  project gpuocelot by Yongjia Zhang.
  The original copyright of gpuocelot appears below in its entirety.
-.
-.
-.
+ .
+ .
+ .
  Copyright 2011
  GEORGIA TECH RESEARCH CORPORATION
  ALL RIGHTS RESERVED
-.
+ .
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions are
  met:
@@ -136,7 +136,7 @@ License: gpuocelot
  names of  its contributors may be used to endorse or promote
  products derived  from this software without specific prior
  written permission.
-.
+ .
  THIS SOFTWARE IS PROVIDED BY GEORGIA TECH RESEARCH CORPORATION ''AS IS''
  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
  THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
@@ -148,7 +148,7 @@ License: gpuocelot
  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-.
+ .
  You agree that the Software will not be shipped, transferred, exported,
  or re-exported directly into any country prohibited by the United States
  Export Administration Act and the regulations thereunder nor will be
