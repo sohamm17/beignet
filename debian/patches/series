@@ -8,3 +8,4 @@ default-to-full-precision.patch
 shared-llvm.patch
 builtin_pow-fix-spurious-failure.patch
 tgamma-accuracy.patch
+python3.patch

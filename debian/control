@@ -15,7 +15,7 @@ Build-Depends:
  ocl-icd-dev,
  ocl-icd-opencl-dev,
  pkg-config,
- python,
+ python3,
  libdrm-dev,
  libedit-dev,
  libtinfo-dev,
