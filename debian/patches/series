@@ -1,4 +1,3 @@
-Enhance-debug-output.patch
 Debian-compliant-compiler-flags-handling.patch
 Link-against-terminfo.patch
 Enable-test-debug.patch
