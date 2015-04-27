@@ -7,6 +7,7 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
   * Update d/copyright.
   * Build with Python 3.
   * Drop Enhance-debug-output.patch.
+  * Add reportbug script.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 24 Apr 2015 21:16:12 +0100
 

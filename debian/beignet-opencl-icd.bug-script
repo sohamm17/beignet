@@ -1,0 +1,15 @@
+#!/bin/bash
+#this deliberately _isn't_ set -e: if not all these commands are installed, we still want to get what we can
+echo "Graphics hardware:" >&3
+xrandr --listproviders >&3
+glxinfo | grep " vendor\| renderer" >&3
+echo >&3
+echo "Processor:" >&3
+#this gives more detailed information than the above, but can't tell whether the GPU is enabled
+lscpu >&3
+echo >&3
+echo "OpenCL library:" >&3
+#libopencl1: could use a reportbug control file for this, but this way avoids needing to update it with new packages
+dpkg -l *libopencl* >&3
+#ICDs: also catch any installed outside the package system, e.g. Intel SDK for CPUs
+head /etc/OpenCL/vendors/* >&3
