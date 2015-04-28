@@ -8,7 +8,9 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
   * Build with Python 3.
   * Drop Enhance-debug-output.patch.
   * Add reportbug script.
-  * Drop Link-against-terminfo.patch and libtinfo dependency.
+  * Drop Link-against-terminfo.patch, llvm-config --system-libs and
+    related dependencies, as they are not needed when dynamically
+    linking libllvm.
   * Make __local on Haswell an error instead of silently doing nothing,
     and document workarounds.
 

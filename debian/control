@@ -17,10 +17,8 @@ Build-Depends:
  pkg-config,
  python3,
  libdrm-dev,
- libedit-dev,
  libxext-dev,
  libxfixes-dev,
- zlib1g-dev,
 Standards-Version: 3.9.6
 Homepage: http://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
