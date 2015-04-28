@@ -1,5 +1,4 @@
 Debian-compliant-compiler-flags-handling.patch
-Link-against-terminfo.patch
 Enable-test-debug.patch
 support-kfreebsd.patch
 reduce-notfound-output.patch
