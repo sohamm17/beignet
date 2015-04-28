@@ -19,6 +19,7 @@ Build-Depends:
  libdrm-dev,
  libxext-dev,
  libxfixes-dev,
+ libx11-dev
 Standards-Version: 3.9.6
 Homepage: http://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: git://anonscm.debian.org/pkg-opencl/beignet.git
