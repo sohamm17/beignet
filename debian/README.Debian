@@ -1,3 +1,22 @@
+Haswell issues
+--------------
+
+On Haswell (mostly Core ix-4xxx) hardware, beignet interacts badly with a
+Linux security mechanism, leading to these errors:
+
+* drm_intel_gem_bo_context_exec() failed: Invalid argument
+
+Occurs on all computations; can be avoided by setting
+i915.enable_cmd_parser=0, either at boot, or later with:
+
+  sudo echo 0 > /sys/module/i915/parameters/enable_cmd_parser
+
+* Beignet: Shared local memory does not work on Haswell
+
+Occurs on using the __local memory space.  To avoid this, apply the patch at
+https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support to Linux,
+remove haswell.patch from beignet, and recompile both.
+
 Precision vs. Speed
 -------------------
 

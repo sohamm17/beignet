@@ -9,6 +9,8 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
   * Drop Enhance-debug-output.patch.
   * Add reportbug script.
   * Drop Link-against-terminfo.patch and libtinfo dependency.
+  * Make __local on Haswell an error instead of silently doing nothing,
+    and document workarounds.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 24 Apr 2015 21:16:12 +0100
 

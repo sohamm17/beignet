@@ -1,0 +1,33 @@
+Description: Better handle known Haswell bugs
+
+Print a helpful error message instead of silently doing nothing
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Forwarded: http://lists.freedesktop.org/archives/beignet/2015-April/005589.html
+
+--- beignet-1.0.3.orig/src/cl_command_queue_gen7.c
++++ beignet-1.0.3/src/cl_command_queue_gen7.c
+@@ -343,6 +343,10 @@ cl_command_queue_ND_range_gen7(cl_comman
+   /* Curbe step 1: fill the constant urb buffer data shared by all threads */
+   if (ker->curbe) {
+     kernel.slm_sz = cl_curbe_fill(ker, work_dim, global_wk_off, global_wk_sz, local_wk_sz, thread_n);
++    if (kernel.slm_sz > 0 && cl_driver_get_ver(ctx->drv) == 75){
++      fprintf(stderr, "Beignet: Shared local memory does not work on Haswell, see /usr/share/doc/beignet-opencl-icd/README.Debian\n");
++      return CL_OUT_OF_RESOURCES;
++    }
+     if (kernel.slm_sz > ker->program->ctx->device->local_mem_size) {
+       fprintf(stderr, "Beignet: Out of shared local memory %d.\n", kernel.slm_sz);
+       return CL_OUT_OF_RESOURCES;
+--- beignet-1.0.3.orig/src/intel/intel_batchbuffer.c
++++ beignet-1.0.3/src/intel/intel_batchbuffer.c
+@@ -135,6 +135,10 @@ intel_batchbuffer_flush(intel_batchbuffe
+   }
+   if (drm_intel_gem_bo_context_exec(batch->buffer, batch->intel->ctx, used, flag) < 0) {
+     fprintf(stderr, "drm_intel_gem_bo_context_exec() failed: %s\n", strerror(errno));
++    if (errno == EINVAL && IS_GEN75(batch->intel->device_id)) {
++      fprintf(stderr, "This is a known bug on Haswell systems, see /usr/share/doc/beignet-opencl-icd/README.Debian\n"
++                "'sudo echo 0 > /sys/module/i915/parameters/enable_cmd_parser' usually helps\n");
++    }
+     err = -1;
+   }
+ 
