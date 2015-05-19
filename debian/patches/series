@@ -11,3 +11,4 @@ self-test.patch
 disable-broken-fast-atomics.patch
 update-docs.patch
 drop-structural_analysis.patch
+allow-+-in-directory.patch

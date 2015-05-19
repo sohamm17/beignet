@@ -1,0 +1,30 @@
+Description: Allow + in directory name
+
++ is a special character in a regex, which makes the build fail in
+directories such as beignet_1.0.3+dfsg
+
+--- a/backend/src/libocl/CMakeLists.txt
++++ b/backend/src/libocl/CMakeLists.txt
+@@ -128,11 +128,12 @@ FOREACH(M ${OCL_BASH_GENERATED_MODULES})
+     GENERATE_SOURCE_BASH(${M})
+ ENDFOREACH(M) 
+ 
++STRING(REPLACE "+" "\\+" ESCAPED_LIBOCL_BINARY_DIR ${LIBOCL_BINARY_DIR})
+ 
+ SET (CLANG_OCL_FLAGS -fno-builtin -ffp-contract=off -cl-kernel-arg-info -DGEN7_SAMPLER_CLAMP_BORDER_WORKAROUND "-cl-std=CL1.2")
+ MACRO(ADD_CL_TO_BC_TARGET _file)
+     # CMake seems can not add pattern rule, use MACRO to replace.
+-    STRING(REGEX REPLACE "${LIBOCL_BINARY_DIR}/src/\(o.*\)\\.cl" "${OCL_OBJECT_DIR}/\\1.bc" output_name ${_file})
++    STRING(REGEX REPLACE "${ESCAPED_LIBOCL_BINARY_DIR}/src/\(o.*\)\\.cl" "${OCL_OBJECT_DIR}/\\1.bc" output_name ${_file})
+     ADD_CUSTOM_COMMAND(OUTPUT ${output_name}
+ 	COMMAND mkdir -p ${OCL_OBJECT_DIR}/
+ 	#COMMAND echo ${LLVM_INSTALL_DIR}clang -cc1 ${CLANG_OCL_FLAGS} -I ${LIBOCL_BINARY_DIR}/include/ -emit-llvm-bc -triple spir -o ${output_name} -x cl ${_file}
+@@ -148,7 +149,7 @@ FOREACH(f ${OCL_SOURCE_FILES})
+ ENDFOREACH(f) 
+ 
+ FOREACH(f ${OCL_SOURCE_FILES})
+-    STRING(REGEX REPLACE "${LIBOCL_BINARY_DIR}/src/\(o.*\)\\.cl" "${OCL_OBJECT_DIR}/\\1.bc" bc_name ${f})
++    STRING(REGEX REPLACE "${ESCAPED_LIBOCL_BINARY_DIR}/src/\(o.*\)\\.cl" "${OCL_OBJECT_DIR}/\\1.bc" bc_name ${f})
+     SET(OCL_BC_FILES ${OCL_BC_FILES} ${bc_name})
+ ENDFOREACH(f) 
+
