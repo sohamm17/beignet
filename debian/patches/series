@@ -10,3 +10,4 @@ python3.patch
 self-test.patch
 disable-broken-fast-atomics.patch
 update-docs.patch
+drop-structural_analysis.patch

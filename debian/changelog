@@ -1,4 +1,4 @@
-beignet (1.0.3-1) UNRELEASED; urgency=medium
+beignet (1.0.3+dfsg-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Drop patches applied upstream, refresh others.
@@ -15,6 +15,7 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
     and document workarounds.
   * Make libx11-dev dependency explicit.
   * Disable fast atomics, they break too much.
+  * Remove non-DFSG gpuocelot code.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 24 Apr 2015 21:16:12 +0100
 
