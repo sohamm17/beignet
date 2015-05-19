@@ -9,3 +9,4 @@ tgamma-accuracy.patch
 python3.patch
 self-test.patch
 disable-broken-fast-atomics.patch
+update-docs.patch

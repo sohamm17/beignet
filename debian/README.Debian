@@ -1,21 +1,16 @@
-Haswell issues
---------------
+"Beignet: self-test failed" / no device 
+---------------------------------------
 
-On Haswell (mostly Core ix-4xxx) hardware, beignet interacts badly with a
-Linux security mechanism, leading to these errors:
+On Haswell (mostly Core ix-4xxx) hardware, shared local memory (__local)
+does not work at all on Linux <= 4.0, and requires the i915.enable_ppgtt=2
+boot parameter (https://wiki.ubuntu.com/Kernel/KernelBootParameters)
+on Linux 4.1.  This will be fixed in Linux 4.2.
 
-* drm_intel_gem_bo_context_exec() failed: Invalid argument
+To avoid silently wrong results, beignet performs a self-test on load and
+hides devices where __local does not work.  If you do not need __local,
+you can override the self-test with
 
-Occurs on all computations; can be avoided by setting
-i915.enable_cmd_parser=0, either at boot, or later with:
-
-  sudo echo 0 > /sys/module/i915/parameters/enable_cmd_parser
-
-* Beignet: Shared local memory does not work on Haswell
-
-Occurs on using the __local memory space.  To avoid this, apply the patch at
-https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support to Linux,
-remove haswell.patch from beignet, and recompile both.
+  export OCL_IGNORE_SELF_TEST=1
 
 Precision vs. Speed
 -------------------
