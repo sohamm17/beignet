@@ -11,7 +11,7 @@ beignet (1.0.3-1) UNRELEASED; urgency=medium
   * Drop Link-against-terminfo.patch, llvm-config --system-libs and
     related dependencies, as they are not needed when dynamically
     linking libllvm.
-  * Make __local on Haswell an error instead of silently doing nothing,
+  * Disable devices where __local silently does nothing,
     and document workarounds.
   * Make libx11-dev dependency explicit.
 
