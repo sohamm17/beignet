@@ -1,3 +1,10 @@
+beignet (1.1.0-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+  * Update and improve d/copyright.
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 09 Aug 2015 13:27:07 +0100
+
 beignet (1.0.3+dfsg-1) unstable; urgency=medium
 
   * New upstream release.
