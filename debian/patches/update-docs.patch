@@ -1,67 +1,66 @@
 Description: Update documentation
 
-Reflect self-test.patch, disable-broken-fast-atomics.patch and
-#767148 fix, plus general cleanup.
+Reflect #767148 fix, high precision now being default, and releases.
+Use the Debian documentation path in the error message.
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: http://cgit.freedesktop.org/beignet/commit/?id=6aae2e8000b421f390b19404486a75b005720f12
 
---- beignet-1.0.3.orig/docs/Beignet.mdwn
-+++ beignet-1.0.3/docs/Beignet.mdwn
+diff --git a/src/cl_device_id.c b/src/cl_device_id.c
+index e9e2c16..3227340 100644
+--- a/src/cl_device_id.c
++++ b/src/cl_device_id.c
+@@ -610,7 +610,7 @@ cl_self_test(cl_device_id device, cl_self_test_res atomic_in_l3_flag)
+                     } else {
+                       ret = SELF_TEST_SLM_FAIL;
+                       printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
+-                             "See README.md or http://www.freedesktop.org/wiki/Software/Beignet/\n",
++                             "See /usr/share/doc/beignet-opencl-icd/Beignet.mdwn.gz or http://www.freedesktop.org/wiki/Software/Beignet/\n",
+                              test_data[0], test_data[1], test_data[2]);
+ 
+                     }
+diff --git a/docs/Beignet.mdwn b/docs/Beignet.mdwn
+index 9a2b516..72cf25e 100644
+--- a/docs/Beignet.mdwn
++++ b/docs/Beignet.mdwn
 @@ -142,7 +142,7 @@ Supported Targets
  
   * 3rd Generation Intel Core Processors
   * Intel “Bay Trail” platforms with Intel HD Graphics
-- * 4th Generation Intel Core Processors, need kernel patch currently, see the "Known Issues" section.
-+ * 4th Generation Intel Core Processors "Haswell", need kernel patch currently, see the "Known Issues" section.
+- * 4th Generation Intel Core Processors "Haswell", need kernel patch currently, see the "Known Issues" section.
++ * 4th Generation Intel Core Processors "Haswell", with some issues on Linux <= 4.1, see the "Known Issues" section.
   * 5th Generation Intel Core Processors "Broadwell".
  
  Known Issues
-@@ -163,22 +163,34 @@ Known Issues
-   But this command is a little bit dangerous, as if your kernel really hang, then the gpu will lock up
+@@ -164,7 +164,7 @@ Known Issues
    forever until a reboot.
  
--* Almost all unit tests fail.
--  There is a known issue in some versions of linux kernel which enable register whitelist feature
--  but miss some necessary registers which are required for beignet. For non-HSW platforms, the
--  problematic version are around 3.15 and 3.16 which have commit f0a346b... but haven't commit
--  c9224f... If it is the case, you can apply c9224f... manually and rebuild the kernel or just
--  disable the parse command by invoke the following command (use Ubuntu as an example):
-+* "Beignet: self-test failed" and almost all unit tests fail.
-+  Linux commits [f0a346b](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=f0a346bdafaf6fc4a51df9ddf1548fd888f860d8)
-+  to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069)
-+  (roughly 3.15 and 3.16, but _not_ Debian jessie's 3.16)
-+  enable the register whitelist by default but miss some registers needed
-+  for Beignet.
-+  
-+  This can be fixed by upgrading Linux, or by disabling the whitelist:
+ * "Beignet: self-test failed" and almost all unit tests fail.
+-  Linux 3.15 and 3.16 (commits [f0a346b](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=f0a346bdafaf6fc4a51df9ddf1548fd888f860d8)
++  Linux 3.15 and upstream 3.16 (_not_ Debian jessie 3.16; commits [f0a346b](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=f0a346bdafaf6fc4a51df9ddf1548fd888f860d8)
+   to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
+   enable the register whitelist by default but miss some registers needed
+   for Beignet.
+@@ -175,7 +175,7 @@ Known Issues
  
-   `# echo 0 > /sys/module/i915/parameters/enable_cmd_parser`
+   On Haswell hardware, Beignet 1.0.1 to 1.0.3 also required the
+   above workaround on later Linux versions, but this _should not_ be
+-  required in current (after [83f8739](http://cgit.freedesktop.org/beignet/commit/?id=83f8739b6fc4893fac60145326052ccb5cf653dc))
++  required in Beignet 1.1 or current (after [83f8739](http://cgit.freedesktop.org/beignet/commit/?id=83f8739b6fc4893fac60145326052ccb5cf653dc))
+   git master.
  
--  For HSW platforms, this issue exists in all linux kernel version after 3.15. We always need
--  to execute the above command.
--
--* Some unit test cases, maybe 20 to 30, fail on 4th Generation (HSW) platform.
--  _The 4th Generation Intel Core Processors's support requires some Linux kernel
--  modification_. You need to apply the patch at:  
--  [https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support](https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support)
-+  On Haswell hardware, Beignet 1.0.1-1 to 1.0.2-2 also required the
-+  above workaround on later Linux versions, but this _should not_ be
-+  required in this version of Beignet.
-+
-+* "Beignet: self-test failed" and 15-30 unit tests fail on 4th Generation (Haswell) hardware.
-+  On Haswell, shared local memory (\_\_local) does not work at all on
-+  Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
-+  on Linux 4.1.
-+  
-+  This will be fixed in Linux 4.2; older versions can be fixed with
-+  [this patch](https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support).
-+  
-+  If you do not need \_\_local, you can override the self-test with
-+  
-+  `export OCL_IGNORE_SELF_TEST=1`
-+  
-+  but using \_\_local after this may silently give wrong results.
+ * "Beignet: self-test failed" and 15-30 unit tests fail on 4th Generation (Haswell) hardware.
+diff --git a/docs/Beignet/Backend.mdwn b/docs/Beignet/Backend.mdwn
+index 583e5d2..e0de7bf 100644
+--- a/docs/Beignet/Backend.mdwn
++++ b/docs/Beignet/Backend.mdwn
+@@ -37,9 +37,7 @@ Environment variables are used all over the code. Most important ones are:
+   precision math instructions compliant with OpenCL Spec. So we provide a
+   software version to meet the high precision requirement. Obviously the
+   software version's performance is not as good as native version supported by
+-  GEN hardware. What's more, most graphics application don't need this high
+-  precision, so we choose 0 as the default value. So OpenCL apps do not suffer
+-  the performance penalty for using high precision math functions.
++  GEN hardware.
  
- * Precision issue.
-   Currently Gen does not provide native support of high precision math functions
+ - `OCL_SIMD_WIDTH` `(8 or 16)`. Select the number of lanes per hardware thread,
+   Normally, you don't need to set it, we will select suitable simd width for
