@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- beignet-1.0.1.orig/src/cl_device_id.c
 +++ beignet-1.0.1/src/cl_device_id.c
-@@ -394,10 +394,10 @@ brw_gt3_break:
+@@ -527,10 +527,10 @@ brw_gt3_break:
      case PCI_CHIP_SANDYBRIDGE_BRIDGE_S:
      case PCI_CHIP_SANDYBRIDGE_S_GT:
        // Intel(R) HD Graphics SandyBridge not supported yet
@@ -23,7 +23,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    if (ret == NULL)
 --- beignet-1.0.1.orig/src/intel/intel_driver.c
 +++ beignet-1.0.1/src/intel/intel_driver.c
-@@ -236,7 +236,6 @@ intel_driver_open(intel_driver_t *intel,
+@@ -242,7 +242,6 @@ intel_driver_open(intel_driver_t *intel,
    }
  
    if(!intel_driver_is_active(intel)) {
@@ -31,7 +31,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
      return CL_DEVICE_NOT_FOUND;
    }
  
-@@ -293,7 +292,6 @@ intel_driver_init_master(intel_driver_t
+@@ -299,7 +298,6 @@ intel_driver_init_master(intel_driver_t
    // usually dev_name = "/dev/dri/card%d"
    dev_fd = open(dev_name, O_RDWR);
    if (dev_fd == -1) {

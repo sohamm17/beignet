@@ -2,7 +2,7 @@ beignet (1.1.0-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Update and improve d/copyright.
-  * Drop patches applied upstream.
+  * Drop patches applied upstream, refresh others.
   * Update update-docs.patch.
   * Drop outdated README.Debian.
 

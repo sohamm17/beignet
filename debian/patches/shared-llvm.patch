@@ -7,7 +7,7 @@ Author: Rebecca Palmer <rebecca_palmer@zoho.com>
 
 --- beignet-1.0.2.orig/CMake/FindLLVM.cmake
 +++ beignet-1.0.2/CMake/FindLLVM.cmake
-@@ -93,20 +93,7 @@ execute_process(
+@@ -87,20 +87,7 @@ execute_process(
    OUTPUT_STRIP_TRAILING_WHITESPACE
  )
  
