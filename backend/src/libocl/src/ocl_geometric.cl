@@ -21,7 +21,7 @@
 #include "ocl_math.h"
 #include "ocl_float.h"
 
-PURE CONST float __gen_ocl_fabs(float x);
+CONST float __gen_ocl_fabs(float x) __asm("llvm.fabs" ".f32");
 
 OVERLOADABLE float dot(float p0, float p1) {
   return p0 * p1;
@@ -38,13 +38,9 @@ OVERLOADABLE float dot(float4 p0, float4 p1) {
 OVERLOADABLE float length(float x) { return __gen_ocl_fabs(x); }
 
 #define BODY \
-  if(m == 0) \
-    return 0; \
-  if(isinf(m)) \
-    return INFINITY; \
-  if(m < 1) \
-    m = 1; \
-  x /= m; \
+  m = m==0.0f ? 1.0f : m; \
+  m = isinf(m) ? 1.0f : m; \
+  x = x/m; \
   return m * sqrt(dot(x,x));
 OVERLOADABLE float length(float2 x) {
   float m = max(__gen_ocl_fabs(x.s0), __gen_ocl_fabs(x.s1));
@@ -64,30 +60,23 @@ OVERLOADABLE float distance(float2 x, float2 y) { return length(x-y); }
 OVERLOADABLE float distance(float3 x, float3 y) { return length(x-y); }
 OVERLOADABLE float distance(float4 x, float4 y) { return length(x-y); }
 OVERLOADABLE float normalize(float x) {
-  union { float f; unsigned u; } u;
-  u.f = x;
-  if(u.u == 0)
-    return 0.f;
-  if(isnan(x))
-    return NAN;
-  return u.u < 0x7fffffff ? 1.f : -1.f;
+  float m = length(x);
+  m = m == 0.0f ? 1.0f : m;
+  return x / m;
 }
 OVERLOADABLE float2 normalize(float2 x) {
   float m = length(x);
-  if(m == 0)
-    return 0;
+  m = m == 0.0f ? 1.0f : m;
   return x / m;
 }
 OVERLOADABLE float3 normalize(float3 x) {
   float m = length(x);
-  if(m == 0)
-    return 0;
+  m = m == 0.0f ? 1.0f : m;
   return x / m;
 }
 OVERLOADABLE float4 normalize(float4 x) {
   float m = length(x);
-  if(m == 0)
-    return 0;
+  m = m == 0.0f ? 1.0f : m;
   return x / m;
 }
 

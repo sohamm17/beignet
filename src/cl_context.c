@@ -68,7 +68,7 @@ cl_context_properties_process(const cl_context_properties *prop,
     case CL_CONTEXT_PLATFORM:
       CHECK (set_cl_context_platform);
       cl_props->platform_id = *(prop + 1);
-      if (UNLIKELY((cl_platform_id) cl_props->platform_id != intel_platform)) {
+      if (UNLIKELY((cl_platform_id) cl_props->platform_id != cl_get_platform_default())) {
         err = CL_INVALID_PLATFORM;
         goto error;
       }
@@ -149,6 +149,7 @@ cl_create_context(const cl_context_properties *  properties,
   /* Save the user callback and user data*/
   ctx->pfn_notify = pfn_notify;
   ctx->user_data = user_data;
+  cl_driver_set_atomic_flag(ctx->drv, ctx->device->atomic_test_result);
 
 exit:
   if (errcode_ret != NULL)
@@ -198,16 +199,16 @@ cl_context_delete(cl_context ctx)
 
   /* delete the internal programs. */
   for (i = CL_INTERNAL_KERNEL_MIN; i < CL_INTERNAL_KERNEL_MAX; i++) {
-    if (ctx->internel_kernels[i]) {
-      cl_kernel_delete(ctx->internel_kernels[i]);
-      ctx->internel_kernels[i] = NULL;
+    if (ctx->internal_kernels[i]) {
+      cl_kernel_delete(ctx->internal_kernels[i]);
+      ctx->internal_kernels[i] = NULL;
 
       assert(ctx->internal_prgs[i]);
       cl_program_delete(ctx->internal_prgs[i]);
       ctx->internal_prgs[i] = NULL;
     }
 
-    if (ctx->internel_kernels[i]) {
+    if (ctx->internal_kernels[i]) {
       cl_kernel_delete(ctx->built_in_kernels[i]);
       ctx->built_in_kernels[i] = NULL;
     }
@@ -268,72 +269,26 @@ cl_context_get_bufmgr(cl_context ctx)
 }
 
 cl_kernel
-cl_context_get_static_kernel(cl_context ctx, cl_int index, const char * str_kernel, const char * str_option)
-{
-  cl_int ret;
-  if (!ctx->internal_prgs[index]) {
-    size_t length = strlen(str_kernel) + 1;
-    ctx->internal_prgs[index] = cl_program_create_from_source(ctx, 1, &str_kernel, &length, NULL);
-
-    if (!ctx->internal_prgs[index])
-      return NULL;
-
-    ret = cl_program_build(ctx->internal_prgs[index], str_option);
-    if (ret != CL_SUCCESS)
-      return NULL;
-
-    ctx->internal_prgs[index]->is_built = 1;
-
-    /* All CL_ENQUEUE_FILL_BUFFER_ALIGN16_xxx use the same program, different kernel. */
-    if (index >= CL_ENQUEUE_FILL_BUFFER_ALIGN8_8 && index <= CL_ENQUEUE_FILL_BUFFER_ALIGN8_64) {
-      int i = CL_ENQUEUE_FILL_BUFFER_ALIGN8_8;
-      for (; i <= CL_ENQUEUE_FILL_BUFFER_ALIGN8_64; i++) {
-        if (index != i) {
-          assert(ctx->internal_prgs[i] == NULL);
-          assert(ctx->internel_kernels[i] == NULL);
-          cl_program_add_ref(ctx->internal_prgs[index]);
-          ctx->internal_prgs[i] = ctx->internal_prgs[index];
-        }
-
-        if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_8) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
-                                                              "__cl_fill_region_align8_2", NULL);
-        } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_16) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
-                                                              "__cl_fill_region_align8_4", NULL);
-        } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_32) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
-                                                              "__cl_fill_region_align8_8", NULL);
-        } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_64) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
-                                                              "__cl_fill_region_align8_16", NULL);
-        } else
-          assert(0);
-      }
-    } else {
-      ctx->internel_kernels[index] = cl_kernel_dup(ctx->internal_prgs[index]->ker[0]);
-    }
-  }
-
-  return ctx->internel_kernels[index];
-}
-
-cl_kernel
 cl_context_get_static_kernel_from_bin(cl_context ctx, cl_int index,
                   const char * str_kernel, size_t size, const char * str_option)
 {
   cl_int ret;
   cl_int binary_status = CL_SUCCESS;
-  if (!ctx->internal_prgs[index]) {
+  cl_kernel ker;
+  pthread_mutex_lock(&ctx->program_lock);
+  if (ctx->internal_prgs[index] == NULL) {
     ctx->internal_prgs[index] = cl_program_create_from_binary(ctx, 1, &ctx->device,
       &size, (const unsigned char **)&str_kernel, &binary_status, &ret);
 
-    if (!ctx->internal_prgs[index])
-      return NULL;
-
+    if (!ctx->internal_prgs[index]) {
+      ker = NULL;
+      goto unlock;
+    }
     ret = cl_program_build(ctx->internal_prgs[index], str_option);
-    if (ret != CL_SUCCESS)
-      return NULL;
+    if (ret != CL_SUCCESS) {
+      ker = NULL;
+      goto unlock;
+    }
 
     ctx->internal_prgs[index]->is_built = 1;
 
@@ -343,30 +298,33 @@ cl_context_get_static_kernel_from_bin(cl_context ctx, cl_int index,
       for (; i <= CL_ENQUEUE_FILL_BUFFER_ALIGN8_64; i++) {
         if (index != i) {
           assert(ctx->internal_prgs[i] == NULL);
-          assert(ctx->internel_kernels[i] == NULL);
+          assert(ctx->internal_kernels[i] == NULL);
           cl_program_add_ref(ctx->internal_prgs[index]);
           ctx->internal_prgs[i] = ctx->internal_prgs[index];
         }
 
         if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_8) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
+          ctx->internal_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
                                                               "__cl_fill_region_align8_2", NULL);
         } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_16) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
+          ctx->internal_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
                                                               "__cl_fill_region_align8_4", NULL);
         } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_32) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
+          ctx->internal_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
                                                               "__cl_fill_region_align8_8", NULL);
         } else if (i == CL_ENQUEUE_FILL_BUFFER_ALIGN8_64) {
-          ctx->internel_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
+          ctx->internal_kernels[i] = cl_program_create_kernel(ctx->internal_prgs[index],
                                                               "__cl_fill_region_align8_16", NULL);
         } else
           assert(0);
       }
     } else {
-      ctx->internel_kernels[index] = cl_kernel_dup(ctx->internal_prgs[index]->ker[0]);
+      ctx->internal_kernels[index] = cl_kernel_dup(ctx->internal_prgs[index]->ker[0]);
     }
   }
+  ker = ctx->internal_kernels[index];
 
-  return ctx->internel_kernels[index];
+unlock:
+  pthread_mutex_unlock(&ctx->program_lock);
+  return cl_kernel_dup(ker);
 }

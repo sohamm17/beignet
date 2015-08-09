@@ -2,8 +2,8 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}
                     ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
 ##### Math Function Part:
-EXEC_PROGRAM(mkdir ${CMAKE_CURRENT_SOURCE_DIR} ARGS generated -p)
-EXEC_PROGRAM(${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR} ARGS utest_math_gen.py OUTPUT_VARIABLE GEN_MATH_STRING)
+EXECUTE_PROCESS(COMMAND mkdir generated -p WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+EXECUTE_PROCESS(COMMAND ${PYTHON_EXECUTABLE} utest_math_gen.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE GEN_MATH_STRING)
 string(REGEX REPLACE " " ";" ADDMATHFUNC ${GEN_MATH_STRING})
 
 string(REGEX REPLACE "generated/([^\ ]*)\\.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../kernels/\\1.cl" KERNEL_MATH_LIST ${GEN_MATH_STRING})
@@ -39,6 +39,8 @@ set (utests_sources
   compiler_box_blur.cpp
   compiler_insert_to_constant.cpp
   compiler_argument_structure.cpp
+  compiler_argument_structure_indirect.cpp
+  compiler_argument_structure_select.cpp
   compiler_arith_shift_right.cpp
   compiler_mixed_pointer.cpp
   compiler_array0.cpp
@@ -49,8 +51,6 @@ set (utests_sources
   compiler_array4.cpp
   compiler_byte_scatter.cpp
   compiler_ceil.cpp
-  compiler_clz_short.cpp
-  compiler_clz_int.cpp
   compiler_popcount.cpp
   compiler_convert_uchar_sat.cpp
   compiler_copy_buffer.cpp
@@ -115,6 +115,7 @@ set (utests_sources
   compiler_write_only_shorts.cpp
   compiler_switch.cpp
   compiler_bswap.cpp
+  compiler_clz.cpp
   compiler_math.cpp
   compiler_atomic_functions.cpp
   compiler_async_copy.cpp
@@ -172,6 +173,9 @@ set (utests_sources
   runtime_compile_link.cpp
   compiler_long.cpp
   compiler_long_2.cpp
+  compiler_long_not.cpp
+  compiler_long_hi_sat.cpp
+  compiler_long_div.cpp
   compiler_long_convert.cpp
   compiler_long_shl.cpp
   compiler_long_shr.cpp
@@ -179,17 +183,19 @@ set (utests_sources
   compiler_long_mult.cpp
   compiler_long_cmp.cpp
   compiler_long_bitcast.cpp
+  compiler_half.cpp
   compiler_function_argument3.cpp
   compiler_function_qualifiers.cpp
   compiler_bool_cross_basic_block.cpp
   compiler_private_const.cpp
   compiler_private_data_overflow.cpp
   compiler_getelementptr_bitcast.cpp
-  compiler_simd_any.cpp
-  compiler_simd_all.cpp
+  compiler_sub_group_any.cpp
+  compiler_sub_group_all.cpp
   compiler_time_stamp.cpp
   compiler_double_precision.cpp
   load_program_from_gen_bin.cpp
+  load_program_from_spir.cpp
   get_arg_info.cpp
   profiling_exec.cpp
   enqueue_copy_buf.cpp
@@ -205,7 +211,10 @@ set (utests_sources
   compiler_assignment_operation_in_if.cpp
   vload_bench.cpp
   runtime_use_host_ptr_buffer.cpp
-  runtime_alloc_host_ptr_buffer.cpp)
+  runtime_alloc_host_ptr_buffer.cpp
+  compiler_get_sub_group_size.cpp
+  compiler_get_sub_group_id.cpp
+  compiler_sub_group_shuffle.cpp)
 
 if (LLVM_VERSION_NODOT VERSION_GREATER 34)
   SET(utests_sources
@@ -214,12 +223,12 @@ if (LLVM_VERSION_NODOT VERSION_GREATER 34)
 endif (LLVM_VERSION_NODOT VERSION_GREATER 34)
 
 if (X11_FOUND)
-  set(utests_sources
+  SET(utests_sources
       ${utests_sources}
       runtime_climage_from_boname.cpp)
   SET(UTESTS_REQUIRED_X11_LIB ${X11_LIBRARIES} ${XEXT_LIBRARIES})
 else()
-SET(UTESTS_REQUIRED_X11_LIB "")
+  SET(UTESTS_REQUIRED_X11_LIB "")
 endif (X11_FOUND)
 
 SET (kernel_bin ${CMAKE_CURRENT_SOURCE_DIR}/../kernels/compiler_ceil)

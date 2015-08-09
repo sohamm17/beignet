@@ -28,6 +28,7 @@ static void builtin_pow(void)
 {
   // Setup kernel and buffers
   int k, i, index_cur;
+  float ULPSIZE_NO_FAST_MATH = 16.0;
   float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
 
   for(i=0; i<count_input_ori;i++)
@@ -37,10 +38,10 @@ static void builtin_pow(void)
       input_data2[i*count_input_ori+k] = ori_data[k];
     }
 
-  const char* env_strict = getenv("OCL_STRICT_CONFORMANCE");
-  float ULPSIZE_FACTOR = 16.0;
-  if (env_strict == NULL || strcmp(env_strict, "0") == 0)
-    ULPSIZE_FACTOR = 10000.;
+  cl_device_fp_config fp_config;
+  clGetDeviceInfo(device, CL_DEVICE_SINGLE_FP_CONFIG, sizeof(cl_device_fp_config), &fp_config, 0);
+  bool denormals_supported = fp_config & CL_FP_DENORM;
+  float ULPSIZE_FACTOR = select_ulpsize(ULPSIZE_FAST_MATH,ULPSIZE_NO_FAST_MATH);
 
   OCL_CREATE_KERNEL("builtin_pow");
 
@@ -75,7 +76,9 @@ static void builtin_pow(void)
 #if udebug
       if ( (isinf(cpu_data[index_cur]) && !isinf(gpu_data[index_cur])) ||
            (isnan(cpu_data[index_cur]) && !isnan(gpu_data[index_cur])) ||
-           (fabs(gpu_data[index_cur] - cpu_data[index_cur]) > cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR)   )
+           (fabs(gpu_data[index_cur] - cpu_data[index_cur]) > cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR
+           && (denormals_supported || gpu_data[index_cur]!=0 || std::fpclassify(cpu_data[index_cur])!=FP_SUBNORMAL) ) )
+
       {
         printf_c("%d/%d: x:%f, y:%f -> gpu:%f  cpu:%f\n", k, i, input_data1[k], input_data2[k], gpu_data[index_cur], cpu_data[index_cur]);
       }
@@ -88,7 +91,8 @@ static void builtin_pow(void)
        OCL_ASSERT(isnan(gpu_data[index_cur]));
      else
      {
-       OCL_ASSERT(fabs(gpu_data[index_cur] - cpu_data[index_cur]) < cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR);
+       OCL_ASSERT((fabs(gpu_data[index_cur] - cpu_data[index_cur]) < cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR) ||
+       (!denormals_supported && gpu_data[index_cur]==0 && std::fpclassify(cpu_data[index_cur])==FP_SUBNORMAL) );
      }
 #endif
     }

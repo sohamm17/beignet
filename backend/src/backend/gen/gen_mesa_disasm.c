@@ -99,8 +99,8 @@ static const struct {
   [GEN_OPCODE_CMP] = { .name = "cmp", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_CMPN] = { .name = "cmpn", .nsrc = 2, .ndst = 1 },
 
-  [GEN_OPCODE_SEND] = { .name = "send", .nsrc = 1, .ndst = 1 },
-  [GEN_OPCODE_SENDC] = { .name = "sendc", .nsrc = 1, .ndst = 1 },
+  [GEN_OPCODE_SEND] = { .name = "send", .nsrc = 2, .ndst = 1 },
+  [GEN_OPCODE_SENDC] = { .name = "sendc", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_NOP] = { .name = "nop", .nsrc = 0, .ndst = 0 },
   [GEN_OPCODE_JMPI] = { .name = "jmpi", .nsrc = 0, .ndst = 0 },
   [GEN_OPCODE_BRD] = { .name = "brd", .nsrc = 0, .ndst = 0 },
@@ -143,7 +143,7 @@ static const char *_abs[2] = {
   [1] = "(abs)",
 };
 
-static const char *vert_stride_gen7[16] = {
+static const char *vert_stride[16] = {
   [0] = "0",
   [1] = "1",
   [2] = "2",
@@ -152,15 +152,6 @@ static const char *vert_stride_gen7[16] = {
   [5] = "16",
   [6] = "32",
   [15] = "VxH",
-};
-static const char *vert_stride_gen8[16] = {
-  [0] = "0",
-  [1] = "1",
-  [2] = "2",
-  [3] = "4",
-  [4] = "8",
-  [5] = "16",
-  [6] = "32",
 };
 
 static const char *width[8] = {
@@ -266,7 +257,7 @@ static const char *access_mode[2] = {
   [1] = "align16",
 };
 
-static const char *reg_encoding[8] = {
+static const char *reg_encoding[11] = {
   [0] = ":UD",
   [1] = ":D",
   [2] = ":UW",
@@ -274,10 +265,13 @@ static const char *reg_encoding[8] = {
   [4] = ":UB",
   [5] = ":B",
   [6] = ":DF",
-  [7] = ":F"
+  [7] = ":F",
+  [8] = ":UQ",
+  [9] = ":Q",
+  [10] = ":HF"
 };
 
-int reg_type_size[8] = {
+int reg_type_size[11] = {
   [0] = 4,
   [1] = 4,
   [2] = 2,
@@ -285,7 +279,10 @@ int reg_type_size[8] = {
   [4] = 1,
   [5] = 1,
   [6] = 8,
-  [7] = 4
+  [7] = 4,
+  [8] = 8,
+  [9] = 8,
+  [10] = 2,
 };
 
 static const char *reg_file[4] = {
@@ -467,6 +464,17 @@ static int gen_version;
       bits = ((const union Gen8NativeInstruction *)inst)->gen;  \
     bits;                                                       \
   })
+
+#define GEN_BITS_FIELD_WITH_TYPE(inst, gen, TYPE)               \
+  ({                                                            \
+    TYPE bits;                                                  \
+    if (gen_version < 80)                                       \
+      bits = ((const union Gen7NativeInstruction *)inst)->gen;	\
+    else                                                        \
+      bits = ((const union Gen8NativeInstruction *)inst)->gen;	\
+    bits;                                                       \
+  })
+
 
 #define GEN_BITS_FIELD2(inst, gen7, gen8)                       \
   ({                                                            \
@@ -713,11 +721,7 @@ static int src_align1_region(FILE *file,
 {
   int err = 0;
   string(file, "<");
-  if (gen_version < 80) {
-    err |= control(file, "vert stride", vert_stride_gen7, _vert_stride, NULL);
-  } else {
-    err |= control(file, "vert stride", vert_stride_gen8, _vert_stride, NULL);
-  }
+  err |= control(file, "vert stride", vert_stride, _vert_stride, NULL);
   string(file, ",");
   err |= control(file, "width", width, _width, NULL);
   string(file, ",");
@@ -797,11 +801,7 @@ static int src_da16(FILE *file,
     format(file, ".%d", 16 / reg_type_size[_reg_type]);
   string(file, "<");
 
-  if (gen_version < 80) {
-    err |= control(file, "vert stride", vert_stride_gen7, _vert_stride, NULL);
-  } else {
-    err |= control(file, "vert stride", vert_stride_gen8, _vert_stride, NULL);
-  }
+  err |= control(file, "vert stride", vert_stride, _vert_stride, NULL);
   string(file, ",4,1>");
   /*
    * Three kinds of swizzle display:
@@ -844,7 +844,10 @@ static int src0_3src(FILE *file, const void* inst)
     return 0;
   if (GEN_BITS_FIELD(inst, bits2.da3src.src0_subreg_nr))
     format(file, ".%d", GEN_BITS_FIELD(inst, bits2.da3src.src0_subreg_nr));
-  string(file, "<4,1,1>");
+  if (GEN_BITS_FIELD(inst, bits2.da3src.src0_rep_ctrl))
+    string(file, "<0,1,0>");
+  else
+    string(file, "<8,8,1>");
   err |= control(file, "src da16 reg type", reg_encoding,
                  GEN_TYPE_F, NULL);
   /*
@@ -889,7 +892,10 @@ static int src1_3src(FILE *file, const void* inst)
     return 0;
   if (src1_subreg_nr)
     format(file, ".%d", src1_subreg_nr);
-  string(file, "<4,1,1>");
+  if (GEN_BITS_FIELD(inst, bits2.da3src.src1_rep_ctrl))
+    string(file, "<0,1,0>");
+  else
+    string(file, "<8,8,1>");
   err |= control(file, "src da16 reg type", reg_encoding,
                  GEN_TYPE_F, NULL);
   /*
@@ -931,7 +937,10 @@ static int src2_3src(FILE *file, const void* inst)
     return 0;
   if (GEN_BITS_FIELD(inst, bits3.da3src.src2_subreg_nr))
     format(file, ".%d", GEN_BITS_FIELD(inst, bits3.da3src.src2_subreg_nr));
-  string(file, "<4,1,1>");
+  if (GEN_BITS_FIELD(inst, bits3.da3src.src2_rep_ctrl))
+    string(file, "<0,1,0>");
+  else
+    string(file, "<8,8,1>");
   err |= control(file, "src da16 reg type", reg_encoding,
                  GEN_TYPE_F, NULL);
   /*
@@ -956,6 +965,57 @@ static int src2_3src(FILE *file, const void* inst)
     err |= control(file, "channel select", chan_sel, swz_w, NULL);
   }
   return err;
+}
+
+static uint32_t __conv_half_to_float(uint16_t h)
+{
+  struct __FP32 {
+    uint32_t mantissa:23;
+    uint32_t exponent:8;
+    uint32_t sign:1;
+  };
+  struct __FP16 {
+    uint32_t mantissa:10;
+    uint32_t exponent:5;
+    uint32_t sign:1;
+  };
+  uint32_t f;
+  struct __FP32 o;
+  memset(&o, 0, sizeof(o));
+  struct __FP16 i;
+  memcpy(&i, &h, sizeof(uint16_t));
+
+  if (i.exponent == 0 && i.mantissa == 0) // (Signed) zero
+    o.sign = i.sign;
+  else {
+    if (i.exponent == 0) { // Denormal (converts to normalized)
+      // Adjust mantissa so it's normalized (and keep
+      // track of exponent adjustment)
+      int e = -1;
+      uint m = i.mantissa;
+      do {
+        e++;
+        m <<= 1;
+      } while ((m & 0x400) == 0);
+
+      o.mantissa = (m & 0x3ff) << 13;
+      o.exponent = 127 - 15 - e;
+      o.sign = i.sign;
+    } else if (i.exponent == 0x1f) { // Inf/NaN
+      // NOTE: Both can be handled with same code path
+      // since we just pass through mantissa bits.
+      o.mantissa = i.mantissa << 13;
+      o.exponent = 255;
+      o.sign = i.sign;
+    } else { // Normalized number
+      o.mantissa = i.mantissa << 13;
+      o.exponent = 127 - 15 + i.exponent;
+      o.sign = i.sign;
+    }
+  }
+
+  memcpy(&f, &o, sizeof(uint32_t));
+  return f;
 }
 
 static int imm(FILE *file, uint32_t type, const void* inst)
@@ -983,7 +1043,29 @@ static int imm(FILE *file, uint32_t type, const void* inst)
       format(file, "0x%xV", GEN_BITS_FIELD(inst, bits3.ud));
       break;
     case GEN_TYPE_F:
-      format(file, "%-gF", GEN_BITS_FIELD(inst, bits3.f));
+      format(file, "%-gF", GEN_BITS_FIELD_WITH_TYPE(inst, bits3.f, float));
+      break;
+    case GEN_TYPE_UL:
+      assert(!(gen_version < 80));
+      format(file, "0x%.8x %.8xUQ", (((const union Gen8NativeInstruction *)inst)->bits3).ud,
+                                (((const union Gen8NativeInstruction *)inst)->bits2).ud);
+      break;
+    case GEN_TYPE_L:
+    {
+      assert(!(gen_version < 80));
+      uint64_t val = (((const union Gen8NativeInstruction *)inst)->bits3).ud;
+      val = (val << 32) + ((((const union Gen8NativeInstruction *)inst)->bits2).ud);
+      format(file, "0x%lldQ", val);
+    }
+    case GEN_TYPE_HF_IMM:
+    {
+      uint16_t h = GEN_BITS_FIELD_WITH_TYPE(inst, bits3.d, uint16_t);
+      uint32_t uf = __conv_half_to_float(h);
+      float f;
+      memcpy(&f, &uf, sizeof(float));
+      format(file, "%-gHF", f);
+      break;
+    }
   }
   return 0;
 }
@@ -1005,10 +1087,15 @@ static int src0(FILE *file, const void* inst)
                      GEN_BITS_FIELD(inst, bits2.da1.src0_abs),
                      GEN_BITS_FIELD(inst, bits2.da1.src0_negate));
     } else {
+      int32_t imm_off = GEN_BITS_FIELD(inst, bits2.ia1.src0_indirect_offset);
+      if (gen_version >= 80) {
+        imm_off = imm_off +
+          ((((const union Gen8NativeInstruction *)inst)->bits2.ia1.src0_indirect_offset_9) << 9);
+      }
       return src_ia1(file,
                      GEN_BITS_FIELD(inst, bits1.ia1.src0_reg_type),
                      GEN_BITS_FIELD(inst, bits1.ia1.src0_reg_file),
-                     GEN_BITS_FIELD(inst, bits2.ia1.src0_indirect_offset),
+                     imm_off,
                      GEN_BITS_FIELD(inst, bits2.ia1.src0_subreg_nr),
                      GEN_BITS_FIELD(inst, bits2.ia1.src0_negate),
                      GEN_BITS_FIELD(inst, bits2.ia1.src0_abs),
@@ -1131,12 +1218,14 @@ int gen_disasm (FILE *file, const void *inst, uint32_t deviceID, uint32_t compac
 {
   int err = 0;
   int space = 0;
-  if (IS_IVYBRIDGE(deviceID)) {
+  if (IS_GEN7(deviceID)) {
     gen_version = 70;
-  } else if (IS_HASWELL(deviceID)) {
+  } else if (IS_GEN75(deviceID)) {
     gen_version = 75;
-  } else if (IS_BROADWELL(deviceID)) {
+  } else if (IS_GEN8(deviceID)) {
     gen_version = 80;
+  } else if (IS_GEN9(deviceID)) {
+    gen_version = 90;
   }
 
   if (PRED_CTRL(inst)) {
@@ -1242,59 +1331,61 @@ int gen_disasm (FILE *file, const void *inst, uint32_t deviceID, uint32_t compac
                      target, &space);
     }
 
-    switch (target) {
-      case GEN_SFID_SAMPLER:
-        format(file, " (%d, %d, %d, %d)",
-               SAMPLE_BTI(inst),
-               SAMPLER(inst),
-               SAMPLER_MSG_TYPE(inst),
-               SAMPLER_SIMD_MODE(inst));
-        break;
-      case GEN_SFID_DATAPORT_DATA:
-        if(UNTYPED_RW_CATEGORY(inst) == 0) {
+    if (GEN_BITS_FIELD2(inst, bits1.da1.src1_reg_file, bits2.da1.src1_reg_file) == GEN_IMMEDIATE_VALUE) {
+      switch (target) {
+        case GEN_SFID_SAMPLER:
+          format(file, " (%d, %d, %d, %d)",
+                 SAMPLE_BTI(inst),
+                 SAMPLER(inst),
+                 SAMPLER_MSG_TYPE(inst),
+                 SAMPLER_SIMD_MODE(inst));
+          break;
+        case GEN_SFID_DATAPORT_DATA:
+          if(UNTYPED_RW_CATEGORY(inst) == 0) {
+            format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
+                   UNTYPED_RW_BTI(inst),
+                   UNTYPED_RW_RGBA(inst),
+                   data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
+                   data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                   data_port_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+          } else {
+            format(file, " (addr: %d, blocks: %s, %s, mode: %s, %s)",
+                   SCRATCH_RW_OFFSET(inst),
+                   data_port_scratch_block_size[SCRATCH_RW_BLOCK_SIZE(inst)],
+                   data_port_scratch_invalidate[SCRATCH_RW_INVALIDATE_AFTER_READ(inst)],
+                   data_port_scratch_channel_mode[SCRATCH_RW_CHANNEL_MODE(inst)],
+                   data_port_scratch_msg_type[SCRATCH_RW_MSG_TYPE(inst)]);
+          }
+          break;
+        case GEN_SFID_DATAPORT1_DATA:
           format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
                  UNTYPED_RW_BTI(inst),
                  UNTYPED_RW_RGBA(inst),
                  data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
                  data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
-                 data_port_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
-        } else {
-          format(file, " (addr: %d, blocks: %s, %s, mode: %s, %s)",
-                 SCRATCH_RW_OFFSET(inst),
-                 data_port_scratch_block_size[SCRATCH_RW_BLOCK_SIZE(inst)],
-                 data_port_scratch_invalidate[SCRATCH_RW_INVALIDATE_AFTER_READ(inst)],
-                 data_port_scratch_channel_mode[SCRATCH_RW_CHANNEL_MODE(inst)],
-                 data_port_scratch_msg_type[SCRATCH_RW_MSG_TYPE(inst)]);
-        }
-        break;
-      case GEN_SFID_DATAPORT1_DATA:
-        format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
-               UNTYPED_RW_BTI(inst),
-               UNTYPED_RW_RGBA(inst),
-               data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
-               data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
-               data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
-        break;
-      case GEN_SFID_DATAPORT_CONSTANT:
-        format(file, " (bti: %d, %s)",
-               DWORD_RW_BTI(inst),
-               data_port_data_cache_msg_type[DWORD_RW_MSG_TYPE(inst)]);
-        break;
-      case GEN_SFID_MESSAGE_GATEWAY:
-        format(file, " (subfunc: %s, notify: %d, ackreq: %d)",
-               gateway_sub_function[MSG_GW_SUBFUNC(inst)],
-               MSG_GW_NOTIFY(inst),
-               MSG_GW_ACKREQ(inst));
-        break;
+                 data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+          break;
+        case GEN_SFID_DATAPORT_CONSTANT:
+          format(file, " (bti: %d, %s)",
+                 DWORD_RW_BTI(inst),
+                 data_port_data_cache_msg_type[DWORD_RW_MSG_TYPE(inst)]);
+          break;
+        case GEN_SFID_MESSAGE_GATEWAY:
+          format(file, " (subfunc: %s, notify: %d, ackreq: %d)",
+                 gateway_sub_function[MSG_GW_SUBFUNC(inst)],
+                 MSG_GW_NOTIFY(inst),
+                 MSG_GW_ACKREQ(inst));
+          break;
 
-      default:
-        format(file, "unsupported target %d", target);
-        break;
+        default:
+          format(file, "unsupported target %d", target);
+          break;
+      }
+      if (space)
+        string(file, " ");
+      format(file, "mlen %d", GENERIC_MSG_LENGTH(inst));
+      format(file, " rlen %d", GENERIC_RESPONSE_LENGTH(inst));
     }
-    if (space)
-      string(file, " ");
-    format(file, "mlen %d", GENERIC_MSG_LENGTH(inst));
-    format(file, " rlen %d", GENERIC_RESPONSE_LENGTH(inst));
   }
   pad(file, 64);
   if (OPCODE(inst) != GEN_OPCODE_NOP) {

@@ -36,10 +36,13 @@
 namespace gbe {
 namespace ir {
   struct BTI {
-    uint8_t bti[MAX_MIXED_POINTER];
-    uint8_t count;
-    BTI() : count(0) {
-      memset(bti, 0, MAX_MIXED_POINTER);
+    uint8_t isConst; // whether fixed bti
+    union {
+      Register reg;  // mixed reg
+      unsigned short imm;  // fixed bti
+    };
+
+    BTI() : isConst(0) {
     }
     ~BTI() {}
   };
@@ -199,6 +202,15 @@ namespace ir {
   /*! Output the instruction string in the given stream */
   std::ostream &operator<< (std::ostream &out, const Instruction &proxy);
 
+  /*! Nullary instruction instructions are typed. */
+  class NullaryInstruction : public Instruction {
+  public:
+    /*! Get the type manipulated by the instruction */
+    Type getType(void) const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
   /*! Unary instructions are typed. dst and sources share the same type */
   class UnaryInstruction : public Instruction {
   public:
@@ -280,10 +292,12 @@ namespace ir {
   class AtomicInstruction : public Instruction {
   public:
     /*! Where the address register goes */
-    static const uint32_t addressIndex = 0;
+    static const uint32_t btiIndex = 0;
+    static const uint32_t addressIndex = 1;
     /*! Address space that is manipulated here */
     AddressSpace getAddressSpace(void) const;
-    BTI getBTI(void) const;
+    Register getBTI(void) const { return this->getSrc(btiIndex); }
+    bool isFixedBTI(void) const;
     /*! Return the atomic function code */
     AtomicOps getAtomicOpcode(void) const;
     /*! Return the register that contains the addresses */
@@ -298,12 +312,14 @@ namespace ir {
   class StoreInstruction : public Instruction {
   public:
     /*! Where the address register goes */
-    static const uint32_t addressIndex = 0;
+    static const uint32_t btiIndex = 0;
+    static const uint32_t addressIndex = 1;
     /*! Return the types of the values to store */
     Type getValueType(void) const;
     /*! Give the number of values the instruction is storing (srcNum-1) */
     uint32_t getValueNum(void) const;
-    BTI getBTI(void) const;
+    Register getBTI(void) const { return this->getSrc(btiIndex); }
+    bool isFixedBTI(void) const;
     /*! Address space that is manipulated here */
     AddressSpace getAddressSpace(void) const;
     /*! DWORD aligned means untyped read for Gen. That is what matters */
@@ -313,7 +329,7 @@ namespace ir {
     /*! Return the register that contain value valueID */
     INLINE Register getValue(uint32_t valueID) const {
       GBE_ASSERT(valueID < this->getValueNum());
-      return this->getSrc(valueID + 1u);
+      return this->getSrc(valueID + 2u);
     }
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
@@ -334,8 +350,9 @@ namespace ir {
     /*! DWORD aligned means untyped read for Gen. That is what matters */
     bool isAligned(void) const;
     /*! Return the register that contains the addresses */
-    INLINE Register getAddress(void) const { return this->getSrc(0u); }
-    BTI getBTI(void) const;
+    INLINE Register getAddress(void) const { return this->getSrc(1u); }
+    Register getBTI(void) const {return this->getSrc(0u);}
+    bool isFixedBTI(void) const;
     /*! Return the register that contain value valueID */
     INLINE Register getValue(uint32_t valueID) const {
       return this->getDst(valueID);
@@ -505,9 +522,26 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
   };
 
+  /*! simd shuffle */
+  class SimdShuffleInstruction : public Instruction {
+  public:
+    Type getType(void) const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
   /*! return a region of a register, make sure the offset does not exceed the register size */
   class RegionInstruction : public Instruction {
   public:
+    uint32_t getOffset(void) const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
+  /*! Indirect Move instruction */
+  class IndirectMovInstruction : public Instruction {
+  public:
+    Type getType(void) const;
     uint32_t getOffset(void) const;
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
@@ -559,6 +593,12 @@ namespace ir {
   /// All emission functions
   ///////////////////////////////////////////////////////////////////////////
 
+  /*! alu0.type dst */
+  Instruction ALU0(Opcode opcode, Type type, Register dst);
+  /*! simd_size.type dst */
+  Instruction SIMD_SIZE(Type type, Register dst);
+  /*! simd_id.type dst */
+  Instruction SIMD_ID(Type type, Register dst);
   /*! alu1.type dst src */
   Instruction ALU1(Opcode opcode, Type type, Register dst, Register src);
   /*! mov.type dst src */
@@ -587,6 +627,8 @@ namespace ir {
   Instruction FBL(Type type, Register dst, Register src);
   /*! cbit.type dst src */
   Instruction CBIT(Type type, Register dst, Register src);
+  /*! lzd.type dst src */
+  Instruction LZD(Type type, Register dst, Register src);
   /*! hadd.type dst src */
   Instruction HADD(Type type, Register dst, Register src0, Register src1);
   /*! rhadd.type dst src */
@@ -619,6 +661,8 @@ namespace ir {
   Instruction RNDU(Type type, Register dst, Register src);
   /*! rndz.type dst src */
   Instruction RNDZ(Type type, Register dst, Register src);
+  /*! bswap.type dst src */
+  Instruction BSWAP(Type type, Register dst, Register src);
   /*! pow.type dst src0 src1 */
   Instruction POW(Type type, Register dst, Register src0, Register src1);
   /*! mul.type dst src0 src1 */
@@ -667,6 +711,8 @@ namespace ir {
   Instruction GT(Type type, Register dst, Register src0, Register src1);
   /*! ord.type dst src0 src1 */
   Instruction ORD(Type type, Register dst, Register src0, Register src1);
+  /*! sub_group_shuffle.type dst src0 src1 */
+  Instruction SIMD_SHUFFLE(Type type, Register dst, Register src0, Register src1);
   /*! BITCAST.{dstType <- srcType} dst src */
   Instruction BITCAST(Type dstType, Type srcType, Tuple dst, Tuple src, uint8_t dstNum, uint8_t srcNum);
   /*! cvt.{dstType <- srcType} dst src */
@@ -678,7 +724,7 @@ namespace ir {
   /*! F32TO16.{dstType <- srcType} dst src */
   Instruction F32TO16(Type dstType, Type srcType, Register dst, Register src);
   /*! atomic dst addr.space {src1 {src2}} */
-  Instruction ATOMIC(AtomicOps opcode, Register dst, AddressSpace space, BTI bti, Tuple src);
+  Instruction ATOMIC(AtomicOps opcode, Register dst, AddressSpace space, Register bti, bool fixedBTI, Tuple src);
   /*! bra labelIndex */
   Instruction BRA(LabelIndex labelIndex);
   /*! (pred) bra labelIndex */
@@ -694,9 +740,9 @@ namespace ir {
   /*! ret */
   Instruction RET(void);
   /*! load.type.space {dst1,...,dst_valueNum} offset value */
-  Instruction LOAD(Type type, Tuple dst, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, BTI bti);
+  Instruction LOAD(Type type, Tuple dst, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, bool fixedBTI, Register bti);
   /*! store.type.space offset {src1,...,src_valueNum} value */
-  Instruction STORE(Type type, Tuple src, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, BTI bti);
+  Instruction STORE(Type type, Tuple src, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, bool fixedBTI, Register bti);
   /*! loadi.type dst value */
   Instruction LOADI(Type type, Register dst, ImmediateIndex value);
   /*! sync.params... (see Sync instruction) */
@@ -704,10 +750,11 @@ namespace ir {
 
   Instruction READ_ARF(Type type, Register dst, ARFRegister arf);
   Instruction REGION(Register dst, Register src, uint32_t offset);
+  Instruction INDIRECT_MOV(Type type, Register dst, Register src0, Register src1, uint32_t offset);
   /*! typed write */
-  Instruction TYPED_WRITE(uint8_t imageIndex, Tuple src, Type srcType, Type coordType);
+  Instruction TYPED_WRITE(uint8_t imageIndex, Tuple src, uint8_t srcNum, Type srcType, Type coordType);
   /*! sample textures */
-  Instruction SAMPLE(uint8_t imageIndex, Tuple dst, Tuple src, bool dstIsFloat, bool srcIsFloat, uint8_t sampler, uint8_t samplerOffset);
+  Instruction SAMPLE(uint8_t imageIndex, Tuple dst, Tuple src, uint8_t srcNum, bool dstIsFloat, bool srcIsFloat, uint8_t sampler, uint8_t samplerOffset);
   /*! get image information , such as width/height/depth/... */
   Instruction GET_IMAGE_INFO(int infoType, Register dst, uint8_t imageIndex, Register infoReg);
   /*! label labelIndex */

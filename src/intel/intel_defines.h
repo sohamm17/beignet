@@ -88,6 +88,7 @@
 #define PIPELINE_SELECT_3D              0
 #define PIPELINE_SELECT_MEDIA           1
 #define PIPELINE_SELECT_GPGPU           2
+#define PIPELINE_SELECT_MASK            (3 << 8)
 
 #define UF0_CS_REALLOC                  (1 << 13)
 #define UF0_VFE_REALLOC                 (1 << 12)
@@ -303,7 +304,6 @@
 
 #define URB_SIZE(intel)         (IS_IGDNG(intel->device_id) ? 1024 : \
                                  IS_G4X(intel->device_id) ? 384 : 256)
-
 // HSW
 #define HSW_SCRATCH1_OFFSET                      (0xB038)
 #define HSW_ROW_CHICKEN3_HDC_OFFSET              (0xE49C)

@@ -663,7 +663,8 @@ cl_image_tiling_t cl_get_default_tiling(cl_driver drv)
 
   if (!initialized) {
     // FIXME, need to find out the performance diff's root cause on BDW.
-    if(cl_driver_get_ver(drv) == 8)
+    // SKL's 3D Image can't use TILE_X, so use TILE_Y as default
+    if(cl_driver_get_ver(drv) == 8 || cl_driver_get_ver(drv) == 9)
       tiling = CL_TILE_Y;
     char *tilingStr = getenv("OCL_TILING");
     if (tilingStr != NULL) {
@@ -842,7 +843,8 @@ _cl_mem_new_image(cl_context ctx,
       image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
     aligned_slice_pitch = 0;
   else
-    aligned_slice_pitch = aligned_pitch * ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
+    //SKL need use tiling's aligned_h to calc slice_pitch and IVB to BDW need CL_NO_TILE's aligned_h to calc.
+    aligned_slice_pitch = aligned_pitch * ALIGN(h, cl_buffer_get_tiling_align(ctx, tiling, 2));
 
   cl_mem_image_init(cl_mem_image(mem), w, h, image_type, depth, *fmt,
                     intel_fmt, bpp, aligned_pitch, aligned_slice_pitch, tiling,
@@ -1201,6 +1203,7 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 3, sizeof(int), &dw_dst_offset);
     cl_kernel_set_arg(ker, 4, sizeof(int), &cb);
     ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    cl_kernel_delete(ker);
     return ret;
   }
 
@@ -1241,6 +1244,7 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 5, sizeof(int), &first_mask);
     cl_kernel_set_arg(ker, 6, sizeof(int), &last_mask);
     ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    cl_kernel_delete(ker);
     return ret;
   }
 
@@ -1270,6 +1274,7 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 7, sizeof(int), &shift);
     cl_kernel_set_arg(ker, 8, sizeof(int), &dw_mask);
     ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    cl_kernel_delete(ker);
     return ret;
   }
 
@@ -1298,6 +1303,7 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 8, sizeof(int), &dw_mask);
     cl_kernel_set_arg(ker, 9, sizeof(int), &src_less);
     ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    cl_kernel_delete(ker);
     return ret;
   }
 
@@ -1370,6 +1376,7 @@ cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &origin[2]);
 
   ret = cl_command_queue_ND_range(queue, ker, 3, global_off, global_sz, local_sz);
+  cl_kernel_delete(ker);
   return ret;
 }
 
@@ -1472,6 +1479,7 @@ cl_mem_fill(cl_command_queue queue, const void * pattern, size_t pattern_size,
     cl_kernel_set_arg(ker, 4, pattern_size, pattern1);
 
   ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  cl_kernel_delete(ker);
   return ret;
 }
 
@@ -1544,7 +1552,7 @@ cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
   cl_kernel_set_arg(ker, 10, sizeof(cl_int), &dst_slice_pitch);
 
   ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
-
+  cl_kernel_delete(ker);
   return ret;
 }
 
@@ -1694,6 +1702,8 @@ cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image
   ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
 
 fail:
+
+  cl_kernel_delete(ker);
   if (fixupDataType) {
     src_image->intel_fmt = savedIntelFmt;
     dst_image->intel_fmt = savedIntelFmt;
@@ -1795,6 +1805,7 @@ cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image,
 
 fail:
 
+  cl_kernel_delete(ker);
   image->intel_fmt = intel_fmt;
   image->bpp = bpp;
   image->w = w_saved;
@@ -1814,6 +1825,10 @@ cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_me
   uint32_t intel_fmt, bpp;
   cl_image_format fmt;
   size_t origin0, region0;
+  size_t kn_src_offset;
+  int align16 = 0;
+  size_t align_size = 1;
+  size_t w_saved = 0;
 
   if(region[1] == 1) local_sz[1] = 1;
   if(region[2] == 1) local_sz[2] = 1;
@@ -1824,24 +1839,48 @@ cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_me
   /* We use one kernel to copy the data. The kernel is lazily created. */
   assert(image->base.ctx == buffer->ctx);
 
-  fmt.image_channel_order = CL_R;
-  fmt.image_channel_data_type = CL_UNSIGNED_INT8;
   intel_fmt = image->intel_fmt;
   bpp = image->bpp;
-  image->intel_fmt = cl_image_get_intel_format(&fmt);
-  image->w = image->w * image->bpp;
-  image->bpp = 1;
+  w_saved = image->w;
   region0 = region[0] * bpp;
-  origin0 = dst_origin[0] * bpp;
+  kn_src_offset = src_offset;
+  if((image->image_type == CL_MEM_OBJECT_IMAGE2D) && ((image->w * image->bpp) % 16 == 0) &&
+      ((dst_origin[0] * bpp) % 16 == 0) && (region0 % 16 == 0) && (src_offset % 16 == 0)){
+    fmt.image_channel_order = CL_RGBA;
+    fmt.image_channel_data_type = CL_UNSIGNED_INT32;
+    align16 = 1;
+    align_size = 16;
+  }
+  else{
+    fmt.image_channel_order = CL_R;
+    fmt.image_channel_data_type = CL_UNSIGNED_INT8;
+    align_size = 1;
+  }
+  image->intel_fmt = cl_image_get_intel_format(&fmt);
+  image->w = (image->w * image->bpp) / align_size;
+  image->bpp = align_size;
+  region0 = (region[0] * bpp) / align_size;
+  origin0 = (dst_origin[0] * bpp) / align_size;
+  kn_src_offset /= align_size;
   global_sz[0] = ((region0 + local_sz[0] - 1) / local_sz[0]) * local_sz[0];
 
   /* setup the kernel and run. */
   if(image->image_type == CL_MEM_OBJECT_IMAGE2D) {
+    if(align16){
+      extern char cl_internal_copy_buffer_to_image_2d_align16_str[];
+      extern size_t cl_internal_copy_buffer_to_image_2d_align16_str_size;
+
+      ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_TO_IMAGE_2D_ALIGN16,
+                cl_internal_copy_buffer_to_image_2d_align16_str,
+                (size_t)cl_internal_copy_buffer_to_image_2d_align16_str_size, NULL);
+    }
+    else{
       extern char cl_internal_copy_buffer_to_image_2d_str[];
       extern size_t cl_internal_copy_buffer_to_image_2d_str_size;
 
       ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_TO_IMAGE_2D,
           cl_internal_copy_buffer_to_image_2d_str, (size_t)cl_internal_copy_buffer_to_image_2d_str_size, NULL);
+    }
   }else if(image->image_type == CL_MEM_OBJECT_IMAGE3D) {
       extern char cl_internal_copy_buffer_to_image_3d_str[];
       extern size_t cl_internal_copy_buffer_to_image_3d_str_size;
@@ -1860,13 +1899,14 @@ cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_me
   cl_kernel_set_arg(ker, 5, sizeof(cl_int), &origin0);
   cl_kernel_set_arg(ker, 6, sizeof(cl_int), &dst_origin[1]);
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &dst_origin[2]);
-  cl_kernel_set_arg(ker, 8, sizeof(cl_int), &src_offset);
+  cl_kernel_set_arg(ker, 8, sizeof(cl_int), &kn_src_offset);
 
   ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  cl_kernel_delete(ker);
 
   image->intel_fmt = intel_fmt;
   image->bpp = bpp;
-  image->w = image->w / bpp;
+  image->w = w_saved;
 
   return ret;
 }

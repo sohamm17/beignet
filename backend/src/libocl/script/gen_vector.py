@@ -20,13 +20,14 @@
 
 # This file is to generate inline code to lower down those builtin
 # vector functions to scalar functions.
+from __future__ import print_function
 import re
 import sys
 import os
 
 if len(sys.argv) != 4:
-    print "Invalid argument {0}".format(sys.argv)
-    print "use {0} spec_file_name output_file_name just_proto".format(sys.argv[0])
+    print("Invalid argument {0}".format(sys.argv))
+    print("use {0} spec_file_name output_file_name just_proto".format(sys.argv[0]))
     raise
 
 all_vector = 1,2,3,4,8,16
@@ -56,17 +57,18 @@ all_itype = "char","short","int","long"
 all_utype = "uchar","ushort","uint","ulong"
 all_int_type = all_itype + all_utype
 
-all_float_type = "float","double"
+all_float_type = "float","double","half"
 all_type = all_int_type + all_float_type
 
 # all vector/scalar types
 for t in all_type:
-    exec "{0}n = [\"{0}n\", gen_vector_type([\"{0}\"])]".format(t)
-    exec "s{0} = [\"{0}\", gen_vector_type([\"{0}\"], [1])]".format(t)
+    exec("{0}n = [\"{0}n\", gen_vector_type([\"{0}\"])]".format(t))
+    exec("s{0} = [\"{0}\", gen_vector_type([\"{0}\"], [1])]".format(t))
 
 # Predefined type sets according to the Open CL spec.
 math_gentype = ["math_gentype", gen_vector_type(all_float_type)]
 math_gentypef = ["math_gentypef", gen_vector_type(["float"])]
+math_gentypeh = ["math_gentypeh", gen_vector_type(["half"])]
 math_gentyped = ["math_gentyped", gen_vector_type(["double"])]
 
 half_native_math_gentype = ["half_native_math_gentype", gen_vector_type(["float"])]
@@ -79,6 +81,7 @@ fast_integer_gentype = ["fast_integer_gentype", gen_vector_type(["uint", "int"])
 
 common_gentype = ["common_gentype", gen_vector_type(all_float_type)]
 common_gentypef = ["common_gentypef", gen_vector_type(["float"])]
+common_gentypeh = ["common_gentypeh", gen_vector_type(["half"])]
 common_gentyped = ["common_gentyped", gen_vector_type(["double"])]
 
 relational_gentype = ["relational_gentype", gen_vector_type(all_type)]
@@ -90,14 +93,14 @@ misc_gentypen = ["misc_gentypen", gen_vector_type(all_type, [2, 4, 8, 16])]
 misc_ugentypem = ["misc_ugentypem", gen_vector_type(all_utype, [2, 4, 8, 16])]
 misc_ugentypen = ["misc_ugentypen", gen_vector_type(all_utype, [2, 4, 8, 16])]
 
-all_predefined_type = math_gentype, math_gentypef, math_gentyped,                \
+all_predefined_type = math_gentype, math_gentypef, math_gentyped, math_gentypeh, \
                       half_native_math_gentype, integer_gentype,integer_sgentype,\
                       integer_ugentype, charn, ucharn, shortn, ushortn, intn,    \
-                      uintn, longn, ulongn, floatn, doublen,                     \
+                      uintn, longn, ulongn, floatn, doublen, halfn, common_gentypeh, \
                       fast_integer_gentype, common_gentype, common_gentypef,     \
                       common_gentyped, relational_gentype, relational_igentype,  \
-                      relational_ugentype, schar, suchar, sshort, sint, suint,   \
-                      slong, sulong, sfloat, sdouble, misc_gentypem,              \
+                      relational_ugentype, schar, suchar, sshort, sushort, sint, \
+                      suint, slong, sulong, sfloat, shalf, sdouble, misc_gentypem,  \
                       misc_ugentypem, misc_gentypen, misc_ugentypen
 
 # type dictionary contains all the predefined type sets.
@@ -124,10 +127,12 @@ def check_type(types):
     for t in types:
         memspace, t = stripMemSpace(t)
         if not t in type_dict:
-            print t
-            raise "found invalid type."
+            print(t)
+            raise TypeError("found invalid type.")
 
 def match_unsigned(dtype):
+    if dtype[0] == 'half':
+        return ["ushort", dtype[1]]
     if dtype[0] == 'float':
         return ["uint", dtype[1]]
     if dtype[0] == 'double':
@@ -137,6 +142,8 @@ def match_unsigned(dtype):
     return ['u' + dtype[0], dtype[1]]
 
 def match_signed(dtype):
+    if dtype[0] == 'half':
+        return ["short", dtype[1]]
     if dtype[0] == 'float':
         return ["int", dtype[1]]
     if dtype[0] == 'double':
@@ -187,8 +194,8 @@ def fixup_type(dstType, srcType, n):
         if (len(dstType) == len(srcType)):
             return dstType[n]
 
-    print dstType, srcType
-    raise "type mispatch"
+    print(dstType, srcType)
+    raise TypeError("type mispatch")
 
 class builtinProto():
     valueTypeStr = ""
@@ -226,7 +233,7 @@ class builtinProto():
 
     def init_from_line(self, t):
         self.append('//{0}'.format(t))
-        line = filter(None, re.split(',| |\(', t.rstrip(')\n')))
+        line = [_f for _f in re.split(',| |\(', t.rstrip(')\n')) if _f]
         self.paramCount = 0
         stripped = 0
         memSpace = ''
@@ -310,7 +317,7 @@ class builtinProto():
                 vtype = fixup_type(vtypeSeq, ptypeSeqs[n], i)
                 if vtype[1] != ptype[1]:
                     if ptype[1] != 1:
-                        raise "parameter is not a scalar but has different width with result value."
+                        raise TypeError("parameter is not a scalar but has different width with result value.")
                     if isPointer(ptype):
                         formatStr += '&'
                     formatStr += 'param{0}'.format(n)
@@ -333,7 +340,7 @@ class builtinProto():
 
     def output(self):
         for line in self.outputStr:
-            print line
+            print(line)
 
     def output(self, outFile):
         for line in self.outputStr:

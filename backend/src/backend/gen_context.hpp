@@ -90,7 +90,7 @@ namespace gbe
     /*! Emit the instructions */
     void emitInstructionStream(void);
     /*! Set the correct target values for the branches */
-    bool patchBranches(void);
+    virtual bool patchBranches(void);
     /*! Forward ir::Function isSpecialReg method */
     INLINE bool isSpecialReg(ir::Register reg) const {
       return fn.isSpecialReg(reg);
@@ -124,32 +124,33 @@ namespace gbe
 
     /*! Final Gen ISA emission helper functions */
     void emitLabelInstruction(const SelectionInstruction &insn);
-    void emitUnaryInstruction(const SelectionInstruction &insn);
-    void emitUnaryWithTempInstruction(const SelectionInstruction &insn);
-    void emitBinaryInstruction(const SelectionInstruction &insn);
-    void emitBinaryWithTempInstruction(const SelectionInstruction &insn);
+    virtual void emitUnaryInstruction(const SelectionInstruction &insn);
+    virtual void emitUnaryWithTempInstruction(const SelectionInstruction &insn);
+    virtual void emitBinaryInstruction(const SelectionInstruction &insn);
+    virtual void emitSimdShuffleInstruction(const SelectionInstruction &insn);
+    virtual void emitBinaryWithTempInstruction(const SelectionInstruction &insn);
     void emitTernaryInstruction(const SelectionInstruction &insn);
-    void emitI64MULHIInstruction(const SelectionInstruction &insn);
-    void emitI64MADSATInstruction(const SelectionInstruction &insn);
-    void emitI64HADDInstruction(const SelectionInstruction &insn);
-    void emitI64RHADDInstruction(const SelectionInstruction &insn);
-    void emitI64ShiftInstruction(const SelectionInstruction &insn);
-    void emitI64CompareInstruction(const SelectionInstruction &insn);
-    void emitI64SATADDInstruction(const SelectionInstruction &insn);
-    void emitI64SATSUBInstruction(const SelectionInstruction &insn);
-    void emitI64ToFloatInstruction(const SelectionInstruction &insn);
-    void emitFloatToI64Instruction(const SelectionInstruction &insn);
+    virtual void emitI64MULHIInstruction(const SelectionInstruction &insn);
+    virtual void emitI64MADSATInstruction(const SelectionInstruction &insn);
+    virtual void emitI64HADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64RHADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64ShiftInstruction(const SelectionInstruction &insn);
+    virtual void emitI64CompareInstruction(const SelectionInstruction &insn);
+    virtual void emitI64SATADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64SATSUBInstruction(const SelectionInstruction &insn);
+    virtual void emitI64ToFloatInstruction(const SelectionInstruction &insn);
+    virtual void emitFloatToI64Instruction(const SelectionInstruction &insn);
     void emitCompareInstruction(const SelectionInstruction &insn);
     void emitJumpInstruction(const SelectionInstruction &insn);
     void emitIndirectMoveInstruction(const SelectionInstruction &insn);
     void emitEotInstruction(const SelectionInstruction &insn);
     void emitNoOpInstruction(const SelectionInstruction &insn);
     void emitWaitInstruction(const SelectionInstruction &insn);
-    void emitBarrierInstruction(const SelectionInstruction &insn);
+    virtual void emitBarrierInstruction(const SelectionInstruction &insn);
     void emitFenceInstruction(const SelectionInstruction &insn);
     void emitMathInstruction(const SelectionInstruction &insn);
-    void emitRead64Instruction(const SelectionInstruction &insn);
-    void emitWrite64Instruction(const SelectionInstruction &insn);
+    virtual void emitRead64Instruction(const SelectionInstruction &insn);
+    virtual void emitWrite64Instruction(const SelectionInstruction &insn);
     void emitUntypedReadInstruction(const SelectionInstruction &insn);
     void emitUntypedWriteInstruction(const SelectionInstruction &insn);
     void emitAtomicInstruction(const SelectionInstruction &insn);
@@ -157,16 +158,20 @@ namespace gbe
     void emitByteScatterInstruction(const SelectionInstruction &insn);
     void emitPackByteInstruction(const SelectionInstruction &insn);
     void emitUnpackByteInstruction(const SelectionInstruction &insn);
+    virtual void emitPackLongInstruction(const SelectionInstruction &insn);
+    virtual void emitUnpackLongInstruction(const SelectionInstruction &insn);
     void emitDWordGatherInstruction(const SelectionInstruction &insn);
     void emitSampleInstruction(const SelectionInstruction &insn);
     void emitTypedWriteInstruction(const SelectionInstruction &insn);
     void emitSpillRegInstruction(const SelectionInstruction &insn);
     void emitUnSpillRegInstruction(const SelectionInstruction &insn);
     void emitGetImageInfoInstruction(const SelectionInstruction &insn);
-    void emitI64MULInstruction(const SelectionInstruction &insn);
-    void emitI64DIVREMInstruction(const SelectionInstruction &insn);
+    virtual void emitI64MULInstruction(const SelectionInstruction &insn);
+    virtual void emitI64DIVREMInstruction(const SelectionInstruction &insn);
     void scratchWrite(const GenRegister header, uint32_t offset, uint32_t reg_num, uint32_t reg_type, uint32_t channel_mode);
     void scratchRead(const GenRegister dst, const GenRegister header, uint32_t offset, uint32_t reg_num, uint32_t reg_type, uint32_t channel_mode);
+    unsigned beforeMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, unsigned desc);
+    void afterMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, unsigned jip0);
 
     /*! Implements base class */
     virtual Kernel *allocateKernel(void);
@@ -205,6 +210,8 @@ namespace gbe
     }
     /*! allocate a new curbe register and insert to curbe pool. */
     void allocCurbeReg(ir::Register reg, gbe_curbe_type value, uint32_t subValue = 0);
+
+    virtual void setA0Content(uint16_t new_a0[16], uint16_t max_offset = 0, int sz = 0);
 
   private:
     CompileErrorCode errCode;

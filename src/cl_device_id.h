@@ -66,6 +66,7 @@ struct _cl_device_id {
   cl_uint  mem_base_addr_align;
   cl_uint  min_data_type_align_size;
   cl_device_fp_config single_fp_config;
+  cl_device_fp_config half_fp_config;
   cl_device_fp_config double_fp_config;
   cl_device_mem_cache_type global_mem_cache_type;
   cl_uint  global_mem_cache_line_size;
@@ -93,7 +94,7 @@ struct _cl_device_id {
   const char *version;
   const char *profile;
   const char *opencl_c_version;
-  const char *extensions;
+  const char extensions[256];
   const char *driver_version;
   const char *built_in_kernels;
   size_t name_sz;
@@ -113,6 +114,7 @@ struct _cl_device_id {
   cl_device_affinity_domain    affinity_domain;
   cl_device_partition_property partition_type[3];
   cl_uint      device_reference_count;
+  uint32_t atomic_test_result;
 };
 
 /* Get a device from the given platform */

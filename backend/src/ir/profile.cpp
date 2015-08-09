@@ -44,7 +44,9 @@ namespace ir {
         "retVal", "slm_offset",
         "printf_buffer_pointer", "printf_index_buffer_pointer",
         "dwblockip",
-        "invalid"
+        "lane_id",
+        "invalid",
+        "bti_utility"
     };
 
 #if GBE_DEBUG
@@ -88,7 +90,9 @@ namespace ir {
       DECL_NEW_REG(FAMILY_DWORD, printfbptr, 1);
       DECL_NEW_REG(FAMILY_DWORD, printfiptr, 1);
       DECL_NEW_REG(FAMILY_DWORD, dwblockip, 0);
+      DECL_NEW_REG(FAMILY_DWORD, laneid, 0);
       DECL_NEW_REG(FAMILY_DWORD, invalid, 1);
+      DECL_NEW_REG(FAMILY_DWORD, btiUtil, 1);
     }
 #undef DECL_NEW_REG
 

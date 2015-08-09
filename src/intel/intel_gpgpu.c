@@ -107,6 +107,9 @@ intel_gpgpu_load_idrt_t *intel_gpgpu_load_idrt = NULL;
 typedef void (intel_gpgpu_pipe_control_t)(intel_gpgpu_t *gpgpu);
 intel_gpgpu_pipe_control_t *intel_gpgpu_pipe_control = NULL;
 
+typedef void (intel_gpgpu_select_pipeline_t)(intel_gpgpu_t *gpgpu);
+intel_gpgpu_select_pipeline_t *intel_gpgpu_select_pipeline = NULL;
+
 static void
 intel_gpgpu_sync(void *buf)
 {
@@ -245,10 +248,18 @@ error:
 }
 
 static void
-intel_gpgpu_select_pipeline(intel_gpgpu_t *gpgpu)
+intel_gpgpu_select_pipeline_gen7(intel_gpgpu_t *gpgpu)
 {
   BEGIN_BATCH(gpgpu->batch, 1);
   OUT_BATCH(gpgpu->batch, CMD_PIPELINE_SELECT | PIPELINE_SELECT_GPGPU);
+  ADVANCE_BATCH(gpgpu->batch);
+}
+
+static void
+intel_gpgpu_select_pipeline_gen9(intel_gpgpu_t *gpgpu)
+{
+  BEGIN_BATCH(gpgpu->batch, 1);
+  OUT_BATCH(gpgpu->batch, CMD_PIPELINE_SELECT | PIPELINE_SELECT_MASK | PIPELINE_SELECT_GPGPU);
   ADVANCE_BATCH(gpgpu->batch);
 }
 
@@ -267,6 +278,13 @@ static uint32_t
 intel_gpgpu_get_cache_ctrl_gen8()
 {
   return tcc_llc_ec_l3 | mtllc_wb;
+}
+static uint32_t
+intel_gpgpu_get_cache_ctrl_gen9()
+{
+  //Pre-defined cache control registers 9:
+  //L3CC: WB; LeCC: WB; TC: LLC/eLLC;
+  return (0x9 << 1);
 }
 
 static void
@@ -344,6 +362,55 @@ intel_gpgpu_set_base_address_gen8(intel_gpgpu_t *gpgpu)
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
     OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
+    ADVANCE_BATCH(gpgpu->batch);
+}
+
+static void
+intel_gpgpu_set_base_address_gen9(intel_gpgpu_t *gpgpu)
+{
+    const uint32_t def_cc = cl_gpgpu_get_cache_ctrl(); /* default Cache Control value */
+    BEGIN_BATCH(gpgpu->batch, 19);
+    OUT_BATCH(gpgpu->batch, CMD_STATE_BASE_ADDRESS | 17);
+    /* 0, Gen State Mem Obj CC, Stateless Mem Obj CC, Stateless Access Write Back */
+    OUT_BATCH(gpgpu->batch, 0 | (def_cc << 4) | (0 << 1)| BASE_ADDRESS_MODIFY);    /* General State Base Addr   */
+    OUT_BATCH(gpgpu->batch, 0);
+    OUT_BATCH(gpgpu->batch, 0 | (def_cc << 16));
+    /* 0, State Mem Obj CC */
+    /* We use a state base address for the surface heap since IVB clamp the
+     * binding table pointer at 11 bits. So, we cannot use pointers directly while
+     * using the surface heap
+     */
+    assert(gpgpu->aux_offset.surface_heap_offset % 4096 == 0);
+    OUT_RELOC(gpgpu->batch, gpgpu->aux_buf.bo,
+              I915_GEM_DOMAIN_SAMPLER,
+              I915_GEM_DOMAIN_SAMPLER,
+              gpgpu->aux_offset.surface_heap_offset + (0 | (def_cc << 4) | (0 << 1)| BASE_ADDRESS_MODIFY));
+    OUT_BATCH(gpgpu->batch, 0);
+    OUT_RELOC(gpgpu->batch, gpgpu->aux_buf.bo,
+              I915_GEM_DOMAIN_RENDER,
+              I915_GEM_DOMAIN_RENDER,
+              (0 | (def_cc << 4) | (0 << 1)| BASE_ADDRESS_MODIFY)); /* Dynamic State Base Addr */
+    OUT_BATCH(gpgpu->batch, 0);
+    OUT_BATCH(gpgpu->batch, 0 | (def_cc << 4) | BASE_ADDRESS_MODIFY); /* Indirect Obj Base Addr */
+    OUT_BATCH(gpgpu->batch, 0);
+    //OUT_BATCH(gpgpu->batch, 0 | (def_cc << 4) | BASE_ADDRESS_MODIFY); /* Instruction Base Addr  */
+    OUT_RELOC(gpgpu->batch, (drm_intel_bo *)gpgpu->ker->bo,
+              I915_GEM_DOMAIN_INSTRUCTION,
+              I915_GEM_DOMAIN_INSTRUCTION,
+              0 + (0 | (def_cc << 4) | (0 << 1)| BASE_ADDRESS_MODIFY));
+    OUT_BATCH(gpgpu->batch, 0);
+
+    OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
+    /* According to mesa i965 driver code, we must set the dynamic state access upper bound
+     * to a valid bound value, otherwise, the border color pointer may be rejected and you
+     * may get incorrect border color. This is a known hardware bug. */
+    OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
+    OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
+    OUT_BATCH(gpgpu->batch, 0xfffff000 | BASE_ADDRESS_MODIFY);
+    /* Bindless surface state base address */
+    OUT_BATCH(gpgpu->batch, (def_cc << 4) | BASE_ADDRESS_MODIFY);
+    OUT_BATCH(gpgpu->batch, 0);
+    OUT_BATCH(gpgpu->batch, 0xfffff000);
     ADVANCE_BATCH(gpgpu->batch);
 }
 
@@ -452,6 +519,7 @@ intel_gpgpu_load_vfe_state_gen8(intel_gpgpu_t *gpgpu)
   OUT_BATCH(gpgpu->batch, 0);
   OUT_BATCH(gpgpu->batch, 0);
   OUT_BATCH(gpgpu->batch, 0);
+
   ADVANCE_BATCH(gpgpu->batch);
 }
 
@@ -577,6 +645,25 @@ intel_gpgpu_pipe_control_gen75(intel_gpgpu_t *gpgpu)
 }
 
 static void
+intel_gpgpu_pipe_control_gen8(intel_gpgpu_t *gpgpu)
+{
+  gen8_pipe_control_t* pc = (gen8_pipe_control_t*)
+    intel_batchbuffer_alloc_space(gpgpu->batch, sizeof(gen8_pipe_control_t));
+  memset(pc, 0, sizeof(*pc));
+  pc->dw0.length = SIZEOF32(gen8_pipe_control_t) - 2;
+  pc->dw0.instruction_subopcode = GEN7_PIPE_CONTROL_SUBOPCODE_3D_CONTROL;
+  pc->dw0.instruction_opcode = GEN7_PIPE_CONTROL_OPCODE_3D_CONTROL;
+  pc->dw0.instruction_pipeline = GEN7_PIPE_CONTROL_3D;
+  pc->dw0.instruction_type = GEN7_PIPE_CONTROL_INSTRUCTION_GFX;
+  pc->dw1.render_target_cache_flush_enable = 1;
+  pc->dw1.texture_cache_invalidation_enable = 1;
+  pc->dw1.cs_stall = 1;
+  pc->dw1.dc_flush_enable = 1;
+  //pc->dw1.instruction_cache_invalidate_enable = 1;
+  ADVANCE_BATCH(gpgpu->batch);
+}
+
+static void
 intel_gpgpu_set_L3_gen7(intel_gpgpu_t *gpgpu, uint32_t use_slm)
 {
   BEGIN_BATCH(gpgpu->batch, 9);
@@ -632,16 +719,23 @@ static void
 intel_gpgpu_set_L3_gen75(intel_gpgpu_t *gpgpu, uint32_t use_slm)
 {
   /* still set L3 in batch buffer for fulsim. */
-  BEGIN_BATCH(gpgpu->batch, 15);
-  OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
-  /* FIXME: KMD always disable the atomic in L3 for some reason.
-     I checked the spec, and don't think we need that workaround now.
-     Before I send a patch to kernel, let's just enable it here. */
-  OUT_BATCH(gpgpu->batch, HSW_SCRATCH1_OFFSET);
-  OUT_BATCH(gpgpu->batch, 0);                         /* enable atomic in L3 */
-  OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
-  OUT_BATCH(gpgpu->batch, HSW_ROW_CHICKEN3_HDC_OFFSET);
-  OUT_BATCH(gpgpu->batch, (1 << 6ul) << 16);          /* enable atomic in L3 */
+  if(gpgpu->drv->atomic_test_result != SELF_TEST_ATOMIC_FAIL)
+  {
+    BEGIN_BATCH(gpgpu->batch, 15);
+    OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
+    /* FIXME: KMD always disable the atomic in L3 for some reason.
+       I checked the spec, and don't think we need that workaround now.
+       Before I send a patch to kernel, let's just enable it here. */
+    OUT_BATCH(gpgpu->batch, HSW_SCRATCH1_OFFSET);
+    OUT_BATCH(gpgpu->batch, 0);                         /* enable atomic in L3 */
+    OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
+    OUT_BATCH(gpgpu->batch, HSW_ROW_CHICKEN3_HDC_OFFSET);
+    OUT_BATCH(gpgpu->batch, (1 << 6ul) << 16);          /* enable atomic in L3 */
+  }
+  else
+  {
+    BEGIN_BATCH(gpgpu->batch, 9);
+  }
   OUT_BATCH(gpgpu->batch, CMD_LOAD_REGISTER_IMM | 1); /* length - 2 */
   OUT_BATCH(gpgpu->batch, GEN7_L3_SQC_REG1_ADDRESS_OFFSET);
   OUT_BATCH(gpgpu->batch, 0x08800000);
@@ -1047,7 +1141,9 @@ static uint32_t get_surface_type(intel_gpgpu_t *gpgpu, int index, cl_mem_object_
   uint32_t surface_type;
   if (((IS_IVYBRIDGE(gpgpu->drv->device_id) ||
         IS_HASWELL(gpgpu->drv->device_id) ||
-        IS_BROADWELL(gpgpu->drv->device_id))) &&
+        IS_BROADWELL(gpgpu->drv->device_id) ||
+        IS_CHERRYVIEW(gpgpu->drv->device_id) ||
+        IS_SKYLAKE(gpgpu->drv->device_id))) &&
       index >= BTI_WORKAROUND_IMAGE_OFFSET + BTI_RESERVED_NUM &&
       type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
     surface_type = I965_SURFACE_2D;
@@ -1063,10 +1159,12 @@ intel_gpgpu_bind_image_gen7(intel_gpgpu_t *gpgpu,
                               uint32_t obj_bo_offset,
                               uint32_t format,
                               cl_mem_object_type type,
+                              uint32_t bpp,
                               int32_t w,
                               int32_t h,
                               int32_t depth,
                               int32_t pitch,
+                              int32_t slice_pitch,
                               int32_t tiling)
 {
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
@@ -1109,10 +1207,12 @@ intel_gpgpu_bind_image_gen75(intel_gpgpu_t *gpgpu,
                               uint32_t obj_bo_offset,
                               uint32_t format,
                               cl_mem_object_type type,
+                              uint32_t bpp,
                               int32_t w,
                               int32_t h,
                               int32_t depth,
                               int32_t pitch,
+                              int32_t slice_pitch,
                               int32_t tiling)
 {
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
@@ -1157,10 +1257,12 @@ intel_gpgpu_bind_image_gen8(intel_gpgpu_t *gpgpu,
                             uint32_t obj_bo_offset,
                             uint32_t format,
                             cl_mem_object_type type,
+                            uint32_t bpp,
                             int32_t w,
                             int32_t h,
                             int32_t depth,
                             int32_t pitch,
+                            int32_t slice_pitch,
                             int32_t tiling)
 {
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
@@ -1173,6 +1275,82 @@ intel_gpgpu_bind_image_gen8(intel_gpgpu_t *gpgpu,
     ss->ss0.surface_array = 1;
     ss->ss1.surface_qpitch = (h + 3)/4;
   }
+  ss->ss0.horizontal_alignment = 1;
+  ss->ss0.vertical_alignment = 1;
+
+  if (tiling == GPGPU_TILE_X) {
+    ss->ss0.tile_mode = GEN8_TILEMODE_XMAJOR;
+  } else if (tiling == GPGPU_TILE_Y) {
+    ss->ss0.tile_mode = GEN8_TILEMODE_YMAJOR;
+  } else
+    assert(tiling == GPGPU_NO_TILE);// W mode is not supported now.
+
+  ss->ss2.width = w - 1;
+  ss->ss2.height = h - 1;
+  ss->ss3.depth = depth - 1;
+
+  ss->ss8.surface_base_addr_lo = (obj_bo->offset64 + obj_bo_offset) & 0xffffffff;
+  ss->ss9.surface_base_addr_hi = ((obj_bo->offset64 + obj_bo_offset) >> 32) & 0xffffffff;
+
+  ss->ss4.render_target_view_ext = depth - 1;
+  ss->ss4.min_array_elt = 0;
+  ss->ss3.surface_pitch = pitch - 1;
+
+  ss->ss1.mem_obj_ctrl_state = cl_gpgpu_get_cache_ctrl();
+  ss->ss7.shader_channel_select_red = I965_SURCHAN_SELECT_RED;
+  ss->ss7.shader_channel_select_green = I965_SURCHAN_SELECT_GREEN;
+  ss->ss7.shader_channel_select_blue = I965_SURCHAN_SELECT_BLUE;
+  ss->ss7.shader_channel_select_alpha = I965_SURCHAN_SELECT_ALPHA;
+  ss->ss0.render_cache_rw_mode = 1; /* XXX do we need to set it? */
+
+  heap->binding_table[index] = offsetof(surface_heap_t, surface) +
+                               index * surface_state_sz;
+  dri_bo_emit_reloc(gpgpu->aux_buf.bo,
+                    I915_GEM_DOMAIN_RENDER,
+                    I915_GEM_DOMAIN_RENDER,
+                    obj_bo_offset,
+                    gpgpu->aux_offset.surface_heap_offset +
+                    heap->binding_table[index] +
+                    offsetof(gen8_surface_state_t, ss8),
+                    obj_bo);
+
+  assert(index < GEN_MAX_SURFACES);
+}
+
+static void
+intel_gpgpu_bind_image_gen9(intel_gpgpu_t *gpgpu,
+                            uint32_t index,
+                            dri_bo* obj_bo,
+                            uint32_t obj_bo_offset,
+                            uint32_t format,
+                            cl_mem_object_type type,
+                            uint32_t bpp,
+                            int32_t w,
+                            int32_t h,
+                            int32_t depth,
+                            int32_t pitch,
+                            int32_t slice_pitch,
+                            int32_t tiling)
+{
+  surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
+  gen8_surface_state_t *ss = (gen8_surface_state_t *) &heap->surface[index * sizeof(gen8_surface_state_t)];
+  memset(ss, 0, sizeof(*ss));
+  ss->ss0.vertical_line_stride = 0; // always choose VALIGN_2
+  ss->ss0.surface_type = get_surface_type(gpgpu, index, type);
+  ss->ss0.surface_format = format;
+  if (intel_is_surface_array(type) && ss->ss0.surface_type == I965_SURFACE_1D) {
+    ss->ss0.surface_array = 1;
+    ss->ss1.surface_qpitch = (slice_pitch/bpp + 3)/4;   //align_h
+  }
+
+  if (intel_is_surface_array(type) && ss->ss0.surface_type == I965_SURFACE_2D) {
+    ss->ss0.surface_array = 1;
+    ss->ss1.surface_qpitch = (slice_pitch/pitch + 3)/4;
+  }
+
+  if(ss->ss0.surface_type == I965_SURFACE_3D)
+    ss->ss1.surface_qpitch = (slice_pitch/pitch + 3)/4;
+
   ss->ss0.horizontal_alignment = 1;
   ss->ss0.vertical_alignment = 1;
 
@@ -1354,6 +1532,50 @@ intel_gpgpu_build_idrt_gen8(intel_gpgpu_t *gpgpu, cl_gpgpu_kernel *kernel)
   else
     slm_sz = 64*KB;
   slm_sz = slm_sz >> 12;
+  desc->desc6.slm_sz = slm_sz;
+}
+
+static void
+intel_gpgpu_build_idrt_gen9(intel_gpgpu_t *gpgpu, cl_gpgpu_kernel *kernel)
+{
+  gen8_interface_descriptor_t *desc;
+
+  desc = (gen8_interface_descriptor_t*) (gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.idrt_offset);
+
+  memset(desc, 0, sizeof(*desc));
+  desc->desc0.kernel_start_pointer = 0; /* reloc */
+  desc->desc2.single_program_flow = 0;
+  desc->desc2.floating_point_mode = 0; /* use IEEE-754 rule */
+  desc->desc6.rounding_mode = 0; /* round to nearest even */
+
+  assert((gpgpu->aux_buf.bo->offset + gpgpu->aux_offset.sampler_state_offset) % 32 == 0);
+  desc->desc3.sampler_state_pointer = gpgpu->aux_offset.sampler_state_offset >> 5;
+  desc->desc4.binding_table_entry_count = 0; /* no prefetch */
+  desc->desc4.binding_table_pointer = 0;
+  desc->desc5.curbe_read_len = kernel->curbe_sz / 32;
+  desc->desc5.curbe_read_offset = 0;
+
+  /* Barriers / SLM are automatically handled on Gen7+ */
+  size_t slm_sz = kernel->slm_sz;
+  /* group_threads_num should not be set to 0 even if the barrier is disabled per bspec */
+  desc->desc6.group_threads_num = kernel->thread_n;
+  desc->desc6.barrier_enable = kernel->use_slm;
+  if (slm_sz == 0)
+    slm_sz = 0;
+  else if (slm_sz <= 1*KB)
+    slm_sz = 1;
+  else if (slm_sz <= 2*KB)
+    slm_sz = 2;
+  else if (slm_sz <= 4*KB)
+    slm_sz = 3;
+  else if (slm_sz <= 8*KB)
+    slm_sz = 4;
+  else if (slm_sz <= 16*KB)
+    slm_sz = 5;
+  else if (slm_sz <= 32*KB)
+    slm_sz = 6;
+  else
+    slm_sz = 7;
   desc->desc6.slm_sz = slm_sz;
 }
 
@@ -1935,13 +2157,15 @@ intel_set_gpgpu_callbacks(int device_id)
   cl_gpgpu_set_printf_info = (cl_gpgpu_set_printf_info_cb *)intel_gpgpu_set_printf_info;
   cl_gpgpu_get_printf_info = (cl_gpgpu_get_printf_info_cb *)intel_gpgpu_get_printf_info;
 
-  if (IS_BROADWELL(device_id)) {
+  if (IS_BROADWELL(device_id) || IS_CHERRYVIEW(device_id)) {
     cl_gpgpu_bind_image = (cl_gpgpu_bind_image_cb *) intel_gpgpu_bind_image_gen8;
     intel_gpgpu_set_L3 = intel_gpgpu_set_L3_gen8;
     cl_gpgpu_get_cache_ctrl = (cl_gpgpu_get_cache_ctrl_cb *)intel_gpgpu_get_cache_ctrl_gen8;
     intel_gpgpu_get_scratch_index = intel_gpgpu_get_scratch_index_gen8;
     intel_gpgpu_post_action = intel_gpgpu_post_action_gen7; //BDW need not restore SLM, same as gen7
     intel_gpgpu_read_ts_reg = intel_gpgpu_read_ts_reg_gen7;
+    if(IS_CHERRYVIEW(device_id))
+      intel_gpgpu_read_ts_reg = intel_gpgpu_read_ts_reg_baytrail;
     intel_gpgpu_set_base_address = intel_gpgpu_set_base_address_gen8;
     intel_gpgpu_setup_bti = intel_gpgpu_setup_bti_gen8;
     intel_gpgpu_load_vfe_state = intel_gpgpu_load_vfe_state_gen8;
@@ -1950,7 +2174,27 @@ intel_set_gpgpu_callbacks(int device_id)
     intel_gpgpu_load_curbe_buffer = intel_gpgpu_load_curbe_buffer_gen8;
     intel_gpgpu_load_idrt = intel_gpgpu_load_idrt_gen8;
     cl_gpgpu_bind_sampler = (cl_gpgpu_bind_sampler_cb *) intel_gpgpu_bind_sampler_gen8;
-    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen7;
+    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen8;
+	intel_gpgpu_select_pipeline = intel_gpgpu_select_pipeline_gen7;
+    return;
+  }
+  if (IS_SKYLAKE(device_id)) {
+    cl_gpgpu_bind_image = (cl_gpgpu_bind_image_cb *) intel_gpgpu_bind_image_gen9;
+    intel_gpgpu_set_L3 = intel_gpgpu_set_L3_gen8;
+    cl_gpgpu_get_cache_ctrl = (cl_gpgpu_get_cache_ctrl_cb *)intel_gpgpu_get_cache_ctrl_gen9;
+    intel_gpgpu_get_scratch_index = intel_gpgpu_get_scratch_index_gen8;
+    intel_gpgpu_post_action = intel_gpgpu_post_action_gen7; //BDW need not restore SLM, same as gen7
+    intel_gpgpu_read_ts_reg = intel_gpgpu_read_ts_reg_gen7;
+    intel_gpgpu_set_base_address = intel_gpgpu_set_base_address_gen9;
+    intel_gpgpu_setup_bti = intel_gpgpu_setup_bti_gen8;
+    intel_gpgpu_load_vfe_state = intel_gpgpu_load_vfe_state_gen8;
+    cl_gpgpu_walker = (cl_gpgpu_walker_cb *)intel_gpgpu_walker_gen8;
+    intel_gpgpu_build_idrt = intel_gpgpu_build_idrt_gen9;
+    intel_gpgpu_load_curbe_buffer = intel_gpgpu_load_curbe_buffer_gen8;
+    intel_gpgpu_load_idrt = intel_gpgpu_load_idrt_gen8;
+    cl_gpgpu_bind_sampler = (cl_gpgpu_bind_sampler_cb *) intel_gpgpu_bind_sampler_gen8;
+    intel_gpgpu_pipe_control = intel_gpgpu_pipe_control_gen8;
+    intel_gpgpu_select_pipeline = intel_gpgpu_select_pipeline_gen9;
     return;
   }
 
@@ -1960,6 +2204,7 @@ intel_set_gpgpu_callbacks(int device_id)
   intel_gpgpu_build_idrt = intel_gpgpu_build_idrt_gen7;
   intel_gpgpu_load_curbe_buffer = intel_gpgpu_load_curbe_buffer_gen7;
   intel_gpgpu_load_idrt = intel_gpgpu_load_idrt_gen7;
+  intel_gpgpu_select_pipeline = intel_gpgpu_select_pipeline_gen7;
 
   if (IS_HASWELL(device_id)) {
     cl_gpgpu_bind_image = (cl_gpgpu_bind_image_cb *) intel_gpgpu_bind_image_gen75;

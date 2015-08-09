@@ -103,9 +103,7 @@ namespace gbe
   void Gen8Encoder::F32TO16(GenRegister dest, GenRegister src0) {
     MOV(GenRegister::retype(dest, GEN_TYPE_HF), GenRegister::retype(src0, GEN_TYPE_F));
   }
-
-  void Gen8Encoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, uint32_t bti, uint32_t srcNum) {
-    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+  unsigned Gen8Encoder::setAtomicMessageDesc(GenNativeInstruction *insn, unsigned function, unsigned bti, unsigned srcNum) {
     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
     uint32_t msg_length = 0;
     uint32_t response_length = 0;
@@ -118,11 +116,6 @@ namespace gbe
       response_length = 2;
     } else
       NOT_IMPLEMENTED;
-
-    this->setHeader(insn);
-    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
-    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
-    this->setSrc1(insn, GenRegister::immud(0));
 
     const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
@@ -137,11 +130,26 @@ namespace gbe
       gen8_insn->bits3.gen7_atomic_op.simd_mode = GEN_ATOMIC_SIMD16;
     else
       NOT_SUPPORTED;
+    return gen8_insn->bits3.ud;
   }
 
-  void Gen8Encoder::UNTYPED_READ(GenRegister dst, GenRegister src, uint32_t bti, uint32_t elemNum) {
+  void Gen8Encoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
-    assert(elemNum >= 1 || elemNum <= 4);
+
+    this->setHeader(insn);
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT1_DATA;
+
+    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
+
+    if (bti.file == GEN_IMMEDIATE_VALUE) {
+      this->setSrc1(insn, GenRegister::immud(0));
+      setAtomicMessageDesc(insn, function, bti.value.ud, srcNum);
+    } else {
+      this->setSrc1(insn, bti);
+    }
+  }
+  unsigned Gen8Encoder::setUntypedReadMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum) {
     uint32_t msg_length = 0;
     uint32_t response_length = 0;
     if (this->curr.execWidth == 8) {
@@ -152,44 +160,73 @@ namespace gbe
       response_length = 2 * elemNum;
     } else
       NOT_IMPLEMENTED;
-
-    this->setHeader(insn);
-    this->setDst(insn,  GenRegister::uw16grf(dst.nr, 0));
-    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
-    this->setSrc1(insn, GenRegister::immud(0));
     setDPUntypedRW(insn,
                    bti,
                    untypedRWMask[elemNum],
                    GEN75_P1_UNTYPED_READ,
                    msg_length,
                    response_length);
+    return insn->bits3.ud;
   }
 
-  void Gen8Encoder::UNTYPED_WRITE(GenRegister msg, uint32_t bti, uint32_t elemNum) {
+  void Gen8Encoder::UNTYPED_READ(GenRegister dst, GenRegister src, GenRegister bti, uint32_t elemNum) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
     assert(elemNum >= 1 || elemNum <= 4);
+
+    this->setHeader(insn);
+    this->setDst(insn,  GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT1_DATA;
+
+    if (bti.file == GEN_IMMEDIATE_VALUE) {
+      this->setSrc1(insn, GenRegister::immud(0));
+      setUntypedReadMessageDesc(insn, bti.value.ud, elemNum);
+    } else {
+      this->setSrc1(insn, bti);
+    }
+  }
+
+  unsigned Gen8Encoder::setUntypedWriteMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum) {
     uint32_t msg_length = 0;
     uint32_t response_length = 0;
-    this->setHeader(insn);
     if (this->curr.execWidth == 8) {
-      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
       msg_length = 1 + elemNum;
     } else if (this->curr.execWidth == 16) {
-      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
       msg_length = 2 * (1 + elemNum);
     }
     else
       NOT_IMPLEMENTED;
-    this->setSrc0(insn, GenRegister::ud8grf(msg.nr, 0));
-    this->setSrc1(insn, GenRegister::immud(0));
     setDPUntypedRW(insn,
                    bti,
                    untypedRWMask[elemNum],
                    GEN75_P1_UNTYPED_SURFACE_WRITE,
                    msg_length,
                    response_length);
+    return insn->bits3.ud;
   }
 
+  void Gen8Encoder::UNTYPED_WRITE(GenRegister msg, GenRegister bti, uint32_t elemNum) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    assert(elemNum >= 1 || elemNum <= 4);
+    this->setHeader(insn);
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT1_DATA;
+    if (this->curr.execWidth == 8) {
+      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+    } else if (this->curr.execWidth == 16) {
+      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+    }
+    else
+      NOT_IMPLEMENTED;
+    this->setSrc0(insn, GenRegister::ud8grf(msg.nr, 0));
+
+    if (bti.file == GEN_IMMEDIATE_VALUE) {
+      this->setSrc1(insn, GenRegister::immud(0));
+      setUntypedWriteMessageDesc(insn, bti.value.ud, elemNum);
+    } else {
+      this->setSrc1(insn, bti);
+    }
+  }
   void Gen8Encoder::LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value) {
     union { double d; unsigned u[2]; } u;
     u.d = value;
@@ -217,6 +254,10 @@ namespace gbe
       MOV(GenRegister::offset(dest, 2), r);
     }
     pop();
+  }
+
+  void Gen8Encoder::LOAD_INT64_IMM(GenRegister dest, GenRegister value) {
+    MOV(dest, value);
   }
 
   void Gen8Encoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp) {
@@ -331,11 +372,15 @@ namespace gbe
       gen8_insn->bits2.da1.src0_negate = reg.negation;
       gen8_insn->bits2.da1.src0_address_mode = reg.address_mode;
       if (reg.file == GEN_IMMEDIATE_VALUE) {
-        gen8_insn->bits3.ud = reg.value.ud;
-
-        /* Required to set some fields in src1 as well: */
-        gen8_insn->bits2.da1.src1_reg_file = 0; /* arf */
-        gen8_insn->bits2.da1.src1_reg_type = reg.type;
+        if (reg.type == GEN_TYPE_L || reg.type == GEN_TYPE_UL) {
+          gen8_insn->bits3.ud = (uint32_t)(reg.value.i64 >> 32);
+          gen8_insn->bits2.ud = (uint32_t)(reg.value.i64);
+        } else {
+          gen8_insn->bits3.ud = reg.value.ud;
+          /* Required to set some fields in src1 as well: */
+          gen8_insn->bits2.da1.src1_reg_file = 0; /* arf */
+          gen8_insn->bits2.da1.src1_reg_type = reg.type;
+        }
       }
       else {
         if (gen8_insn->header.access_mode == GEN_ALIGN_1) {
@@ -361,21 +406,21 @@ namespace gbe
     } else {
       gen8_insn->bits1.ia1.src0_reg_file = GEN_GENERAL_REGISTER_FILE;
       gen8_insn->bits1.ia1.src0_reg_type = reg.type;
-      gen8_insn->bits2.ia1.src0_subreg_nr = 0;
-      gen8_insn->bits2.ia1.src0_indirect_offset = 0;
-      gen8_insn->bits2.ia1.src0_abs = 0;
-      gen8_insn->bits2.ia1.src0_negate = 0;
+      gen8_insn->bits2.ia1.src0_subreg_nr = reg.a0_subnr;
+      gen8_insn->bits2.ia1.src0_indirect_offset = (reg.addr_imm & 0x1ff);
+      gen8_insn->bits2.ia1.src0_abs = reg.absolute;
+      gen8_insn->bits2.ia1.src0_negate = reg.negation;
       gen8_insn->bits2.ia1.src0_address_mode = reg.address_mode;
-      gen8_insn->bits2.ia1.src0_horiz_stride = GEN_HORIZONTAL_STRIDE_0;
-      gen8_insn->bits2.ia1.src0_width = GEN_WIDTH_1;
-      gen8_insn->bits2.ia1.src0_vert_stride = GEN_VERTICAL_STRIDE_ONE_DIMENSIONAL;
+      gen8_insn->bits2.ia1.src0_horiz_stride = reg.hstride;
+      gen8_insn->bits2.ia1.src0_width = reg.width;
+      gen8_insn->bits2.ia1.src0_vert_stride = reg.vstride;
+      gen8_insn->bits2.ia1.src0_indirect_offset_9 = (reg.addr_imm & 0x02) >> 9;
     }
   }
 
   void Gen8Encoder::setSrc1(GenNativeInstruction *insn, GenRegister reg) {
     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
     assert(reg.nr < 128);
-    assert(reg.file != GEN_ARCHITECTURE_REGISTER_FILE || reg.nr == 0);
 
     gen8_insn->bits2.da1.src1_reg_file = reg.file;
     gen8_insn->bits2.da1.src1_reg_type = reg.type;
@@ -407,6 +452,11 @@ namespace gbe
         gen8_insn->bits3.da1.src1_vert_stride = reg.vstride;
       }
     }
+  }
+
+  bool Gen8Encoder::canHandleLong(uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1)
+  {
+    return false;
   }
 
 #define NO_SWIZZLE ((0<<0) | (1<<2) | (2<<4) | (3<<6))

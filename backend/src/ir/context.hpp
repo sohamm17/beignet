@@ -176,6 +176,12 @@ namespace ir {
     DECL_THREE_SRC_INSN(MAD);
 #undef DECL_THREE_SRC_INSN
 
+    /*! For all nullary functions */
+    void ALU0(Opcode opcode, Type type, Register dst) {
+      const Instruction insn = gbe::ir::ALU0(opcode, type, dst);
+      this->append(insn);
+    }
+
     /*! For all unary functions */
     void ALU1(Opcode opcode, Type type, Register dst, Register src) {
       const Instruction insn = gbe::ir::ALU1(opcode, type, dst, src);
@@ -184,22 +190,22 @@ namespace ir {
 
     /*! LOAD with the destinations directly specified */
     template <typename... Args>
-    void LOAD(Type type, Register offset, AddressSpace space, bool dwAligned, BTI bti, Args...values)
+    void LOAD(Type type, Register offset, AddressSpace space, bool dwAligned, bool fixedBTI, Register bti, Args...values)
     {
       const Tuple index = this->tuple(values...);
       const uint16_t valueNum = std::tuple_size<std::tuple<Args...>>::value;
       GBE_ASSERT(valueNum > 0);
-      this->LOAD(type, index, offset, space, valueNum, dwAligned, bti);
+      this->LOAD(type, index, offset, space, valueNum, dwAligned, fixedBTI, bti);
     }
 
     /*! STORE with the sources directly specified */
     template <typename... Args>
-    void STORE(Type type, Register offset, AddressSpace space, bool dwAligned, BTI bti, Args...values)
+    void STORE(Type type, Register offset, AddressSpace space, bool dwAligned, bool fixedBTI, Register bti, Args...values)
     {
       const Tuple index = this->tuple(values...);
       const uint16_t valueNum = std::tuple_size<std::tuple<Args...>>::value;
       GBE_ASSERT(valueNum > 0);
-      this->STORE(type, index, offset, space, valueNum, dwAligned, bti);
+      this->STORE(type, index, offset, space, valueNum, dwAligned, fixedBTI, bti);
     }
     void appendSurface(uint8_t bti, Register reg) { fn->appendSurface(bti, reg); }
 
