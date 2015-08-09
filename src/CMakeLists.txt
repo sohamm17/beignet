@@ -3,7 +3,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     ${DRM_INCLUDE_DIRS}/../
                     ${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/
                     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-                    ${MESA_SOURCE_INCLUDES})
+                    ${MESA_SOURCE_INCLUDES}
+                    ${LLVM_INCLUDE_DIR})
 
 macro (MakeKernelBinStr KERNEL_PATH KERNEL_FILES)
 foreach (KF ${KERNEL_FILES})
@@ -15,13 +16,13 @@ foreach (KF ${KERNEL_FILES})
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND rm -rf ${output_file}
-      COMMAND ${GBE_BIN_GENERATER} -s ${input_file} -o${output_file} -t${GEN_PCI_ID}
+      COMMAND ${GBE_BIN_GENERATER} -s -o${output_file} -t${GEN_PCI_ID} ${input_file}
       DEPENDS ${input_file} ${GBE_BIN_FILE})
   else(GEN_PCI_ID)
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND rm -rf ${output_file}
-      COMMAND ${GBE_BIN_GENERATER} -s ${input_file} -o${output_file}
+      COMMAND ${GBE_BIN_GENERATER} -s -o${output_file} ${input_file}
       DEPENDS ${input_file} ${GBE_BIN_FILE})
   endif(GEN_PCI_ID)
 endforeach (KF)
@@ -50,7 +51,7 @@ cl_internal_copy_image_2d_to_2d_array cl_internal_copy_image_1d_array_to_1d_arra
 cl_internal_copy_image_2d_array_to_2d_array cl_internal_copy_image_2d_array_to_2d
 cl_internal_copy_image_2d_array_to_3d cl_internal_copy_image_3d_to_2d_array
 cl_internal_copy_image_2d_to_buffer cl_internal_copy_image_2d_to_buffer_align16 cl_internal_copy_image_3d_to_buffer
-cl_internal_copy_buffer_to_image_2d cl_internal_copy_buffer_to_image_3d
+cl_internal_copy_buffer_to_image_2d cl_internal_copy_buffer_to_image_2d_align16 cl_internal_copy_buffer_to_image_3d
 cl_internal_fill_buf_align8 cl_internal_fill_buf_align4
 cl_internal_fill_buf_align2 cl_internal_fill_buf_unalign
 cl_internal_fill_buf_align128 cl_internal_fill_image_1d
@@ -117,6 +118,16 @@ if (DRM_INTEL_USERPTR)
 SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
 SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
 endif (DRM_INTEL_USERPTR)
+
+if (DRM_INTEL_EU_TOTAL)
+SET(CMAKE_CXX_FLAGS "-DHAS_EU_TOTAL ${CMAKE_CXX_FLAGS}")
+SET(CMAKE_C_FLAGS "-DHAS_EU_TOTAL ${CMAKE_C_FLAGS}")
+endif (DRM_INTEL_EU_TOTAL)
+
+if (DRM_INTEL_SUBSLICE_TOTAL)
+SET(CMAKE_CXX_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_CXX_FLAGS}")
+SET(CMAKE_C_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_C_FLAGS}")
+endif (DRM_INTEL_SUBSLICE_TOTAL)
 
 set(GIT_SHA1 "git_sha1.h")
 add_custom_target(${GIT_SHA1} ALL

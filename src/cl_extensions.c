@@ -1,17 +1,22 @@
+#include "llvm/Config/llvm-config.h"
 #ifdef HAS_EGL
 #include "EGL/egl.h"
 #include "EGL/eglext.h"
 #endif
 
 #include "cl_platform_id.h"
+#include "cl_device_id.h"
 #include "cl_internals.h"
 #include "CL/cl.h"
 #include "cl_utils.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
-static struct cl_extensions intel_extensions =
+/* This extension should be common for all the intel GPU platform.
+   Every device may have its own additional externsions. */
+static struct cl_extensions intel_platform_extensions =
 {
   {
 #define DECL_EXT(name) \
@@ -34,8 +39,14 @@ void check_opt1_extension(cl_extensions_t *extensions)
 {
   int id;
   for(id = OPT1_EXT_START_ID; id <= OPT1_EXT_END_ID; id++)
+  {
     if (id == EXT_ID(khr_icd))
       extensions->extensions[id].base.ext_enabled = 1;
+#if  LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+    if (id == EXT_ID(khr_spir))
+      extensions->extensions[id].base.ext_enabled = 1;
+#endif
+  }
 }
 
 void
@@ -62,7 +73,7 @@ process_extension_str(cl_extensions_t *extensions)
   int str_offset = 0;
   int id;
 
-  extensions->ext_str[str_max] = '\0';
+  memset(extensions->ext_str, 0, sizeof(extensions->ext_str));
 
   for(id = 0; id < cl_khr_extension_id_max; id++)
   {
@@ -84,24 +95,51 @@ process_extension_str(cl_extensions_t *extensions)
 }
 
 LOCAL void
+cl_intel_platform_get_default_extension(cl_device_id device)
+{
+  cl_platform_id pf = device->platform;
+  memcpy((char*)device->extensions,
+       pf->internal_extensions->ext_str, sizeof(device->extensions));
+  device->extensions_sz = strlen(pf->internal_extensions->ext_str) + 1;
+}
+
+LOCAL void
+cl_intel_platform_enable_fp16_extension(cl_device_id device)
+{
+  cl_extensions_t new_ext;
+  cl_platform_id pf = device->platform;
+  int id;
+  assert(pf);
+
+  memcpy(&new_ext, pf->internal_extensions, sizeof(new_ext));
+
+  for(id = OPT1_EXT_START_ID; id <= OPT1_EXT_END_ID; id++) {
+    if (id == EXT_ID(khr_fp16))
+      new_ext.extensions[id].base.ext_enabled = 1;
+  }
+
+  process_extension_str(&new_ext);
+
+  memcpy((char*)device->extensions, new_ext.ext_str, sizeof(device->extensions));
+  device->extensions_sz = strlen(new_ext.ext_str) + 1;
+}
+
+LOCAL void
 cl_intel_platform_extension_init(cl_platform_id intel_platform)
 {
-  static int initialized = 0;
+  static int ext_initialized = 0;
 
-  if (initialized) {
-    intel_platform->internal_extensions = &intel_extensions;
-    intel_platform->extensions = intel_extensions.ext_str;
-    return;
-  }
-  check_basic_extension(&intel_extensions);
-  check_opt1_extension(&intel_extensions);
-  check_gl_extension(&intel_extensions);
-  check_intel_extension(&intel_extensions);
-  process_extension_str(&intel_extensions);
+  /* The EXT should be only inited once. */
+  assert(!ext_initialized);
+  check_basic_extension(&intel_platform_extensions);
+  check_opt1_extension(&intel_platform_extensions);
+  check_gl_extension(&intel_platform_extensions);
+  check_intel_extension(&intel_platform_extensions);
+  process_extension_str(&intel_platform_extensions);
+  ext_initialized = 1;
 
-  intel_platform->internal_extensions = &intel_extensions;
-  intel_platform->extensions = intel_extensions.ext_str;
-
-  initialized = 1;
+  intel_platform->internal_extensions = &intel_platform_extensions;
+  intel_platform->extensions = intel_platform_extensions.ext_str;
+  intel_platform->extensions_sz = strlen(intel_platform->extensions) + 1;
   return;
 }

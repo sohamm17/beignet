@@ -85,7 +85,7 @@ handle_events(cl_command_queue queue, cl_int num, const cl_event *wait_list,
       cl_event_new_enqueue_callback(e, data, num, wait_list);
     }
   }
-  queue->current_event = e;
+  set_current_event(queue, e);
   return status;
 }
 
@@ -195,7 +195,7 @@ clGetPlatformInfo(cl_platform_id    platform,
                   size_t *          param_value_size_ret)
 {
   /* Only one platform. This is easy */
-  if (UNLIKELY(platform != NULL && platform != intel_platform))
+  if (UNLIKELY(platform != NULL && platform != cl_get_platform_default()))
     return CL_INVALID_PLATFORM;
 
   return cl_get_platform_info(platform,
@@ -217,7 +217,7 @@ clGetDeviceIDs(cl_platform_id platform,
   /* Check parameter consistency */
   if (UNLIKELY(devices == NULL && num_devices == NULL))
     return CL_INVALID_VALUE;
-  if (UNLIKELY(platform && platform != intel_platform))
+  if (UNLIKELY(platform && platform != cl_get_platform_default()))
     return CL_INVALID_PLATFORM;
   if (UNLIKELY(devices && num_entries == 0))
     return CL_INVALID_VALUE;
@@ -941,6 +941,7 @@ clBuildProgram(cl_program            program,
   /* TODO support create program from binary */
   assert(program->source_type == FROM_LLVM ||
          program->source_type == FROM_SOURCE ||
+         program->source_type == FROM_LLVM_SPIR ||
          program->source_type == FROM_BINARY);
   if((err = cl_program_build(program, options)) != CL_SUCCESS) {
     goto error;
@@ -2980,6 +2981,7 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
   data->type = EnqueueNDRangeKernel;
   data->queue = command_queue;
 
+  TRY(cl_event_check_waitlist, num_events_in_wait_list, event_wait_list, event, command_queue->ctx);
   if(handle_events(command_queue, num_events_in_wait_list, event_wait_list,
                    event, data, CL_COMMAND_NDRANGE_KERNEL) == CL_ENQUEUE_EXECUTE_IMM) {
     if (event && (*event)->type != CL_COMMAND_USER
@@ -3192,7 +3194,7 @@ void*
 clGetExtensionFunctionAddressForPlatform(cl_platform_id platform,
                               const char *func_name)
 {
-  if (UNLIKELY(platform != NULL && platform != intel_platform))
+  if (UNLIKELY(platform != NULL && platform != cl_get_platform_default()))
     return NULL;
   return internal_clGetExtensionFunctionAddress(func_name);
 }

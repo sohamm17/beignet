@@ -53,6 +53,7 @@ cl_mem buf[MAX_BUFFER_N] = {};
 void *buf_data[MAX_BUFFER_N] = {};
 size_t globals[3] = {};
 size_t locals[3] = {};
+float ULPSIZE_FAST_MATH = 10000.;
 
 #ifdef HAS_EGL
 Display    *xDisplay;
@@ -681,7 +682,7 @@ int cl_INT_ULP(int int_number)
   return 0;
 }
 
-int time_subtract(struct timeval *y, struct timeval *x, struct timeval *result)
+double time_subtract(struct timeval *y, struct timeval *x, struct timeval *result)
 {
   if ( x->tv_sec > y->tv_sec )
     return   -1;
@@ -699,6 +700,17 @@ int time_subtract(struct timeval *y, struct timeval *x, struct timeval *result)
     }
   }
 
-  int msec = 1000.0*(y->tv_sec - x->tv_sec) + (y->tv_usec - x->tv_usec)/1000.0;
+  double msec = 1000.0*(y->tv_sec - x->tv_sec) + (y->tv_usec - x->tv_usec)/1000.0;
   return msec;
+}
+
+float select_ulpsize(float ULPSIZE_FAST_MATH, float ULPSIZE_NO_FAST_MATH)
+{
+  const char* env_strict = getenv("OCL_STRICT_CONFORMANCE");
+
+  float ULPSIZE_FACTOR = ULPSIZE_NO_FAST_MATH;
+  if (env_strict != NULL && strcmp(env_strict, "0") == 0 )
+        ULPSIZE_FACTOR = ULPSIZE_FAST_MATH;
+
+  return ULPSIZE_FACTOR;
 }

@@ -171,7 +171,9 @@ intel_driver_init(intel_driver_t *driver, int dev_fd)
   else
     FATAL ("Unsupported Gen for emulation");
 #else
-  if (IS_GEN8(driver->device_id))
+  if (IS_GEN9(driver->device_id))
+    driver->gen_ver = 9;
+  else if (IS_GEN8(driver->device_id))
     driver->gen_ver = 8;
   else if (IS_GEN75(driver->device_id))
     driver->gen_ver = 75;
@@ -446,6 +448,12 @@ intel_driver_get_ver(struct intel_driver *drv)
   return drv->gen_ver;
 }
 
+static void
+intel_driver_set_atomic_flag(intel_driver_t *drv, int atomic_flag)
+{
+  drv->atomic_test_result = atomic_flag;
+}
+
 static size_t drm_intel_bo_get_size(drm_intel_bo *bo) { return bo->size; }
 static void* drm_intel_bo_get_virtual(drm_intel_bo *bo) { return bo->virtual; }
 
@@ -472,6 +480,13 @@ static uint32_t intel_buffer_get_tiling_align(cl_context ctx, uint32_t tiling_mo
       ret = 512;
     } else if (dim == 1) { //tileX height in number of rows
       ret = 8;
+    }  else if (dim == 2) { //height to calculate slice pitch
+      if (gen_ver == 9) //SKL same as tileY height
+        ret = 8;
+      else if (gen_ver == 8)  //IVB, HSW, BDW same as CL_NO_TILE vertical alignment
+        ret = 4;
+      else
+        ret = 2;
     } else
       assert(0);
     break;
@@ -481,13 +496,20 @@ static uint32_t intel_buffer_get_tiling_align(cl_context ctx, uint32_t tiling_mo
       ret = 128;
     } else if (dim == 1) { //tileY height in number of rows
       ret = 32;
+    } else if (dim == 2) { //height to calculate slice pitch
+      if (gen_ver == 9) //SKL same as tileY height
+        ret = 32;
+      else if (gen_ver == 8) //IVB, HSW, BDW same as CL_NO_TILE vertical alignment
+        ret = 4;
+      else
+        ret = 2;
     } else
       assert(0);
     break;
 
   case CL_NO_TILE:
-    if (dim == 1) { //vertical alignment
-      if (gen_ver == 8)
+    if (dim == 1 || dim == 2) { //vertical alignment
+      if (gen_ver == 8 || gen_ver == 9) //SKL 1D array need 4 alignment qpitch
         ret = 4;
       else
         ret = 2;
@@ -748,14 +770,80 @@ static int intel_buffer_set_tiling(cl_buffer bo,
   return ret;
 }
 
+#define CHV_CONFIG_WARNING \
+        "Warning: can't get GPU's configurations, will use the minimal one. Please update your drm to 2.4.59+ and linux kernel to 4.0.0+.\n"
+static void
+intel_update_device_info(cl_device_id device)
+{
+  intel_driver_t *driver;
+
+  driver = intel_driver_new();
+  assert(driver != NULL);
+  if (intel_driver_open(driver, NULL) != CL_SUCCESS) {
+    intel_driver_delete(driver);
+    return;
+  }
+
+#ifdef HAS_USERPTR
+  const size_t sz = 4096;
+  void *host_ptr;
+
+  host_ptr = cl_aligned_malloc(sz, 4096);
+  if (host_ptr != NULL) {
+    cl_buffer bo = intel_buffer_alloc_userptr((cl_buffer_mgr)driver->bufmgr,
+      "CL memory object", host_ptr, sz, 0);
+    if (bo == NULL)
+      device->host_unified_memory = CL_FALSE;
+    else
+      drm_intel_bo_unreference((drm_intel_bo*)bo);
+    cl_free(host_ptr);
+  }
+  else
+    device->host_unified_memory = CL_FALSE;
+#endif
+
+#ifdef HAS_EU_TOTAL
+  unsigned int eu_total;
+
+  /* Prefer driver-queried max compute units if supported */
+  if (!drm_intel_get_eu_total(driver->fd, &eu_total))
+    device->max_compute_unit = eu_total;
+  else if (IS_CHERRYVIEW(device->vendor_id))
+    printf(CHV_CONFIG_WARNING);
+#else
+  if (IS_CHERRYVIEW(device->vendor_id))
+    printf(CHV_CONFIG_WARNING);
+#endif
+
+#ifdef HAS_SUBSLICE_TOTAL
+  unsigned int subslice_total;
+
+  /* Prefer driver-queried subslice count if supported */
+  if (!drm_intel_get_subslice_total(driver->fd, &subslice_total))
+    device->sub_slice_count = subslice_total;
+  else if (IS_CHERRYVIEW(device->vendor_id))
+    printf(CHV_CONFIG_WARNING);
+#else
+  if (IS_CHERRYVIEW(device->vendor_id))
+    printf(CHV_CONFIG_WARNING);
+#endif
+
+  intel_driver_context_destroy(driver);
+  intel_driver_close(driver);
+  intel_driver_terminate(driver);
+  intel_driver_delete(driver);
+}
+
 LOCAL void
 intel_setup_callbacks(void)
 {
   cl_driver_new = (cl_driver_new_cb *) cl_intel_driver_new;
   cl_driver_delete = (cl_driver_delete_cb *) cl_intel_driver_delete;
   cl_driver_get_ver = (cl_driver_get_ver_cb *) intel_driver_get_ver;
+  cl_driver_set_atomic_flag = (cl_driver_set_atomic_flag_cb *) intel_driver_set_atomic_flag;
   cl_driver_get_bufmgr = (cl_driver_get_bufmgr_cb *) intel_driver_get_bufmgr;
   cl_driver_get_device_id = (cl_driver_get_device_id_cb *) intel_get_device_id;
+  cl_driver_update_device_info = (cl_driver_update_device_info_cb *) intel_update_device_info;
   cl_buffer_alloc = (cl_buffer_alloc_cb *) drm_intel_bo_alloc;
   cl_buffer_alloc_userptr = (cl_buffer_alloc_userptr_cb*) intel_buffer_alloc_userptr;
   cl_buffer_set_tiling = (cl_buffer_set_tiling_cb *) intel_buffer_set_tiling;

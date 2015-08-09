@@ -80,6 +80,7 @@ namespace gbe
       case GEN_TYPE_UW:
       case GEN_TYPE_W:
       case GEN_TYPE_HF:
+      case GEN_TYPE_HF_IMM:
         return 2;
       case GEN_TYPE_UB:
       case GEN_TYPE_B:
@@ -205,6 +206,8 @@ namespace gbe
       this->quarter = 0;
       this->nr = this->subnr = 0;
       this->address_mode = GEN_ADDRESS_DIRECT;
+      this->a0_subnr = 0;
+      this->addr_imm = 0;
     }
 
     /*! For specific physical registers only */
@@ -229,6 +232,8 @@ namespace gbe
       this->hstride = hstride;
       this->quarter = 0;
       this->address_mode = GEN_ADDRESS_DIRECT;
+      this->a0_subnr = 0;
+      this->addr_imm = 0;
     }
 
     /*! Return the IR virtual register */
@@ -242,6 +247,7 @@ namespace gbe
       uint32_t ud;
       uint32_t reg;
       int64_t i64;
+      uint64_t u64;
     } value;
 
     uint32_t nr:8;         //!< Just for some physical registers (acc, null)
@@ -257,12 +263,19 @@ namespace gbe
     uint32_t hstride:2;      //!< Horizontal stride
     uint32_t quarter:1;      //!< To choose which part we want (Q1 / Q2)
     uint32_t address_mode:1; //!< direct or indirect
+    uint32_t a0_subnr:4;     //!< In indirect mode, use a0.nr as the base.
+    int32_t addr_imm:10;     //!< In indirect mode, the imm as address offset from a0.
 
     static INLINE GenRegister offset(GenRegister reg, int nr, int subnr = 0) {
       GenRegister r = reg;
       r.nr += nr;
       r.subnr += subnr;
+      r.subphysical = 1;
       return r;
+    }
+
+    static INLINE uint32_t grfOffset(GenRegister reg) {
+      return reg.nr * GEN_REG_SIZE + reg.subnr;
     }
 
     // split a DWORD register into unpacked Byte or Short register
@@ -293,6 +306,15 @@ namespace gbe
     INLINE bool isint64(void) const {
       if ((type == GEN_TYPE_UL || type == GEN_TYPE_L) && file == GEN_GENERAL_REGISTER_FILE)
         return true;
+      return false;
+    }
+
+    /* Besides long and double, there are also some cases which can also stride
+       several registers, eg. unpacked ud for long<8,4:2> and unpacked uw for
+       long<16,4:4> */
+    INLINE bool is_unpacked_long(void) const {
+      if (file != GEN_GENERAL_REGISTER_FILE) return false;
+      if (width == GEN_WIDTH_4 && hstride > GEN_HORIZONTAL_STRIDE_1) return true;
       return false;
     }
 
@@ -447,6 +469,20 @@ namespace gbe
       return retype(vec1(file, reg), GEN_TYPE_DF);
     }
 
+    /* Because we can not crossing row with horizontal stride, so for long
+       type, we need to set it to <4,4:1>:UQ */
+    static INLINE GenRegister ul16(uint32_t file, ir::Register reg) {
+      return retype(vec4(file, reg), GEN_TYPE_UL);
+    }
+
+    static INLINE GenRegister ul8(uint32_t file, ir::Register reg) {
+      return retype(vec4(file, reg), GEN_TYPE_UL);
+    }
+
+    static INLINE GenRegister ul1(uint32_t file, ir::Register reg) {
+      return retype(vec1(file, reg), GEN_TYPE_UL);
+    }
+
     static INLINE GenRegister ud16(uint32_t file, ir::Register reg) {
       return retype(vec16(file, reg), GEN_TYPE_UD);
     }
@@ -497,13 +533,47 @@ namespace gbe
       return retype(vec1(file, reg), GEN_TYPE_UB);
     }
 
-    static INLINE GenRegister unpacked_uw(ir::Register reg, bool uniform = false) {
-        return GenRegister(GEN_GENERAL_REGISTER_FILE,
-                           reg,
-                           GEN_TYPE_UW,
-                           uniform ? GEN_VERTICAL_STRIDE_0 : GEN_VERTICAL_STRIDE_16,
-                           uniform ? GEN_WIDTH_1 : GEN_WIDTH_8,
-                           uniform ? GEN_HORIZONTAL_STRIDE_0 : GEN_HORIZONTAL_STRIDE_2);
+    static INLINE GenRegister unpacked_ud(ir::Register reg, bool uniform = false) {
+      uint32_t width;
+      uint32_t vstride;
+      uint32_t hstride;
+
+      if (uniform) {
+        width = GEN_WIDTH_1;
+        vstride = GEN_VERTICAL_STRIDE_0;
+        hstride = GEN_HORIZONTAL_STRIDE_0;
+      } else {
+        width = GEN_WIDTH_4;
+        vstride = GEN_VERTICAL_STRIDE_8;
+        hstride = GEN_HORIZONTAL_STRIDE_2;
+      }
+
+      return GenRegister(GEN_GENERAL_REGISTER_FILE, reg,
+                         GEN_TYPE_UD, vstride, width, hstride);
+    }
+
+    static INLINE GenRegister unpacked_uw(ir::Register reg, bool uniform = false,
+                                          bool islong = false) {
+      uint32_t width;
+      uint32_t vstride;
+      uint32_t hstride;
+
+      if (uniform) {
+        width = GEN_WIDTH_1;
+        vstride = GEN_VERTICAL_STRIDE_0;
+        hstride = GEN_HORIZONTAL_STRIDE_0;
+      } else if (islong) {
+        width = GEN_WIDTH_4;
+        vstride = GEN_VERTICAL_STRIDE_16;
+        hstride = GEN_HORIZONTAL_STRIDE_4;
+      } else {
+        width = GEN_WIDTH_8;
+        vstride = GEN_VERTICAL_STRIDE_16;
+        hstride = GEN_HORIZONTAL_STRIDE_2;
+      }
+
+      return GenRegister(GEN_GENERAL_REGISTER_FILE, reg,
+                         GEN_TYPE_UW, vstride, width, hstride);
     }
 
     static INLINE GenRegister unpacked_ub(ir::Register reg, bool uniform = false) {
@@ -523,6 +593,12 @@ namespace gbe
                          GEN_VERTICAL_STRIDE_0,
                          GEN_WIDTH_1,
                          GEN_HORIZONTAL_STRIDE_0);
+    }
+
+    static INLINE GenRegister immuint64(uint64_t i) {
+      GenRegister immediate = imm(GEN_TYPE_UL);
+      immediate.value.u64 = i;
+      return immediate;
     }
 
     static INLINE GenRegister immint64(int64_t i) {
@@ -564,6 +640,12 @@ namespace gbe
     static INLINE GenRegister immw(int16_t w) {
       GenRegister immediate = imm(GEN_TYPE_W);
       immediate.value.d = w;
+      return immediate;
+    }
+
+    static INLINE GenRegister immh(uint16_t uw) {
+      GenRegister immediate = imm(GEN_TYPE_HF_IMM);
+      immediate.value.ud = uw;
       return immediate;
     }
 
@@ -624,6 +706,18 @@ namespace gbe
 
     static INLINE GenRegister df16grf(ir::Register reg) {
       return df16(GEN_GENERAL_REGISTER_FILE, reg);
+    }
+
+    static INLINE GenRegister ul16grf(ir::Register reg) {
+      return ul16(GEN_GENERAL_REGISTER_FILE, reg);
+    }
+
+    static INLINE GenRegister ul8grf(ir::Register reg) {
+      return ul8(GEN_GENERAL_REGISTER_FILE, reg);
+    }
+
+    static INLINE GenRegister ul1grf(ir::Register reg) {
+      return ul1(GEN_GENERAL_REGISTER_FILE, reg);
     }
 
     static INLINE GenRegister ud16grf(ir::Register reg) {
@@ -744,19 +838,43 @@ namespace gbe
     }
 
     /*! Build an indirectly addressed source */
-    static INLINE GenRegister indirect(uint32_t type, uint32_t subnr, uint32_t width) {
+    static INLINE GenRegister indirect(uint32_t type, uint32_t subnr, uint32_t width,
+                                        uint32_t vstride, uint32_t hstride) {
       GenRegister reg;
       reg.type = type;
       reg.file = GEN_GENERAL_REGISTER_FILE;
       reg.address_mode = GEN_ADDRESS_REGISTER_INDIRECT_REGISTER;
       reg.width = width;
-      reg.subnr = subnr;
+      reg.a0_subnr = subnr;
       reg.nr = 0;
+      reg.addr_imm = 0;
       reg.negation = 0;
       reg.absolute = 0;
-      reg.vstride = 0;
-      reg.hstride = 0;
+      reg.vstride = vstride;
+      reg.hstride = hstride;
       return reg;
+    }
+
+    /*! convert one register to indirectly mode */
+    static INLINE GenRegister to_indirect1xN(GenRegister reg, uint32_t base_addr,
+                                          int32_t imm_off = 4096, int a0_subnr = 0) {
+      GenRegister r = reg;
+      int32_t offset;
+      if (imm_off > 4095) {
+        offset = (r.nr*32 + r.subnr) - base_addr;
+      } else {
+        offset = imm_off;
+      }
+
+      GBE_ASSERT(offset <= 511 && offset>=-512);
+      r.a0_subnr = a0_subnr;
+      r.addr_imm = offset;
+      r.address_mode = GEN_ADDRESS_REGISTER_INDIRECT_REGISTER;
+
+      r.width = GEN_WIDTH_1;
+      r.vstride = GEN_VERTICAL_STRIDE_ONE_DIMENSIONAL;
+      r.hstride = GEN_HORIZONTAL_STRIDE_0;
+      return r;
     }
 
     static INLINE GenRegister vec16(uint32_t file, uint32_t nr, uint32_t subnr) {
@@ -840,6 +958,18 @@ namespace gbe
       return retype(vec1(file, nr, subnr), GEN_TYPE_DF);
     }
 
+    static INLINE GenRegister ul16(uint32_t file, uint32_t nr, uint32_t subnr) {
+      return retype(vec4(file, nr, subnr), GEN_TYPE_UL);
+    }
+
+    static INLINE GenRegister ul8(uint32_t file, uint32_t nr, uint32_t subnr) {
+      return retype(vec4(file, nr, subnr), GEN_TYPE_UL);
+    }
+
+    static INLINE GenRegister ul1(uint32_t file, uint32_t nr, uint32_t subnr) {
+      return retype(vec1(file, nr, subnr), GEN_TYPE_UL);
+    }
+
     static INLINE GenRegister ud16(uint32_t file, uint32_t nr, uint32_t subnr) {
       return retype(vec16(file, nr, subnr), GEN_TYPE_UD);
     }
@@ -865,7 +995,7 @@ namespace gbe
     }
 
     static INLINE GenRegister uw1(uint32_t file, uint32_t nr, uint32_t subnr) {
-      return suboffset(retype(vec1(file, nr, 0), GEN_TYPE_UW), subnr);
+      return offset(retype(vec1(file, nr, 0), GEN_TYPE_UW), 0, typeSize(GEN_TYPE_UW)*subnr);
     }
 
     static INLINE GenRegister ub16(uint32_t file, uint32_t nr, uint32_t subnr) {
@@ -922,6 +1052,18 @@ namespace gbe
 
     static INLINE GenRegister df1grf(uint32_t nr, uint32_t subnr) {
       return df1(GEN_GENERAL_REGISTER_FILE, nr, subnr);
+    }
+
+    static INLINE GenRegister ul16grf(uint32_t nr, uint32_t subnr) {
+      return ul16(GEN_GENERAL_REGISTER_FILE, nr, subnr);
+    }
+
+    static INLINE GenRegister ul8grf(uint32_t nr, uint32_t subnr) {
+      return ul8(GEN_GENERAL_REGISTER_FILE, nr, subnr);
+    }
+
+    static INLINE GenRegister ul1grf(uint32_t nr, uint32_t subnr) {
+      return ul1(GEN_GENERAL_REGISTER_FILE, nr, subnr);
     }
 
     static INLINE GenRegister ud16grf(uint32_t nr, uint32_t subnr) {
@@ -1049,6 +1191,7 @@ namespace gbe
         return SIMD1(values...); \
       } \
     }
+    // TODO: Should add native long type here.
     DECL_REG_ENCODER(dfxgrf, df16grf, df8grf, df1grf);
     DECL_REG_ENCODER(fxgrf, f16grf, f8grf, f1grf);
     DECL_REG_ENCODER(uwxgrf, uw16grf, uw8grf, uw1grf);

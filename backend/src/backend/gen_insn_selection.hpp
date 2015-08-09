@@ -100,7 +100,7 @@ namespace gbe
       struct {
         /*! Store bti for loads/stores and function for math, atomic and compares */
         uint16_t function:8;
-        /*! elemSize for byte scatters / gathers, elemNum for untyped msg, bti for atomic */
+        /*! elemSize for byte scatters / gathers, elemNum for untyped msg, operand number for atomic */
         uint16_t elem:8;
       };
       struct {
@@ -131,6 +131,7 @@ namespace gbe
       };
       uint32_t barrierType;
       bool longjmp;
+      uint32_t indirect_offset;
     } extra;
     /*! Gen opcode */
     uint8_t opcode;
@@ -149,14 +150,7 @@ namespace gbe
     INLINE uint32_t getbti() const {
       GBE_ASSERT(isRead() || isWrite());
       switch (opcode) {
-        case SEL_OP_ATOMIC: return extra.elem;
-        case SEL_OP_BYTE_SCATTER:
-        case SEL_OP_WRITE64:
-        case SEL_OP_DWORD_GATHER:
-        case SEL_OP_UNTYPED_WRITE:
-        case SEL_OP_UNTYPED_READ:
-        case SEL_OP_BYTE_GATHER:
-        case SEL_OP_READ64: return extra.function;
+        case SEL_OP_DWORD_GATHER: return extra.function;
         case SEL_OP_SAMPLE: return extra.rdbti;
         case SEL_OP_TYPED_WRITE: return extra.bti;
         default:
@@ -168,14 +162,7 @@ namespace gbe
     INLINE void setbti(uint32_t bti) {
       GBE_ASSERT(isRead() || isWrite());
       switch (opcode) {
-        case SEL_OP_ATOMIC: extra.elem = bti; return;
-        case SEL_OP_BYTE_SCATTER:
-        case SEL_OP_WRITE64:
-        case SEL_OP_UNTYPED_WRITE:
-        case SEL_OP_DWORD_GATHER:
-        case SEL_OP_UNTYPED_READ:
-        case SEL_OP_BYTE_GATHER:
-        case SEL_OP_READ64: extra.function = bti; return;
+        case SEL_OP_DWORD_GATHER: extra.function = bti; return;
         case SEL_OP_SAMPLE: extra.rdbti = bti; return;
         case SEL_OP_TYPED_WRITE: extra.bti = bti; return;
         default:
@@ -199,6 +186,8 @@ namespace gbe
     GenRegister *reg;
     /*! Number of registers in the vector */
     uint16_t regNum;
+    /*! offset in insn src() or dst() */
+    uint16_t offsetID;
     /*! Indicate if this a destination or a source vector */
     uint16_t isSrc;
   };
@@ -267,6 +256,8 @@ namespace gbe
     bool spillRegs(const SpilledRegs &spilledRegs, uint32_t registerPool);
     /*! Indicate if a register is scalar or not */
     bool isScalarReg(const ir::Register &reg) const;
+    /*! is this register a partially written register.*/
+    bool isPartialWrite(const ir::Register &reg) const;
     /*! Create a new selection instruction */
     SelectionInstruction *create(SelectionOpcode, uint32_t dstNum, uint32_t srcNum);
     /*! List of emitted blocks */
@@ -291,6 +282,20 @@ namespace gbe
     public:
       /*! Initialize internal structures used for the selection */
       Selection8(GenContext &ctx);
+  };
+
+  class SelectionChv: public Selection
+  {
+    public:
+      /*! Initialize internal structures used for the selection */
+      SelectionChv(GenContext &ctx);
+  };
+
+  class Selection9: public Selection
+  {
+    public:
+      /*! Initialize internal structures used for the selection */
+      Selection9(GenContext &ctx);
   };
 
 } /* namespace gbe */

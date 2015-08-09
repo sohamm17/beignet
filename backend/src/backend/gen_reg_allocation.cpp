@@ -141,7 +141,7 @@ namespace gbe
     /*! Allocate the vectors detected in the instruction selection pass */
     void allocateVector(Selection &selection);
     /*! Allocate the given interval. Return true if success */
-    bool createGenReg(const GenRegInterval &interval);
+    bool createGenReg(const Selection &selection, const GenRegInterval &interval);
     /*! Indicate if the registers are already allocated in vectors */
     bool isAllocated(const SelectionVector *vector) const;
     /*! Reallocate registers if needed to make the registers in the vector
@@ -180,7 +180,7 @@ namespace gbe
     uint32_t reservedReg;
     /*! Current vector to expire */
     uint32_t expiringID;
-    INLINE void insertNewReg(ir::Register reg, uint32_t grfOffset, bool isVector = false);
+    INLINE void insertNewReg(const Selection &selection, ir::Register reg, uint32_t grfOffset, bool isVector = false);
     INLINE bool expireReg(ir::Register reg);
     INLINE bool spillAtInterval(GenRegInterval interval, int size, uint32_t alignment);
     INLINE uint32_t allocateReg(GenRegInterval interval, uint32_t size, uint32_t alignment);
@@ -250,7 +250,7 @@ namespace gbe
     }
   }
 
-  bool GenRegAllocator::Opaque::createGenReg(const GenRegInterval &interval) {
+  bool GenRegAllocator::Opaque::createGenReg(const Selection &selection, const GenRegInterval &interval) {
     using namespace ir;
     const ir::Register reg = interval.reg;
     if (RA.contains(reg) == true)
@@ -262,7 +262,7 @@ namespace gbe
     if (grfOffset == 0) {
       return false;
     }
-    insertNewReg(reg, grfOffset);
+    insertNewReg(selection, reg, grfOffset);
     return true;
   }
 
@@ -319,7 +319,7 @@ namespace gbe
       else {
         ir::Register tmp;
         ir::Type type = getIRType(vector->reg[regID].type);
-        tmp = this->replaceReg(selection, vector->insn, regID, vector->isSrc, type);
+        tmp = this->replaceReg(selection, vector->insn, regID + vector->offsetID, vector->isSrc, type);
         const VectorLocation location = std::make_pair(vector, regID);
         this->vectorMap.insert(std::make_pair(tmp, location));
       }
@@ -620,7 +620,10 @@ namespace gbe
             // set a temporary register to avoid switch in this block.
             bool isSrc = false;
             bool needMov = false;
-            this->replaceReg(selection, &insn, 0, isSrc, ir::TYPE_FLOAT, needMov);
+            ir::Type ir_type = ir::TYPE_FLOAT;
+            if (insn.src(0).isint64())
+              ir_type = ir::TYPE_U64;
+            this->replaceReg(selection, &insn, 0, isSrc, ir_type, needMov);
           }
           // If the instruction requires to generate (CMP for long/int/float..)
           // the flag value to the register, and it's not a pure flag boolean,
@@ -710,13 +713,13 @@ namespace gbe
           getRegAttrib(reg, alignment, NULL);
           // check all sub registers aligned correctly
           GBE_ASSERT((grfOffset + subOffset) % alignment == 0 || (grfOffset + subOffset) % GEN_REG_SIZE == 0);
-          insertNewReg(reg, grfOffset + subOffset, true);
+          insertNewReg(selection, reg, grfOffset + subOffset, true);
           ctx.splitBlock(grfOffset, subOffset);  //splitBlock will not split if regID == 0
           subOffset += alignment;
         }
       }
       // Case 2: This is a regular scalar register, allocate it alone
-      else if (this->createGenReg(interval) == false) {
+      else if (this->createGenReg(selection, interval) == false) {
         if (!spillReg(interval))
           return false;
       }
@@ -800,7 +803,10 @@ namespace gbe
 
   // insert a new register with allocated offset,
   // put it to the RA map and the spill map if it could be spilled.
-  INLINE void GenRegAllocator::Opaque::insertNewReg(ir::Register reg, uint32_t grfOffset, bool isVector)
+  INLINE void GenRegAllocator::Opaque::insertNewReg(const Selection &selection,
+                                                    ir::Register reg,
+                                                    uint32_t grfOffset,
+                                                    bool isVector)
   {
      RA.insert(std::make_pair(reg, grfOffset));
 
@@ -815,8 +821,9 @@ namespace gbe
        if (ctx.getSimdWidth() == 16 && reg.value() >= ctx.getFunction().getRegisterFile().regNum())
          return;
 
-       if ((regSize == ctx.getSimdWidth()/8 * GEN_REG_SIZE && family == ir::FAMILY_DWORD)
-          || (regSize == 2 * ctx.getSimdWidth()/8 * GEN_REG_SIZE && family == ir::FAMILY_QWORD)) {
+       if (((regSize == ctx.getSimdWidth()/8 * GEN_REG_SIZE && family == ir::FAMILY_DWORD)
+          || (regSize == 2 * ctx.getSimdWidth()/8 * GEN_REG_SIZE && family == ir::FAMILY_QWORD))
+          && !selection.isPartialWrite(reg)) {
          GBE_ASSERT(offsetReg.find(grfOffset) == offsetReg.end());
          offsetReg.insert(std::make_pair(grfOffset, reg));
          spillCandidate.insert(intervals[reg]);

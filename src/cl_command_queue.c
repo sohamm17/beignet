@@ -78,8 +78,9 @@ cl_command_queue_delete(cl_command_queue queue)
 
   // If there is a valid last event, we need to give it a chance to
   // call the call-back function.
-  if (queue->last_event && queue->last_event->user_cb)
-    cl_event_update_status(queue->last_event, 1);
+  cl_event last_event = get_last_event(queue);
+  if (last_event && last_event->user_cb)
+    cl_event_update_status(last_event, 1);
   /* Remove it from the list */
   assert(queue->ctx);
   pthread_mutex_lock(&queue->ctx->queue_lock);
@@ -140,16 +141,16 @@ cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
     image = cl_mem_image(k->args[id].mem);
     set_image_info(k->curbe, &k->images[i], image);
     cl_gpgpu_bind_image(gpgpu, k->images[i].idx, image->base.bo, image->offset,
-                        image->intel_fmt, image->image_type,
+                        image->intel_fmt, image->image_type, image->bpp,
                         image->w, image->h, image->depth,
-                        image->row_pitch, (cl_gpgpu_tiling)image->tiling);
+                        image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
     // TODO, this workaround is for GEN7/GEN75 only, we may need to do it in the driver layer
     // on demand.
     if (image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
       cl_gpgpu_bind_image(gpgpu, k->images[i].idx + BTI_WORKAROUND_IMAGE_OFFSET, image->base.bo, image->offset,
-                          image->intel_fmt, image->image_type,
+                          image->intel_fmt, image->image_type, image->bpp,
                           image->w, image->h, image->depth,
-                          image->row_pitch, (cl_gpgpu_tiling)image->tiling);
+                          image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
   }
   return CL_SUCCESS;
 }
@@ -207,7 +208,7 @@ cl_command_queue_ND_range(cl_command_queue queue,
   /* Check that the user did not forget any argument */
   TRY (cl_kernel_check_args, k);
 
-  if (ver == 7 || ver == 75 || ver == 8)
+  if (ver == 7 || ver == 75 || ver == 8 || ver == 9)
     TRY (cl_command_queue_ND_range_gen7, queue, k, work_dim, global_wk_off, global_wk_sz, local_wk_sz);
   else
     FATAL ("Unknown Gen Device");
@@ -259,10 +260,14 @@ cl_command_queue_flush(cl_command_queue queue)
   // be released at the call back function, no other function will access
   // the event any more. If we don't do this here, we will leak that event
   // and all the corresponding buffers which is really bad.
-  if (queue->last_event && queue->last_event->user_cb)
-    cl_event_update_status(queue->last_event, 1);
-  if (queue->current_event && err == CL_SUCCESS)
-    err = cl_event_flush(queue->current_event);
+  cl_event last_event = get_last_event(queue);
+  if (last_event && last_event->user_cb)
+    cl_event_update_status(last_event, 1);
+  cl_event current_event = get_current_event(queue);
+  if (current_event && err == CL_SUCCESS) {
+    err = cl_event_flush(current_event);
+    set_current_event(queue, NULL);
+  }
   cl_invalid_thread_gpgpu(queue);
   return err;
 }

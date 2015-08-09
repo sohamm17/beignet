@@ -53,6 +53,8 @@ set (GBE_SRC
     ir/sampler.hpp
     ir/image.cpp
     ir/image.hpp
+    ir/half.cpp
+    ir/half.hpp
     ir/instruction.cpp
     ir/instruction.hpp
     ir/liveness.cpp
@@ -66,10 +68,10 @@ set (GBE_SRC
     ir/lowering.hpp
     ir/printf.cpp
     ir/printf.hpp
-    ir/structural_analysis.cpp
-    ir/structural_analysis.hpp
     ir/immediate.hpp
     ir/immediate.cpp
+    ir/structurizer.hpp
+    ir/structurizer.cpp
     backend/context.cpp
     backend/context.hpp
     backend/program.cpp
@@ -80,7 +82,6 @@ set (GBE_SRC
     llvm/llvm_gen_backend.cpp
     llvm/llvm_passes.cpp
     llvm/llvm_scalarize.cpp
-    llvm/llvm_legalize.cpp
     llvm/llvm_intrinsic_lowering.cpp
     llvm/llvm_barrier_nodup.cpp
     llvm/llvm_printf_parser.cpp
@@ -108,6 +109,8 @@ set (GBE_SRC
     backend/gen75_context.cpp
     backend/gen8_context.hpp
     backend/gen8_context.cpp
+    backend/gen9_context.hpp
+    backend/gen9_context.cpp
     backend/gen_program.cpp
     backend/gen_program.hpp
     backend/gen_program.h
@@ -123,6 +126,8 @@ set (GBE_SRC
     backend/gen75_encoder.cpp
     backend/gen8_encoder.hpp
     backend/gen8_encoder.cpp
+    backend/gen9_encoder.hpp
+    backend/gen9_encoder.cpp
     )
 
 set (GBE_LINK_LIBRARIES

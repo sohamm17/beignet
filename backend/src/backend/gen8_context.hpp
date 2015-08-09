@@ -47,8 +47,35 @@ namespace gbe
     }
     /*! Get the pointer argument size for curbe alloc */
     virtual uint32_t getPointerSize(void) { return 8; }
+    /*! Set the correct target values for the branches */
+    virtual bool patchBranches(void);
+
+    virtual void emitUnaryInstruction(const SelectionInstruction &insn);
+    virtual void emitUnaryWithTempInstruction(const SelectionInstruction &insn);
+    virtual void emitSimdShuffleInstruction(const SelectionInstruction &insn);
+    virtual void emitBinaryInstruction(const SelectionInstruction &insn);
+    virtual void emitBinaryWithTempInstruction(const SelectionInstruction &insn);
+    virtual void emitI64MULHIInstruction(const SelectionInstruction &insn);
+    virtual void emitI64RHADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64HADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64ShiftInstruction(const SelectionInstruction &insn);
+    virtual void emitI64CompareInstruction(const SelectionInstruction &insn);
+    virtual void emitI64SATADDInstruction(const SelectionInstruction &insn);
+    virtual void emitI64SATSUBInstruction(const SelectionInstruction &insn);
+    virtual void emitI64ToFloatInstruction(const SelectionInstruction &insn);
+    virtual void emitFloatToI64Instruction(const SelectionInstruction &insn);
+    virtual void emitI64MADSATInstruction(const SelectionInstruction &insn);
+
+    virtual void emitWrite64Instruction(const SelectionInstruction &insn);
+    virtual void emitRead64Instruction(const SelectionInstruction &insn);
+    virtual void emitI64MULInstruction(const SelectionInstruction &insn);
+    virtual void emitI64DIVREMInstruction(const SelectionInstruction &insn);
+
+    virtual void emitPackLongInstruction(const SelectionInstruction &insn);
+    virtual void emitUnpackLongInstruction(const SelectionInstruction &insn);
 
   protected:
+    virtual void setA0Content(uint16_t new_a0[16], uint16_t max_offset = 0, int sz = 0);
     virtual GenEncoder* generateEncoder(void) {
       return GBE_NEW(Gen8Encoder, this->simdWidth, 8, deviceID);
     }
@@ -56,6 +83,31 @@ namespace gbe
   private:
     virtual void emitSLMOffset(void);
     virtual void newSelection(void);
+    void packLongVec(GenRegister unpacked, GenRegister packed, uint32_t simd);
+    void unpackLongVec(GenRegister packed, GenRegister unpacked, uint32_t simd);
+    void calculateFullS64MUL(GenRegister src0, GenRegister src1, GenRegister dst_h,
+                             GenRegister dst_l, GenRegister s0_abs, GenRegister s1_abs,
+                             GenRegister tmp0, GenRegister tmp1, GenRegister sign, GenRegister flagReg);
+    virtual void calculateFullU64MUL(GenRegister src0, GenRegister src1, GenRegister dst_h,
+                                           GenRegister dst_l, GenRegister s0l_s1h, GenRegister s0h_s1l);
+  };
+
+  class ChvContext : public Gen8Context
+  {
+  public:
+    virtual ~ChvContext(void) { }
+    ChvContext(const ir::Unit &unit, const std::string &name, uint32_t deviceID, bool relaxMath = false)
+            : Gen8Context(unit, name, deviceID, relaxMath) {
+    };
+    virtual void emitI64MULInstruction(const SelectionInstruction &insn);
+
+  protected:
+    virtual void setA0Content(uint16_t new_a0[16], uint16_t max_offset = 0, int sz = 0);
+
+  private:
+    virtual void newSelection(void);
+    virtual void calculateFullU64MUL(GenRegister src0, GenRegister src1, GenRegister dst_h,
+                                           GenRegister dst_l, GenRegister s0l_s1h, GenRegister s0h_s1l);
   };
 }
 #endif /* __GBE_GEN8_CONTEXT_HPP__ */

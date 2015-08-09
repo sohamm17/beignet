@@ -49,6 +49,7 @@
 #include "backend/gen_context.hpp"
 #include "backend/gen75_context.hpp"
 #include "backend/gen8_context.hpp"
+#include "backend/gen9_context.hpp"
 #include "backend/gen_defs.hpp"
 #include "backend/gen/gen_mesa_disasm.h"
 #include "backend/gen_reg_allocation.hpp"
@@ -165,6 +166,10 @@ namespace gbe {
       ctx = GBE_NEW(Gen75Context, unit, name, deviceID, relaxMath);
     } else if (IS_BROADWELL(deviceID)) {
       ctx = GBE_NEW(Gen8Context, unit, name, deviceID, relaxMath);
+    } else if (IS_CHERRYVIEW(deviceID)) {
+      ctx = GBE_NEW(ChvContext, unit, name, deviceID, relaxMath);
+    } else if (IS_SKYLAKE(deviceID)) {
+      ctx = GBE_NEW(Gen9Context, unit, name, deviceID, relaxMath);
     }
     GBE_ASSERTM(ctx != NULL, "Fail to create the gen context\n");
 
@@ -206,7 +211,9 @@ namespace gbe {
                                       (IS_IVYBRIDGE(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
                                       (IS_BAYTRAIL_T(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
                                       (IS_HASWELL(typeA) && !strcmp(src_hw_info, "HSW")) ||  \
-                                      (IS_BROADWELL(typeA) && !strcmp(src_hw_info, "BDW")) )
+                                      (IS_BROADWELL(typeA) && !strcmp(src_hw_info, "BDW")) ||  \
+                                      (IS_CHERRYVIEW(typeA) && !strcmp(src_hw_info, "CHV")) ||  \
+                                      (IS_SKYLAKE(typeA) && !strcmp(src_hw_info, "SKL")) )
 
   static gbe_program genProgramNewFromBinary(uint32_t deviceID, const char *binary, size_t size) {
     using namespace gbe;
@@ -257,6 +264,11 @@ namespace gbe {
     acquireLLVMContextLock();
     llvm::Module* module = llvm::ParseIR(memory_buffer, Err, c);
 #endif
+    // if load 32 bit spir binary, the triple should be spir-unknown-unknown.
+    llvm::Triple triple(module->getTargetTriple());
+    if(triple.getArchName() == "spir" && triple.getVendorName() == "unknown" && triple.getOSName() == "unknown"){
+      module->setTargetTriple("spir");
+    }
     releaseLLVMContextLock();
     if(module == NULL){
       GBE_ASSERT(0);
@@ -307,6 +319,14 @@ namespace gbe {
         src_hw_info[0]='B';
         src_hw_info[1]='D';
         src_hw_info[2]='W';
+      }else if(IS_CHERRYVIEW(prog->deviceID)){
+        src_hw_info[0]='C';
+        src_hw_info[1]='H';
+        src_hw_info[2]='V';
+      }else if(IS_SKYLAKE(prog->deviceID)){
+        src_hw_info[0]='S';
+        src_hw_info[1]='K';
+        src_hw_info[2]='L';
       }
       FILL_DEVICE_ID(*binary, src_hw_info);
       memcpy(*binary+BINARY_HEADER_LENGTH, oss.str().c_str(), sz*sizeof(char));

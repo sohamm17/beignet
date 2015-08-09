@@ -56,7 +56,7 @@ int cl_event_flush(cl_event event)
     event->gpgpu = NULL;
   }
   cl_gpgpu_event_flush(event->gpgpu_event);
-  event->queue->last_event = event;
+  set_last_event(event->queue, event);
   return err;
 }
 
@@ -117,8 +117,8 @@ void cl_event_delete(cl_event event)
   if (atomic_dec(&event->ref_n) > 1)
     return;
 
-  if(event->queue && event->queue->last_event == event)
-    event->queue->last_event = NULL;
+  if(event->queue && get_last_event(event->queue) == event)
+    set_last_event(event->queue, NULL);
 
   /* Call all user's callback if haven't execute */
   cl_event_call_callback(event, CL_COMPLETE, CL_TRUE); // CL_COMPLETE status will force all callbacks that are not executed to run
@@ -221,7 +221,7 @@ cl_int cl_event_check_waitlist(cl_uint num_events_in_wait_list,
       err = CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
       goto exit;
     }
-    if(event && *event == event_wait_list[i])
+    if(event && event == &event_wait_list[i])
       goto error;
     if(event_wait_list[i]->ctx != ctx)
       goto error;
@@ -568,9 +568,9 @@ cl_int cl_event_marker_with_wait_list(cl_command_queue queue,
     return CL_SUCCESS;
   }
 
-  if(queue->last_event && queue->last_event->gpgpu_event) {
-    cl_gpgpu_event_update_status(queue->last_event->gpgpu_event, 1);
-  }
+  cl_event last_event = get_last_event(queue);
+  if(last_event && last_event->gpgpu_event)
+    cl_gpgpu_event_update_status(last_event->gpgpu_event, 1);
 
   cl_event_set_status(e, CL_COMPLETE);
   return CL_SUCCESS;
@@ -605,9 +605,9 @@ cl_int cl_event_barrier_with_wait_list(cl_command_queue queue,
     return CL_SUCCESS;
   }
 
-  if(queue->last_event && queue->last_event->gpgpu_event) {
-    cl_gpgpu_event_update_status(queue->last_event->gpgpu_event, 1);
-  }
+  cl_event last_event = get_last_event(queue);
+  if(last_event && last_event->gpgpu_event)
+    cl_gpgpu_event_update_status(last_event->gpgpu_event, 1);
 
   cl_event_set_status(e, CL_COMPLETE);
   return CL_SUCCESS;

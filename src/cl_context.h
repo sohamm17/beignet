@@ -63,6 +63,7 @@ enum _cl_internal_ker_type {
   CL_ENQUEUE_COPY_IMAGE_2D_TO_BUFFER_ALIGN16,
   CL_ENQUEUE_COPY_IMAGE_3D_TO_BUFFER,   //copy image 3d tobuffer
   CL_ENQUEUE_COPY_BUFFER_TO_IMAGE_2D,   //copy buffer to image 2d
+  CL_ENQUEUE_COPY_BUFFER_TO_IMAGE_2D_ALIGN16,
   CL_ENQUEUE_COPY_BUFFER_TO_IMAGE_3D,   //copy buffer to image 3d
   CL_ENQUEUE_FILL_BUFFER_UNALIGN,      //fill buffer with 1 aligne pattern, pattern size=1
   CL_ENQUEUE_FILL_BUFFER_ALIGN2,       //fill buffer with 2 aligne pattern, pattern size=2
@@ -114,7 +115,7 @@ struct _cl_context {
   pthread_mutex_t event_lock;       /* To allocate and deallocate events */
   cl_program internal_prgs[CL_INTERNAL_KERNEL_MAX];
                                     /* All programs internal used, for example clEnqueuexxx api use */
-  cl_kernel  internel_kernels[CL_INTERNAL_KERNEL_MAX];
+  cl_kernel  internal_kernels[CL_INTERNAL_KERNEL_MAX];
                                     /* All kernels  for clenqueuexxx api, for example clEnqueuexxx api use */
   cl_program built_in_prgs;  /*all built-in kernels belongs to this program only*/
   cl_kernel  built_in_kernels[CL_INTERNAL_KERNEL_MAX];
@@ -162,9 +163,6 @@ extern cl_int cl_context_ND_kernel(cl_context,
 
 /* Used for allocation */
 extern cl_buffer_mgr cl_context_get_bufmgr(cl_context ctx);
-
-/* Get the internal used kernel */
-extern cl_kernel cl_context_get_static_kernel(cl_context ctx, cl_int index, const char *str_kernel, const char * str_option);
 
 /* Get the internal used kernel from binary*/
 extern cl_kernel cl_context_get_static_kernel_from_bin(cl_context ctx, cl_int index,

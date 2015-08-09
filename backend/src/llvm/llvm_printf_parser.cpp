@@ -552,7 +552,6 @@ error:
     return true;
   }
 
-
   bool PrintfParser::runOnFunction(llvm::Function &F)
   {
     bool changed = false;
@@ -565,6 +564,7 @@ error:
 #else
       case CallingConv::C:
       case CallingConv::Fast:
+      case CallingConv::SPIR_KERNEL:
 #endif
         break;
       default:
@@ -582,6 +582,15 @@ error:
 
     builder = new IRBuilder<>(module->getContext());
 
+    llvm::GlobalValue* gFun = module->getNamedValue("printf");
+    if(gFun) {
+      gFun->setName("__gen_ocl_printf_stub");
+    }
+    llvm::GlobalValue* gFun2 = module->getNamedValue("puts");
+    if(gFun2 ) {
+      gFun2->setName("__gen_ocl_puts_stub");
+    }
+
     /* First find printfs and caculate all slots size of one loop. */
     for (llvm::Function::iterator B = F.begin(), BE = F.end(); B != BE; B++) {
       for (BasicBlock::iterator instI = B->begin(),
@@ -595,13 +604,13 @@ error:
           continue;
         }
 
-        if (call->getCalledFunction()->getIntrinsicID() != 0)
+        if (call->getCalledFunction() && call->getCalledFunction()->getIntrinsicID() != 0)
           continue;
 
         Value *Callee = call->getCalledValue();
         const std::string fnName = Callee->getName();
 
-        if (fnName != "__gen_ocl_printf_stub")
+        if (fnName != "__gen_ocl_printf_stub" && fnName != "__gen_ocl_puts_stub")
           continue;
 
         if (!parseOnePrintfInstruction(call, pInfo, sizeof_size)) {

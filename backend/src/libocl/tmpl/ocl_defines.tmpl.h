@@ -34,5 +34,7 @@
 #define cl_khr_byte_addressable_store
 #define cl_khr_icd
 #define cl_khr_gl_sharing
+#define cl_khr_spir
+#define cl_khr_fp16
 
 #endif /* end of __OCL_COMMON_DEF_H__ */

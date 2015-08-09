@@ -49,6 +49,15 @@ extern cl_driver_get_bufmgr_cb *cl_driver_get_bufmgr;
 typedef uint32_t (cl_driver_get_ver_cb)(cl_driver);
 extern cl_driver_get_ver_cb *cl_driver_get_ver;
 
+typedef enum cl_self_test_res{
+  SELF_TEST_PASS = 0,
+  SELF_TEST_SLM_FAIL  = 1,
+  SELF_TEST_ATOMIC_FAIL = 2,
+  SELF_TEST_OTHER_FAIL = 3,
+} cl_self_test_res;
+/* Set the atomic enable/disable flag in the driver */
+typedef void (cl_driver_set_atomic_flag_cb)(cl_driver, int);
+extern cl_driver_set_atomic_flag_cb *cl_driver_set_atomic_flag;
 /**************************************************************************
  * GPGPU command streamer
  **************************************************************************/
@@ -145,11 +154,13 @@ typedef void (cl_gpgpu_bind_image_cb)(cl_gpgpu state,
                                       cl_buffer obj_bo,
                                       uint32_t obj_bo_offset,
                                       uint32_t format,
+                                      uint32_t bpp,
                                       uint32_t type,
                                       int32_t w,
                                       int32_t h,
                                       int32_t depth,
                                       int pitch,
+                                      int32_t slice_pitch,
                                       cl_gpgpu_tiling tiling);
 
 extern cl_gpgpu_bind_image_cb *cl_gpgpu_bind_image;
@@ -373,6 +384,10 @@ extern cl_buffer_get_tiling_align_cb *cl_buffer_get_tiling_align;
 /* Get the device id */
 typedef int (cl_driver_get_device_id_cb)(void);
 extern cl_driver_get_device_id_cb *cl_driver_get_device_id;
+
+/* Update the device info */
+typedef void (cl_driver_update_device_info_cb)(cl_device_id device);
+extern cl_driver_update_device_info_cb *cl_driver_update_device_info;
 
 /**************************************************************************
  * cl_khr_gl_sharing.
