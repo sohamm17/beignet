@@ -2,6 +2,7 @@ beignet (1.1.0-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Update and improve d/copyright.
+  * Drop patches applied upstream.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 09 Aug 2015 13:27:07 +0100
 
