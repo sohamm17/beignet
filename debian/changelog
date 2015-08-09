@@ -4,6 +4,7 @@ beignet (1.1.0-1) UNRELEASED; urgency=medium
   * Update and improve d/copyright.
   * Drop patches applied upstream.
   * Update update-docs.patch.
+  * Drop outdated README.Debian.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 09 Aug 2015 13:27:07 +0100
 
