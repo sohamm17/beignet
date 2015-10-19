@@ -77,6 +77,7 @@ handle_events(cl_command_queue queue, cl_int num, const cl_event *wait_list,
     if (e->type != CL_COMMAND_USER &&
 	    e->queue->props & CL_QUEUE_PROFILING_ENABLE) {
 	cl_event_get_timestamp(e, CL_PROFILING_COMMAND_QUEUED);
+	cl_event_get_queued_cpu_timestamp(e);
     }
 
     if(event != NULL)
@@ -1015,10 +1016,11 @@ clLinkProgram(cl_context            context,
   INVALID_VALUE_IF (pfn_notify  == 0 && user_data   != NULL);
   INVALID_VALUE_IF (num_input_programs == 0 && input_programs != NULL);
   INVALID_VALUE_IF (num_input_programs != 0 && input_programs == NULL);
+  INVALID_VALUE_IF (num_input_programs == 0 && input_programs == NULL);
 
   program = cl_program_link(context, num_input_programs, input_programs, options, &err);
 
-  program->is_built = CL_TRUE;
+  if(program) program->is_built = CL_TRUE;
 
   if (pfn_notify) pfn_notify(program, user_data);
 
@@ -1251,6 +1253,11 @@ cl_int clGetKernelArgInfo(cl_kernel kernel, cl_uint arg_index, cl_kernel_arg_inf
   cl_int err = CL_SUCCESS;
   CHECK_KERNEL(kernel);
 
+  if(kernel->program->build_opts == NULL ||
+        strstr(kernel->program->build_opts,"-cl-kernel-arg-info") == NULL ) {
+    err = CL_KERNEL_ARG_INFO_NOT_AVAILABLE;
+    goto error;
+  }
   if (param_name != CL_KERNEL_ARG_ADDRESS_QUALIFIER
           && param_name != CL_KERNEL_ARG_ACCESS_QUALIFIER
           && param_name != CL_KERNEL_ARG_TYPE_NAME
@@ -1468,6 +1475,7 @@ clGetEventProfilingInfo(cl_event             event,
   cl_ulong ret_val;
 
   CHECK_EVENT(event);
+  cl_event_update_status(event, 0);
 
   if (event->type == CL_COMMAND_USER ||
       !(event->queue->props & CL_QUEUE_PROFILING_ENABLE) ||
@@ -1482,15 +1490,15 @@ clGetEventProfilingInfo(cl_event             event,
   }
 
   if (param_name == CL_PROFILING_COMMAND_QUEUED) {
-    ret_val = event->timestamp[0];
+    ret_val = event->queued_timestamp;
   } else if (param_name == CL_PROFILING_COMMAND_SUBMIT) {
-    ret_val = event->timestamp[1];
+    ret_val= event->queued_timestamp + cl_event_get_timestamp_delta(event->timestamp[0],event->timestamp[1]);
   } else if (param_name == CL_PROFILING_COMMAND_START) {
     err = cl_event_get_timestamp(event, CL_PROFILING_COMMAND_START);
-    ret_val = event->timestamp[2];
+    ret_val = event->queued_timestamp + cl_event_get_start_timestamp(event);
   } else if (param_name == CL_PROFILING_COMMAND_END) {
     err = cl_event_get_timestamp(event, CL_PROFILING_COMMAND_END);
-    ret_val = event->timestamp[3];
+    ret_val =  event->queued_timestamp + cl_event_get_end_timestamp(event);
   } else {
     err = CL_INVALID_VALUE;
     goto error;

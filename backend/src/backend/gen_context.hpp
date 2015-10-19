@@ -43,6 +43,7 @@ namespace gbe
   class SelectionInstruction; // Pre-RA Gen instruction
   class SelectionReg;         // Pre-RA Gen register
   class GenRegister;
+  class GenKernel;
   typedef enum {
     NO_ERROR,
     REGISTER_ALLOCATION_FAIL,
@@ -68,6 +69,8 @@ namespace gbe
     #define GEN7_SCRATCH_SIZE  (12 * KB)
     /*! Start new code generation with specific parameters */
     void startNewCG(uint32_t simdWidth, uint32_t reservedSpillRegs, bool limitRegisterPressure);
+    /*! Set the file name for the ASM dump */
+    void setASMFileName(const char* asmFname);
     /*! Target device ID*/
     uint32_t deviceID;
     /*! Implements base class */
@@ -217,8 +220,11 @@ namespace gbe
     CompileErrorCode errCode;
     bool ifEndifFix;
     uint32_t regSpillTick;
+    const char* asmFileName;
     /*! Build the curbe patch list for the given kernel */
     void buildPatchList(void);
+    /* Helper for printing the assembly */
+    void outputAssembly(FILE *file, GenKernel* genKernel);
     /*! Calc the group's slm offset from R0.0, to work around HSW SLM bug*/
     virtual void emitSLMOffset(void) { };
     /*! new selection of device */

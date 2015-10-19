@@ -49,6 +49,7 @@ namespace gbe
     this->p = NULL;
     this->sel = NULL;
     this->ra = NULL;
+    this->asmFileName = NULL;
     this->ifEndifFix = false;
     this->regSpillTick = 0;
   }
@@ -74,6 +75,10 @@ namespace gbe
     this->labelPos.clear();
     this->errCode = NO_ERROR;
     this->regSpillTick = 0;
+  }
+
+  void GenContext::setASMFileName(const char* asmFname) {
+    this->asmFileName = asmFname;
   }
 
   void GenContext::newSelection(void) {
@@ -2291,40 +2296,52 @@ namespace gbe
     genKernel->insnNum = p->store.size();
     genKernel->insns = GBE_NEW_ARRAY_NO_ARG(GenInstruction, genKernel->insnNum);
     std::memcpy(genKernel->insns, &p->store[0], genKernel->insnNum * sizeof(GenInstruction));
-    if (OCL_OUTPUT_ASM) {
-      std::cout << genKernel->getName() << "'s disassemble begin:" << std::endl;
-      ir::LabelIndex curLabel = (ir::LabelIndex)0;
-      GenCompactInstruction * pCom = NULL;
-      GenInstruction insn[2];
-      std::cout << "  L0:" << std::endl;
-      for (uint32_t insnID = 0; insnID < genKernel->insnNum; ) {
-        if (labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID &&
-            curLabel < this->getFunction().labelNum()) {
-          std::cout << "  L" << curLabel + 1 << ":" << std::endl;
-          curLabel = (ir::LabelIndex)(curLabel + 1);
-          while(labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID) {
-            std::cout << "  L" << curLabel + 1 << ":" << std::endl;
-            curLabel = (ir::LabelIndex)(curLabel + 1);
-          }
-        }
-        std::cout << "    (" << std::setw(8) << insnID << ")  ";
-        pCom = (GenCompactInstruction*)&p->store[insnID];
-        if(pCom->bits1.cmpt_control == 1) {
-          decompactInstruction(pCom, &insn);
-          gen_disasm(stdout, &insn, deviceID, 1);
-          insnID++;
-        } else {
-          gen_disasm(stdout, &p->store[insnID], deviceID, 0);
-          insnID = insnID + 2;
-        }
+    if (OCL_OUTPUT_ASM)
+      outputAssembly(stdout, genKernel);
+
+    if (this->asmFileName) {
+      FILE *asmDumpStream = fopen(this->asmFileName, "a");
+      if (asmDumpStream) {
+        outputAssembly(asmDumpStream, genKernel);
+        fclose(asmDumpStream);
       }
-      std::cout << genKernel->getName() << "'s disassemble end." << std::endl;
     }
+
     return true;
   }
 
   Kernel *GenContext::allocateKernel(void) {
     return GBE_NEW(GenKernel, name, deviceID);
+  }
+
+  void GenContext::outputAssembly(FILE *file, GenKernel* genKernel) {
+    fprintf(file, "%s's disassemble begin:\n", genKernel->getName());
+    ir::LabelIndex curLabel = (ir::LabelIndex)0;
+    GenCompactInstruction * pCom = NULL;
+    GenInstruction insn[2];
+    fprintf(file, "  L0:\n");
+    for (uint32_t insnID = 0; insnID < genKernel->insnNum; ) {
+      if (labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID &&
+          curLabel < this->getFunction().labelNum()) {
+        fprintf(file, "  L%i:\n", curLabel + 1);
+        curLabel = (ir::LabelIndex)(curLabel + 1);
+        while(labelPos.find((ir::LabelIndex)(curLabel + 1))->second == insnID) {
+          fprintf(file, "  L%i:\n", curLabel + 1);
+          curLabel = (ir::LabelIndex)(curLabel + 1);
+        }
+      }
+      fprintf(file, "    (%8i)  ", insnID);
+      pCom = (GenCompactInstruction*)&p->store[insnID];
+      if(pCom->bits1.cmpt_control == 1) {
+        decompactInstruction(pCom, &insn);
+        gen_disasm(file, &insn, deviceID, 1);
+        insnID++;
+      } else {
+        gen_disasm(file, &p->store[insnID], deviceID, 0);
+        insnID = insnID + 2;
+      }
+    }
+    fprintf(file, "%s's disassemble end.\n", genKernel->getName());
   }
 
 } /* namespace gbe */
