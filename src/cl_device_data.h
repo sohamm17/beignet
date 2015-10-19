@@ -21,6 +21,7 @@
 #define __CL_DEVICE_DATA_H__
 
 #define INVALID_CHIP_ID -1 //returned by intel_get_device_id if no device found
+#define INTEL_VENDOR_ID                 0x8086   // Vendor ID for Intel
 
 #define PCI_CHIP_GM45_GM                0x2A42
 #define PCI_CHIP_IGD_E_G                0x2E02
@@ -201,7 +202,8 @@
 #define PCI_CHIP_BROADWLL_W_GT2       0x161D /* Intel(R) Broadwell Workstation - GT2 */
 #define PCI_CHIP_BROADWLL_U_GT2       0x161E /* Intel(R) Broadwell ULX - GT2 */
 #define PCI_CHIP_BROADWLL_M_GT3       0x1622 /* Intel(R) Broadwell Mobile - Halo (EDRAM) - GT3 */
-#define PCI_CHIP_BROADWLL_D_GT3       0x1626 /* Intel(R) Broadwell U-Processor - GT3 */
+#define PCI_CHIP_BROADWLL_D_GT3       0x1626 /* Intel(R) Broadwell U-Processor HD 6000 - GT3 */
+#define PCI_CHIP_BROADWLL_UI_GT3      0x162B /* Intel(R) Broadwell U-Process Iris 6100 - GT3 */
 #define PCI_CHIP_BROADWLL_S_GT3       0x162A /* Intel(R) Broadwell Server - GT3 */
 #define PCI_CHIP_BROADWLL_W_GT3       0x162D /* Intel(R) Broadwell Workstation - GT3 */
 #define PCI_CHIP_BROADWLL_U_GT3       0x162E /* Intel(R) Broadwell ULX - GT3 */
@@ -225,6 +227,7 @@
    devid == PCI_CHIP_BROADWLL_D_GT3 || \
    devid == PCI_CHIP_BROADWLL_S_GT3 || \
    devid == PCI_CHIP_BROADWLL_W_GT3 || \
+   devid == PCI_CHIP_BROADWLL_UI_GT3 || \
    devid == PCI_CHIP_BROADWLL_U_GT3)
 
 #define IS_BROADWELL(devid) (IS_BRW_GT1(devid) || IS_BRW_GT2(devid) || IS_BRW_GT3(devid))

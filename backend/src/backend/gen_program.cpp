@@ -172,6 +172,7 @@ namespace gbe {
       ctx = GBE_NEW(Gen9Context, unit, name, deviceID, relaxMath);
     }
     GBE_ASSERTM(ctx != NULL, "Fail to create the gen context\n");
+    ctx->setASMFileName(this->asm_file_name);
 
     for (; codeGen < codeGenNum; ++codeGen) {
       const uint32_t simdWidth = codeGenStrategy[codeGen].simdWidth;
@@ -352,13 +353,14 @@ namespace gbe {
                                            const char *fileName,
                                            const void* module,
                                            const void* llvm_ctx,
+                                           const char* asm_file_name,
                                            size_t stringSize,
                                            char *err,
                                            size_t *errSize,
                                            int optLevel)
   {
     using namespace gbe;
-    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx);
+    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx, asm_file_name);
 #ifdef GBE_COMPILER_AVAILABLE
     std::string error;
     // Try to compile the program
@@ -384,7 +386,7 @@ namespace gbe {
     return (gbe_program) program;
   }
 
-  static void genProgramLinkFromLLVM(gbe_program           dst_program,
+  static bool genProgramLinkFromLLVM(gbe_program           dst_program,
                                      gbe_program           src_program,
                                      size_t                stringSize,
                                      char *                err,
@@ -406,10 +408,12 @@ namespace gbe {
           err[stringSize-1] = '\0';
           *errSize = strlen(err);
         }
+        return true;
       }
     }
     // Everything run fine
 #endif
+    return false;
   }
 
   static void genProgramBuildFromLLVM(gbe_program program,
@@ -442,7 +446,6 @@ namespace gbe {
         std::memcpy(err, error.c_str(), msgSize);
         *errSize = error.size();
       }
-      GBE_DELETE(p);
     }
     releaseLLVMContextLock();
 #endif

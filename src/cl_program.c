@@ -224,6 +224,10 @@ cl_program_create_from_binary(cl_context             ctx,
   }
 
   program = cl_program_new(ctx);
+  if (UNLIKELY(program == NULL)) {
+      err = CL_OUT_OF_HOST_MEMORY;
+      goto error;
+  }
 
   // TODO:  Need to check the binary format here to return CL_INVALID_BINARY.
   TRY_ALLOC(program->binary, cl_calloc(lengths[0], sizeof(char)));
@@ -237,7 +241,7 @@ cl_program_create_from_binary(cl_context             ctx,
     TRY_ALLOC(typed_binary, cl_calloc(lengths[0]+1, sizeof(char)));
     memcpy(typed_binary+1, binaries[0], lengths[0]);
     *typed_binary = 1;
-    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->vendor_id, typed_binary, program->binary_sz+1);
+    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->device_id, typed_binary, program->binary_sz+1);
     cl_free(typed_binary);
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
@@ -254,7 +258,7 @@ cl_program_create_from_binary(cl_context             ctx,
       err= CL_INVALID_BINARY;
       goto error;
     }
-    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->vendor_id, program->binary, program->binary_sz);
+    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->device_id, program->binary, program->binary_sz);
 
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
@@ -263,7 +267,7 @@ cl_program_create_from_binary(cl_context             ctx,
     program->source_type = FROM_LLVM;
   }
   else if (*program->binary == 0) {
-    program->opaque = interp_program_new_from_binary(program->ctx->device->vendor_id, program->binary, program->binary_sz);
+    program->opaque = interp_program_new_from_binary(program->ctx->device->device_id, program->binary, program->binary_sz);
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
       goto error;
@@ -379,7 +383,12 @@ cl_program_create_from_llvm(cl_context ctx,
   INVALID_VALUE_IF (file_name == NULL);
 
   program = cl_program_new(ctx);
-  program->opaque = compiler_program_new_from_llvm(ctx->device->vendor_id, file_name, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1);
+  if (UNLIKELY(program == NULL)) {
+      err = CL_OUT_OF_HOST_MEMORY;
+      goto error;
+  }
+
+  program->opaque = compiler_program_new_from_llvm(ctx->device->device_id, file_name, NULL, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1);
   if (UNLIKELY(program->opaque == NULL)) {
     err = CL_INVALID_PROGRAM;
     goto error;
@@ -417,6 +426,11 @@ cl_program_create_from_source(cl_context ctx,
   // the real compilation step will be done at build time since we do not have
   // yet the compilation options
   program = cl_program_new(ctx);
+  if (UNLIKELY(program == NULL)) {
+      err = CL_OUT_OF_HOST_MEMORY;
+      goto error;
+  }
+
   TRY_ALLOC (lens, cl_calloc(count, sizeof(int32_t)));
   for (i = 0; i < (int) count; ++i) {
     size_t len;
@@ -532,7 +546,7 @@ cl_program_build(cl_program p, const char *options)
       goto error;
     }
 
-    p->opaque = compiler_program_new_from_source(p->ctx->device->vendor_id, p->source, p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
+    p->opaque = compiler_program_new_from_source(p->ctx->device->device_id, p->source, p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
     if (UNLIKELY(p->opaque == NULL)) {
       if (p->build_log_sz > 0 && strstr(p->build_log, "error: error reading 'options'"))
         err = CL_INVALID_BUILD_OPTIONS;
@@ -560,7 +574,7 @@ cl_program_build(cl_program p, const char *options)
     /* Create all the kernels */
     TRY (cl_program_load_gen_program, p);
   } else if (p->source_type == FROM_BINARY) {
-    p->opaque = interp_program_new_from_binary(p->ctx->device->vendor_id, p->binary, p->binary_sz);
+    p->opaque = interp_program_new_from_binary(p->ctx->device->device_id, p->binary, p->binary_sz);
     if (UNLIKELY(p->opaque == NULL)) {
       err = CL_BUILD_PROGRAM_FAILURE;
       goto error;
@@ -604,21 +618,52 @@ cl_program_link(cl_context            context,
   cl_int err = CL_SUCCESS;
   cl_int i = 0;
   int copyed = 0;
+  cl_bool ret = 0;
+  int avialable_program = 0;
+
+  //Although we don't use options, but still need check options
+  if(!compiler_program_check_opt(options)) {
+    err = CL_INVALID_LINKER_OPTIONS;
+    goto error;
+  }
+
+  for(i = 0; i < num_input_programs; i++) {
+    //num_input_programs >0 and input_programs MUST not NULL, so compare with input_programs[0] directly.
+    if(input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_LIBRARY ||
+       input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT) {
+      avialable_program++;
+    }
+  }
+
+  //None of program contain a compilerd binary or library.
+  if(avialable_program == 0) {
+    goto done;
+  }
+
+  //Must all of program contain a compilerd binary or library.
+  if(avialable_program < num_input_programs) {
+    err = CL_INVALID_OPERATION;
+    goto error;
+  }
+
   p = cl_program_new(context);
+  if (UNLIKELY(p == NULL)) {
+      err = CL_OUT_OF_HOST_MEMORY;
+      goto error;
+  }
 
   if (!check_cl_version_option(p, options)) {
     err = CL_BUILD_PROGRAM_FAILURE;
     goto error;
   }
 
-  p->opaque = compiler_program_new_gen_program(context->device->vendor_id, NULL, NULL);
-
+  p->opaque = compiler_program_new_gen_program(context->device->device_id, NULL, NULL);
   for(i = 0; i < num_input_programs; i++) {
     // if program create with llvm binary, need deserilize first to get module.
     if(input_programs[i])
-      compiler_program_link_program(p->opaque, input_programs[i]->opaque,
-        p->build_log_max_sz, p->build_log, &p->build_log_sz);
-    if (UNLIKELY(p->opaque == NULL)) {
+      ret = compiler_program_link_program(p->opaque, input_programs[i]->opaque,
+                                          p->build_log_max_sz, p->build_log, &p->build_log_sz);
+    if (UNLIKELY(ret)) {
       err = CL_LINK_PROGRAM_FAILURE;
       goto error;
     }
@@ -650,14 +695,14 @@ cl_program_link(cl_context            context,
     copyed += sz;
   }
 done:
-  p->is_built = 1;
-  p->build_status = CL_BUILD_SUCCESS;
+  if(p) p->is_built = 1;
+  if(p) p->build_status = CL_BUILD_SUCCESS;
   if (errcode_ret)
     *errcode_ret = err;
   return p;
 
 error:
-  p->build_status = CL_BUILD_ERROR;
+  if(p) p->build_status = CL_BUILD_ERROR;
   if (errcode_ret)
     *errcode_ret = err;
   return p;
@@ -741,7 +786,7 @@ cl_program_compile(cl_program            p,
       }
     }
 
-    p->opaque = compiler_program_compile_from_source(p->ctx->device->vendor_id, p->source, temp_header_path,
+    p->opaque = compiler_program_compile_from_source(p->ctx->device->device_id, p->source, temp_header_path,
         p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
 
     char rm_path[255]="rm ";

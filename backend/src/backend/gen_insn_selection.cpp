@@ -2290,10 +2290,16 @@ namespace gbe
       GenRegister dst = sel.selReg(insn.getDst(0), type);
 
       sel.push();
+      if (sel.isScalarReg(insn.getDst(0))) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
+
       switch (opcode) {
         case ir::OP_SIMD_SIZE:
           {
-            const GenRegister src = GenRegister::immud(sel.curr.execWidth);
+            const GenRegister src = GenRegister::immud(sel.ctx.getSimdWidth());
             sel.MOV(dst, src);
           }
           break;
@@ -3205,8 +3211,8 @@ namespace gbe
           }
           sel.MOV(dst, imm.getIntegerValue() ? GenRegister::immuw(0xffff) : GenRegister::immuw(0));
         break;
-        case TYPE_U32:
-        case TYPE_S32:
+        case TYPE_U32: sel.MOV(dst, GenRegister::immud(imm.getIntegerValue())); break;
+        case TYPE_S32: sel.MOV(dst, GenRegister::immd(imm.getIntegerValue())); break;
         case TYPE_FLOAT:
           sel.MOV(GenRegister::retype(dst, GEN_TYPE_F),
                   GenRegister::immf(imm.asFloatValue()));
@@ -4998,6 +5004,11 @@ namespace gbe
       }
 
       sel.push();
+      if (sel.isScalarReg(insn.getDst(0))) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
       if (src1.file == GEN_IMMEDIATE_VALUE)
         sel.SIMD_SHUFFLE(dst, src0, src1);
       else {

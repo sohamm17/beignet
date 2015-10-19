@@ -518,8 +518,8 @@ namespace gbe {
 #ifdef GBE_COMPILER_AVAILABLE
   BVAR(OCL_OUTPUT_BUILD_LOG, false);
 
-  static bool buildModuleFromSource(const char* input, llvm::Module** out_module, llvm::LLVMContext* llvm_ctx,
-                                    std::vector<std::string>& options, size_t stringSize, char *err,
+  static bool buildModuleFromSource(const char *source, llvm::Module** out_module, llvm::LLVMContext* llvm_ctx,
+                                    std::string dumpLLVMFileName, std::vector<std::string>& options, size_t stringSize, char *err,
                                     size_t *errSize) {
     // Arguments to pass to the clang frontend
     vector<const char *> args;
@@ -551,8 +551,7 @@ namespace gbe {
     args.push_back("-triple");
     args.push_back("spir");
 #endif /* LLVM_VERSION_MINOR <= 2 */
-    args.push_back(input);
-
+    args.push_back("stringInput.cl");
     args.push_back("-ffp-contract=off");
 
     // The compiler invocation needs a DiagnosticsEngine so it can report problems
@@ -574,6 +573,14 @@ namespace gbe {
                                               &args[0],
                                               &args[0] + args.size(),
                                               Diags);
+    llvm::StringRef srcString(source);
+    (*CI).getPreprocessorOpts().addRemappedFile("stringInput.cl",
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
+                llvm::MemoryBuffer::getMemBuffer(srcString)
+#else
+                llvm::MemoryBuffer::getMemBuffer(srcString).release()
+#endif
+                );
 
     // Create the compiler instance
     clang::CompilerInstance Clang;
@@ -628,6 +635,34 @@ namespace gbe {
 #endif
 
     *out_module = module;
+
+// Dump the LLVM if requested.
+#if (LLVM_VERSION_MAJOR == 3) && (LLVM_VERSION_MINOR < 6)
+    if (!dumpLLVMFileName.empty()) {
+      std::string err;
+      llvm::raw_fd_ostream ostream (dumpLLVMFileName.c_str(),
+                                    err,
+      #if LLVM_VERSION_MINOR == 3
+                                    0
+      #else
+                                    llvm::sys::fs::F_None
+      #endif
+                                    );
+
+      if (err.empty()) {
+        (*out_module)->print(ostream, 0);
+      } //Otherwise, you'll have to make do without the dump.
+    }
+#else
+    if (!dumpLLVMFileName.empty()) {
+      std::error_code err;
+      llvm::raw_fd_ostream ostream (dumpLLVMFileName.c_str(),
+                                    err, llvm::sys::fs::F_None);
+      if (!err) {
+        (*out_module)->print(ostream, 0);
+      } //Otherwise, you'll have to make do without the dump.
+    }
+#endif
     return true;
   }
 
@@ -640,7 +675,8 @@ namespace gbe {
                                      const char *options,
                                      const char *temp_header_path,
                                      std::vector<std::string>& clOpt,
-                                     std::string& clName,
+                                     std::string& dumpLLVMFileName,
+                                     std::string& dumpASMFileName,
                                      int& optLevel,
                                      size_t stringSize,
                                      char *err,
@@ -719,6 +755,16 @@ namespace gbe {
           clOpt.push_back("__FAST_RELAXED_MATH__=1");
         }
 
+        if(str.find("-dump-opt-llvm=") != std::string::npos) {
+          dumpLLVMFileName = str.substr(str.find("=") + 1);
+          continue; // Don't push this str back; ignore it.
+        }
+
+        if(str.find("-dump-opt-asm=") != std::string::npos) {
+          dumpASMFileName = str.substr(str.find("=") + 1);
+          continue; // Don't push this str back; ignore it.
+        }
+
         clOpt.push_back(str);
       }
       free(str);
@@ -741,21 +787,6 @@ namespace gbe {
       }
     }
 
-    char clStr[] = "/tmp/XXXXXX.cl";
-    int clFd = mkstemps(clStr, 3);
-    clName = std::string(clStr);
-
-    FILE *clFile = fdopen(clFd, "w");
-    FATAL_IF(clFile == NULL, "Failed to open temporary file");
-    // XXX enable cl_khr_fp64 may cause some potential bugs.
-    // we may need to revisit here latter when we want to support fp64 completely.
-    // For now, as we don't support fp64 actually, just disable it by default.
-#if 0
-    #define ENABLE_CL_KHR_FP64_STR "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n"
-    if (options && !strstr(const_cast<char *>(options), "-cl-std=CL1.1"))
-      fwrite(ENABLE_CL_KHR_FP64_STR, strlen(ENABLE_CL_KHR_FP64_STR), 1, clFile);
-#endif
-
     if (!findPCH || invalidPCH) {
       clOpt.push_back("-include");
       clOpt.push_back("ocl.h");
@@ -765,9 +796,6 @@ namespace gbe {
       clOpt.push_back(pchFileName);
     }
 
-    // Write the source to the cl file
-    fwrite(source, strlen(source), 1, clFile);
-    fclose(clFile);
     return true;
   }
 
@@ -780,9 +808,11 @@ namespace gbe {
   {
     int optLevel = 1;
     std::vector<std::string> clOpt;
-    std::string clName;
-    if (!processSourceAndOption(source, options, NULL, clOpt, clName,
-                                optLevel, stringSize, err, errSize))
+    std::string dumpLLVMFileName, dumpASMFileName;
+    if (!processSourceAndOption(source, options, NULL, clOpt,
+                                dumpLLVMFileName, dumpASMFileName,
+                                optLevel,
+                                stringSize, err, errSize))
       return NULL;
 
     gbe_program p;
@@ -793,7 +823,7 @@ namespace gbe {
     if (!llvm::llvm_is_multithreaded())
       llvm_mutex.lock();
 
-    if (buildModuleFromSource(clName.c_str(), &out_module, llvm_ctx, clOpt,
+    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, clOpt,
                               stringSize, err, errSize)) {
     // Now build the program from llvm
       size_t clangErrSize = 0;
@@ -804,8 +834,14 @@ namespace gbe {
         clangErrSize = *errSize;
       }
 
-      p = gbe_program_new_from_llvm(deviceID, NULL, out_module, llvm_ctx, stringSize,
-                                    err, errSize, optLevel);
+      if (!dumpASMFileName.empty()) {
+        FILE *asmDumpStream = fopen(dumpASMFileName.c_str(), "w");
+        if (asmDumpStream)
+          fclose(asmDumpStream);
+      }
+      p = gbe_program_new_from_llvm(deviceID, NULL, out_module, llvm_ctx,
+                                    dumpASMFileName.empty() ? NULL : dumpASMFileName.c_str(),
+                                    stringSize, err, errSize, optLevel);
       if (err != NULL)
         *errSize += clangErrSize;
       if (OCL_OUTPUT_BUILD_LOG && options)
@@ -816,7 +852,6 @@ namespace gbe {
     if (!llvm::llvm_is_multithreaded())
       llvm_mutex.unlock();
 
-    remove(clName.c_str());
     return p;
   }
 #endif
@@ -833,8 +868,9 @@ namespace gbe {
   {
     int optLevel = 1;
     std::vector<std::string> clOpt;
-    std::string clName;
-    if (!processSourceAndOption(source, options, temp_header_path, clOpt, clName,
+    std::string dumpLLVMFileName, dumpASMFileName;
+    if (!processSourceAndOption(source, options, temp_header_path, clOpt,
+                                dumpLLVMFileName, dumpASMFileName,
                                 optLevel, stringSize, err, errSize))
       return NULL;
 
@@ -844,7 +880,8 @@ namespace gbe {
     //for some functions, so we use global context now, need switch to new context later.
     llvm::Module * out_module;
     llvm::LLVMContext* llvm_ctx = &llvm::getGlobalContext();
-    if (buildModuleFromSource(clName.c_str(), &out_module, llvm_ctx, clOpt,
+
+    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, clOpt,
                               stringSize, err, errSize)) {
     // Now build the program from llvm
       if (err != NULL) {
@@ -859,29 +896,69 @@ namespace gbe {
         llvm::errs() << options;
     } else
       p = NULL;
-    remove(clName.c_str());
     releaseLLVMContextLock();
     return p;
   }
 #endif
 
 #ifdef GBE_COMPILER_AVAILABLE
-  static void programLinkProgram(gbe_program           dst_program,
+  static bool programLinkProgram(gbe_program           dst_program,
                                  gbe_program           src_program,
                                  size_t                stringSize,
                                  char *                err,
                                  size_t *              errSize)
   {
+    bool ret = 0;
     acquireLLVMContextLock();
 
-    gbe_program_link_from_llvm(dst_program, src_program, stringSize, err, errSize);
+    ret = gbe_program_link_from_llvm(dst_program, src_program, stringSize, err, errSize);
 
     releaseLLVMContextLock();
 
     if (OCL_OUTPUT_BUILD_LOG && err)
       llvm::errs() << err;
+    return ret;
   }
 #endif
+
+#ifdef GBE_COMPILER_AVAILABLE
+    static bool programCheckOption(const char * option)
+    {
+      vector<const char *> args;
+      if (option == NULL) return 1;   //if NULL, return ok
+      std::string s(option);
+      size_t pos = s.find("-create-library");
+      //clang don't accept -create-library and -enable-link-options, erase them
+      if(pos != std::string::npos) {
+        s.erase(pos, strlen("-create-library"));
+      }
+      pos = s.find("-enable-link-options");
+      if(pos != std::string::npos) {
+        s.erase(pos, strlen("-enable-link-options"));
+      }
+      args.push_back(s.c_str());
+
+      // The compiler invocation needs a DiagnosticsEngine so it can report problems
+      std::string ErrorString;
+      llvm::raw_string_ostream ErrorInfo(ErrorString);
+      llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> DiagOpts = new clang::DiagnosticOptions();
+      DiagOpts->ShowCarets = false;
+      DiagOpts->ShowPresumedLoc = true;
+
+      clang::TextDiagnosticPrinter *DiagClient =
+                               new clang::TextDiagnosticPrinter(ErrorInfo, &*DiagOpts);
+      llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> DiagID(new clang::DiagnosticIDs());
+      clang::DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagClient);
+
+      // Create the compiler invocation
+      std::unique_ptr<clang::CompilerInvocation> CI(new clang::CompilerInvocation);
+      return clang::CompilerInvocation::CreateFromArgs(*CI,
+                                                       &args[0],
+                                                       &args[0] + args.size(),
+                                                       Diags);
+    }
+#endif
+
 
   static size_t programGetGlobalConstantSize(gbe_program gbeProgram) {
     if (gbeProgram == NULL) return 0;
@@ -1127,6 +1204,7 @@ void releaseLLVMContextLock()
 GBE_EXPORT_SYMBOL gbe_program_new_from_source_cb *gbe_program_new_from_source = NULL;
 GBE_EXPORT_SYMBOL gbe_program_compile_from_source_cb *gbe_program_compile_from_source = NULL;
 GBE_EXPORT_SYMBOL gbe_program_link_program_cb *gbe_program_link_program = NULL;
+GBE_EXPORT_SYMBOL gbe_program_check_opt_cb *gbe_program_check_opt = NULL;
 GBE_EXPORT_SYMBOL gbe_program_new_from_binary_cb *gbe_program_new_from_binary = NULL;
 GBE_EXPORT_SYMBOL gbe_program_new_from_llvm_binary_cb *gbe_program_new_from_llvm_binary = NULL;
 GBE_EXPORT_SYMBOL gbe_program_serialize_to_binary_cb *gbe_program_serialize_to_binary = NULL;
@@ -1182,6 +1260,7 @@ namespace gbe
       gbe_program_new_from_source = gbe::programNewFromSource;
       gbe_program_compile_from_source = gbe::programCompileFromSource;
       gbe_program_link_program = gbe::programLinkProgram;
+      gbe_program_check_opt = gbe::programCheckOption;
       gbe_program_get_global_constant_size = gbe::programGetGlobalConstantSize;
       gbe_program_get_global_constant_data = gbe::programGetGlobalConstantData;
       gbe_program_clean_llvm_resource = gbe::programCleanLlvmResource;
