@@ -205,15 +205,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
 --- a/utests/utest_generator.py
 +++ b/utests/utest_generator.py
-@@ -158,6 +158,7 @@ def udebug(ulpSize,returnType,function):
-       }
+@@ -159,6 +159,7 @@ def udebug(ulpSize,returnType,function):
+     }
  #endif
    }
 +  OCL_ASSERTM(status == 0, log);
  }\n'''%(returnType,Min_ulp(function),\
          ulpUnit(ulpSize),ulpNum(ulpSize),\
          ulpNum(ulpSize), ulpNum(ulpSize),\
-@@ -224,16 +225,16 @@ which can print more values and informat
+@@ -225,16 +226,16 @@ which can print more values and informat
  #include <algorithm>
  #include <string.h>
  
@@ -233,7 +233,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  }
  '''
      #########Execute class itself
-@@ -333,6 +334,7 @@ which can print more values and informat
+@@ -334,6 +335,7 @@ which can print more values and informat
  static void %s_%s(void)
  {
    int index;
