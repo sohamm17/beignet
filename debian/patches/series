@@ -8,3 +8,4 @@ allow-+-in-directory.patch
 llvm-36-convert-bug.patch
 llvm-37-support.patch
 printf-fix-90472.patch
+printf-fix2.patch
