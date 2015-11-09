@@ -6,3 +6,4 @@ shared-llvm.patch
 update-docs.patch
 allow-+-in-directory.patch
 llvm-36-convert-bug.patch
+llvm-37-support.patch
