@@ -1,3 +1,10 @@
+beignet (1.1.1-2) UNRELEASED; urgency=medium
+
+  * Add patch to support LLVM 3.6,
+    use system default version. (Closes: #803643)
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 09 Nov 2015 21:47:04 +0000
+
 beignet (1.1.1-1) unstable; urgency=medium
 
   * New upstream release.

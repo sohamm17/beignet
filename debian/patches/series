@@ -5,3 +5,4 @@ reduce-notfound-output.patch
 shared-llvm.patch
 update-docs.patch
 allow-+-in-directory.patch
+llvm-36-convert-bug.patch
