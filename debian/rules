@@ -16,3 +16,6 @@ override_dh_auto_configure:
 
 override_dh_strip:
 	dh_strip --dbg-package=beignet-opencl-icd-dbg
+
+override_dh_gencontrol:
+	dh_gencontrol -- -VClang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-?.?-dev | grep -e '= [0-9]')"
