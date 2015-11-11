@@ -14,7 +14,7 @@ index e9e2c16..3227340 100644
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
 -                             "See README.md or http://www.freedesktop.org/wiki/Software/Beignet/\n",
-+                             "See /usr/share/doc/beignet-opencl-icd/Beignet.mdwn.gz or http://www.freedesktop.org/wiki/Software/Beignet/\n",
++                             "This can usually be fixed by upgrading Linux to >= 4.2,\nsee /usr/share/doc/beignet-opencl-icd/Beignet.mdwn.gz or http://www.freedesktop.org/wiki/Software/Beignet/\n",
                               test_data[0], test_data[1], test_data[2]);
  
                      }
@@ -49,6 +49,21 @@ index 9a2b516..72cf25e 100644
    git master.
  
  * "Beignet: self-test failed" and 15-30 unit tests fail on 4th Generation (Haswell) hardware.
+@@ -183,10 +183,11 @@ Known Issues
+   Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
+   on Linux 4.1.
+   
+-  This will be fixed in Linux 4.2; older versions can be fixed with
+-  [this patch](https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support).
++  This is fixed from Linux 4.2, which is the default in sid/stretch, and available from -backports in jessie:
++  
++  `sudo apt-get install -t jessie-backports linux-image-amd64`
+   
+-  If you do not need \_\_local, you can override the self-test with
++  (or -i386).  If you do not need \_\_local, you can override the self-test with
+   
+   `export OCL_IGNORE_SELF_TEST=1`
+   
 diff --git a/docs/Beignet/Backend.mdwn b/docs/Beignet/Backend.mdwn
 index 583e5d2..e0de7bf 100644
 --- a/docs/Beignet/Backend.mdwn
