@@ -1,9 +1,10 @@
-Description: Don't try to use sysinfo on non-Linux
+Description: Don't try to use sysinfo or CLOCK_MONOTONIC_RAW on non-Linux
 
-Fixes FTBFS on kfreebsd due to use of a Linux-specific system call:
+Fixes two FTBFS on kfreebsd due to use of Linux-specific features:
 https://buildd.debian.org/status/fetch.php?pkg=beignet&arch=kfreebsd-amd64&ver=1.0.1-3&stamp=1425101150
+https://buildd.debian.org/status/fetch.php?pkg=beignet&arch=kfreebsd-amd64&ver=1.1.1-1&stamp=1445338350
 
-Origin: https://github.com/freebsd/freebsd-ports-graphics/blob/opencl/lang/beignet/files/patch-src_cl__device__id.c
+Origin: https://github.com/freebsd/freebsd-ports-graphics/blob/opencl/lang/beignet/files/patch-src_cl__device__id.c https://github.com/freebsd/freebsd-ports-graphics/blob/master/lang/beignet/files/patch-src_cl__event.c
 Author: Koop Mast, Rebecca Palmer
 
 --- a/src/cl_device_id.c
@@ -52,4 +53,27 @@ Author: Koop Mast, Rebecca Palmer
  
    return ret;
  }
+--- a/src/cl_event.c
++++ b/src/cl_event.c
+@@ -27,6 +27,7 @@
+ 
+ #include <assert.h>
+ #include <stdio.h>
++#include <time.h>
+ 
+ inline cl_bool
+ cl_event_is_gpu_command_type(cl_command_type type)
+@@ -617,7 +618,11 @@ cl_ulong cl_event_get_cpu_timestamp(cl_u
+ {
+   struct timespec ts;
+ 
+- if(clock_gettime(CLOCK_MONOTONIC_RAW,&ts) != 0){
++#if defined(linux) || defined(__linux__) || defined(__LINUX__)
++ if(clock_gettime(CLOCK_MONOTONIC_RAW,&ts) != 0){
++#else
++ if(clock_gettime(CLOCK_MONOTONIC,&ts) != 0){
++#endif
+   printf("CPU Timmer error\n");
+   return CL_FALSE;
+   }
 
