@@ -6,4 +6,3 @@ shared-llvm.patch
 update-docs.patch
 allow-+-in-directory.patch
 printf-fix-90472.patch
-find-python35.patch
