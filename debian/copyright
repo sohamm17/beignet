@@ -3,16 +3,44 @@ Upstream-Name: beignet
 Source: http://cgit.freedesktop.org/beignet/
 
 Files: *
-Copyright: 2012-2015 Intel Corporation
+Copyright: 2012-2016 Intel Corporation
 License: LGPL-2.1+
+
+Files: backend/src/backend/gen7_encoder.cpp backend/src/backend/gen75_encoder.cpp backend/src/backend/gen8_encoder.cpp backend/src/backend/gen9_encoder.cpp backend/src/backend/gen_register.hpp backend/src/ir/instruction.hxx examples/libva_buffer_sharing/libva_buffer_sharing.cpp examples/v4l2_buffer_sharing/v4l2_buffer_sharing.cpp
+Copyright: 2006-2015 Intel Corporation
+License: MIT
+
+Files: backend/src/backend/gen/gen_mesa_disasm.c
+Copyright: 2012 Intel Corporation
+           2008 Keith Packard
+License: LGPL-2.1+
+
+Files: backend/src/libocl/tmpl/ocl_math.tmpl.cl utests/builtin_sinpi.cpp
+Copyright: 1993 Sun Microsystems, Inc.
+           2012-2015 Intel Corporation
+License: LGPL-2.1+
+
+Files: backend/src/llvm/ExpandUtils.cpp backend/src/llvm/PromoteIntegers.cpp backend/src/llvm/ExpandConstantExpr.cpp backend/src/llvm/ExpandLargeIntegers.cpp
+Copyright: 2012 Intel Corporation
+           2003-2014 University of Illinois at Urbana-Champaign
+License: LGPL-2.1+
+
+Files: backend/src/llvm/llvm_scalarize.cpp
+Copyright: 2010-2014 LunarG, Inc
+License: BSD-3-clause
 
 Files: backend/src/sys/intrusive_list.*
 Copyright: 2007 Maciej Sinilo
 License: MIT
 
-Files: backend/src/backend/gen7_encoder.cpp backend/src/backend/gen75_encoder.cpp backend/src/backend/gen8_encoder.cpp backend/src/backend/gen9_encoder.cpp backend/src/backend/gen_register.hpp backend/src/ir/instruction.hxx examples/libva_buffer_sharing/libva_buffer_sharing.cpp examples/v4l2_buffer_sharing/v4l2_buffer_sharing.cpp
-Copyright: 2006-2015 Intel Corporation
+Files: include/CL/cl_gl_ext.h include/CL/cl_d3d10.h include/CL/opencl.h include/CL/cl_platform.h include/CL/cl_ext.h include/CL/cl.h include/CL/cl_d3d11.h include/CL/cl.hpp include/CL/cl_gl.h include/CL/cl_egl.h include/CL/cl_dx9_media_sharing.h
+Copyright: 2008-2013 The Khronos Group Inc
 License: MIT
+
+Files: src/intel/intel_batchbuffer.*
+Copyright: 2006 Tungsten Graphics, Inc., Cedar Park, Texas
+           2012 Intel Corporation
+License: LGPL-2.1+
 
 Files: src/intel/intel_dri_resource_sharing.c
 Copyright: 2003 Tungsten Graphics, Inc.
@@ -23,28 +51,20 @@ Copyright: 2013-2014 Intel Corporation
            2013-2014 Zhigang Gong <zhigang.gong@linux.intel.com>
 License: MIT
 
-Files: backend/src/llvm/llvm_scalarize.cpp
-Copyright: 2010-2014 LunarG, Inc
-License: BSD-3-clause
-
-Files: include/CL/cl_gl_ext.h include/CL/cl_d3d10.h include/CL/opencl.h include/CL/cl_platform.h include/CL/cl_ext.h include/CL/cl.h include/CL/cl_d3d11.h include/CL/cl.hpp include/CL/cl_gl.h include/CL/cl_egl.h include/CL/cl_dx9_media_sharing.h
-Copyright: 2008-2013 The Khronos Group Inc
-License: MIT
+Files: src/x11/va_dri2*
+Copyright: 2012 Intel Corporation
+           2007-2008 Red Hat, Inc
+License: LGPL-2.1+
 
 Files: src/cl_khr_icd.*
 Copyright: 2013 Simon Richter <sjr@debian.org>
-License: LGPL-2.1+
-
-Files: backend/src/libocl/tmpl/ocl_math.tmpl.cl utests/builtin_sinpi.cpp
-Copyright: 1993 Sun Microsystems, Inc.
-           2012-2015 Intel Corporation
 License: LGPL-2.1+
 
 Files: debian/*
 Copyright: 2013 Simon Richter <sjr@debian.org>
            2014 Julian Wollrath <jwollrath@web.de>
            © 2014-2015 Andreas Beckmann <anbe@debian.org>
-           © 2014-2015 Rebecca N. Palmer <rebecca_palmer@zoho.com>
+           © 2014-2016 Rebecca N. Palmer <rebecca_palmer@zoho.com>
 License: LGPL-2.1+
 
 License: LGPL-2.1+
