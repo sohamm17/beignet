@@ -198,6 +198,17 @@ static struct _cl_device_id intel_skl_gt4_device = {
 #include "cl_gen75_device.h"
 };
 
+static struct _cl_device_id intel_bxt_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 18,
+  .max_thread_per_unit = 6,
+  .sub_slice_count = 3,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen75_device.h"
+};
+
 LOCAL cl_device_id
 cl_get_gt_device(void)
 {
@@ -518,6 +529,15 @@ skl_gt4_break:
       cl_intel_platform_enable_fp16_extension(ret);
       break;
 
+    case PCI_CHIP_BROXTON_P:
+      DECL_INFO_STRING(bxt_break, intel_bxt_device, name, "Intel(R) HD Graphics Broxton-P");
+bxt_break:
+      intel_bxt_device.device_id = device_id;
+      intel_bxt_device.platform = cl_get_platform_default();
+      ret = &intel_bxt_device;
+      cl_intel_platform_enable_fp16_extension(ret);
+      break;
+
     case PCI_CHIP_SANDYBRIDGE_BRIDGE:
     case PCI_CHIP_SANDYBRIDGE_GT1:
     case PCI_CHIP_SANDYBRIDGE_GT2:
@@ -622,6 +642,7 @@ cl_self_test(cl_device_id device, cl_self_test_res atomic_in_l3_flag)
                   // Atomic fail need to test SLM again with atomic in L3 feature disabled.
                   tested = 0;
                 }
+                clReleaseEvent(kernel_finished);
               }
             }
             clReleaseMemObject(buffer);
@@ -731,7 +752,8 @@ cl_get_device_info(cl_device_id     device,
                device != &intel_skl_gt1_device &&
                device != &intel_skl_gt2_device &&
                device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device
+               device != &intel_skl_gt4_device &&
+               device != &intel_bxt_device
                ))
     return CL_INVALID_DEVICE;
 
@@ -802,6 +824,7 @@ cl_get_device_info(cl_device_id     device,
     DECL_STRING_FIELD(VERSION, version)
     DECL_STRING_FIELD(PROFILE, profile)
     DECL_STRING_FIELD(OPENCL_C_VERSION, opencl_c_version)
+    DECL_STRING_FIELD(SPIR_VERSIONS, spir_versions)
     DECL_STRING_FIELD(EXTENSIONS, extensions);
     DECL_STRING_FIELD(BUILT_IN_KERNELS, built_in_kernels)
     DECL_FIELD(PARENT_DEVICE, parent_device)
@@ -842,7 +865,9 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
                device != &intel_skl_gt1_device &&
                device != &intel_skl_gt2_device &&
                device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device))
+               device != &intel_skl_gt4_device &&
+               device != &intel_bxt_device
+               ))
     return CL_INVALID_DEVICE;
   if (ver == NULL)
     return CL_SUCCESS;
@@ -857,7 +882,8 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
         || device == &intel_brw_gt3_device || device == &intel_chv_device) {
     *ver = 8;
   } else if (device == &intel_skl_gt1_device || device == &intel_skl_gt2_device
-        || device == &intel_skl_gt3_device || device == &intel_skl_gt4_device) {
+        || device == &intel_skl_gt3_device || device == &intel_skl_gt4_device
+        || device == &intel_bxt_device) {
     *ver = 9;
   } else
     return CL_INVALID_VALUE;
@@ -945,7 +971,8 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
                device != &intel_skl_gt1_device &&
                device != &intel_skl_gt2_device &&
                device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device))
+               device != &intel_skl_gt4_device &&
+               device != &intel_bxt_device))
     return CL_INVALID_DEVICE;
 
   CHECK_KERNEL(kernel);
@@ -962,7 +989,16 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
         return CL_SUCCESS;
       }
     }
-    DECL_FIELD(PREFERRED_WORK_GROUP_SIZE_MULTIPLE, device->preferred_wg_sz_mul)
+    case CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE:
+    {
+      if (param_value && param_value_size < sizeof(size_t))
+        return CL_INVALID_VALUE;
+      if (param_value_size_ret != NULL)
+        *param_value_size_ret = sizeof(size_t);
+      if (param_value)
+        *(size_t*)param_value = interp_kernel_get_simd_width(kernel->opaque);
+      return CL_SUCCESS;
+    }
     case CL_KERNEL_LOCAL_MEM_SIZE:
     {
       size_t local_mem_sz =  interp_kernel_get_slm_size(kernel->opaque) + kernel->local_mem_sz;
