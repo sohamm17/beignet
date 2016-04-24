@@ -22,7 +22,7 @@ Author: Koop Mast, Rebecca Palmer
  
  #ifndef CL_VERSION_1_2
  #define CL_DEVICE_BUILT_IN_KERNELS 0x103F
-@@ -546,6 +551,7 @@ skl_gt4_break:
+@@ -568,6 +573,7 @@ skl_gt4_break:
    /* Apply any driver-dependent updates to the device info */
    cl_driver_update_device_info(ret);
  
@@ -30,7 +30,7 @@ Author: Koop Mast, Rebecca Palmer
    struct sysinfo info;
    if (sysinfo(&info) == 0) {
      uint64_t two_gb = 2 * 1024 * 1024 * 1024ul; 
-@@ -554,6 +559,22 @@ skl_gt4_break:
+@@ -576,6 +581,22 @@ skl_gt4_break:
                              two_gb : info.totalram;
      ret->max_mem_alloc_size = ret->global_mem_size / 2;
    }
@@ -61,9 +61,9 @@ Author: Koop Mast, Rebecca Palmer
  #include <stdio.h>
 +#include <time.h>
  
- inline cl_bool
- cl_event_is_gpu_command_type(cl_command_type type)
-@@ -617,7 +618,11 @@ cl_ulong cl_event_get_cpu_timestamp(cl_u
+ void cl_event_update_last_events(cl_command_queue queue, int wait)
+ {
+@@ -649,7 +650,11 @@ cl_ulong cl_event_get_cpu_timestamp(cl_u
  {
    struct timespec ts;
  
