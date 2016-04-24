@@ -273,6 +273,24 @@ namespace gbe {
       OUT_UPDATE_SZ(arg.size);
       OUT_UPDATE_SZ(arg.align);
       OUT_UPDATE_SZ(arg.bti);
+
+      OUT_UPDATE_SZ(arg.info.addrSpace);
+
+      OUT_UPDATE_SZ(arg.info.typeName.size());
+      outs.write(arg.info.typeName.c_str(), arg.info.typeName.size());
+      ret_size += sizeof(char)*arg.info.typeName.size();
+
+      OUT_UPDATE_SZ(arg.info.accessQual.size());
+      outs.write(arg.info.accessQual.c_str(), arg.info.accessQual.size());
+      ret_size += sizeof(char)*arg.info.accessQual.size();
+
+      OUT_UPDATE_SZ(arg.info.typeQual.size());
+      outs.write(arg.info.typeQual.c_str(), arg.info.typeQual.size());
+      ret_size += sizeof(char)*arg.info.typeQual.size();
+
+      OUT_UPDATE_SZ(arg.info.argName.size());
+      outs.write(arg.info.argName.c_str(), arg.info.argName.size());
+      ret_size += sizeof(char)*arg.info.argName.size();
     }
 
     OUT_UPDATE_SZ(patches.size());
@@ -363,6 +381,43 @@ namespace gbe {
       IN_UPDATE_SZ(arg.size);
       IN_UPDATE_SZ(arg.align);
       IN_UPDATE_SZ(arg.bti);
+
+      IN_UPDATE_SZ(arg.info.addrSpace);
+
+      size_t len;
+      char* a_name = NULL;
+
+      IN_UPDATE_SZ(len);
+      a_name = new char[len+1];
+      ins.read(a_name, len*sizeof(char));
+      total_size += sizeof(char)*len;
+      a_name[len] = 0;
+      arg.info.typeName = a_name;
+      delete[] a_name;
+
+      IN_UPDATE_SZ(len);
+      a_name = new char[len+1];
+      ins.read(a_name, len*sizeof(char));
+      total_size += sizeof(char)*len;
+      a_name[len] = 0;
+      arg.info.accessQual = a_name;
+      delete[] a_name;
+
+      IN_UPDATE_SZ(len);
+      a_name = new char[len+1];
+      ins.read(a_name, len*sizeof(char));
+      total_size += sizeof(char)*len;
+      a_name[len] = 0;
+      arg.info.typeQual = a_name;
+      delete[] a_name;
+
+      IN_UPDATE_SZ(len);
+      a_name = new char[len+1];
+      ins.read(a_name, len*sizeof(char));
+      total_size += sizeof(char)*len;
+      a_name[len] = 0;
+      arg.info.argName = a_name;
+      delete[] a_name;
     }
 
     IN_UPDATE_SZ(patch_num);
@@ -530,8 +585,6 @@ namespace gbe {
     }
 
     args.push_back("-cl-kernel-arg-info");
-    args.push_back("-mllvm");
-    args.push_back("-inline-threshold=200000");
 #ifdef GEN7_SAMPLER_CLAMP_BORDER_WORKAROUND
     args.push_back("-DGEN7_SAMPLER_CLAMP_BORDER_WORKAROUND");
 #endif
@@ -596,18 +649,7 @@ namespace gbe {
     clang::LangOptions & lang_opts = Clang.getLangOpts();
     lang_opts.OpenCL = 1;
     
-    //llvm flags need command line parsing to take effect
-    if (!Clang.getFrontendOpts().LLVMArgs.empty()) {
-      unsigned NumArgs = Clang.getFrontendOpts().LLVMArgs.size();
-      const char **Args = new const char*[NumArgs + 2];
-      Args[0] = "clang (LLVM option parsing)";
-      for (unsigned i = 0; i != NumArgs; ++i){
-        Args[i + 1] = Clang.getFrontendOpts().LLVMArgs[i].c_str();
-      }
-      Args[NumArgs + 1] = 0;
-      llvm::cl::ParseCommandLineOptions(NumArgs + 1, Args);
-      delete [] Args;
-    }
+    GBE_ASSERT(Clang.getFrontendOpts().LLVMArgs.empty() && "We do not have llvm args now");
   
     // Create an action and make the compiler instance carry it out
     std::unique_ptr<clang::CodeGenAction> Act(new clang::EmitLLVMOnlyAction(llvm_ctx));
@@ -715,9 +757,9 @@ namespace gbe {
     bool useDefaultCLCVersion = true;
 
     if (options) {
-      char *str = (char *)malloc(sizeof(char) * (strlen(options) + 1));
-      memcpy(str, options, strlen(options) + 1);
-      std::string optionStr(str);
+      char *c_str = (char *)malloc(sizeof(char) * (strlen(options) + 1));
+      memcpy(c_str, options, strlen(options) + 1);
+      std::string optionStr(c_str);
       const std::string unsupportedOptions("-cl-denorms-are-zero, -cl-strict-aliasing, -cl-opt-disable,"
                        "-cl-no-signed-zeros, -cl-fp32-correctly-rounded-divide-sqrt");
 
@@ -726,11 +768,72 @@ namespace gbe {
       while (end != std::string::npos) {
         end = optionStr.find(' ', start);
         std::string str = optionStr.substr(start, end - start);
-        start = end + 1;
-        if(str.size() == 0)
+
+        if(str.size() == 0) {
+          start = end + 1;
           continue;
+        }
+
+EXTEND_QUOTE:
+        /* We need to find the ", if the there are odd number of " within this string,
+           we need to extend the string to the matched " of the last one. */
+        int quoteNum = 0;
+        for (size_t i = 0; i < str.size(); i++) {
+          if (str[i] == '"') {
+            quoteNum++;
+          }
+        }
+
+        if (quoteNum % 2) { // Odd number of ", need to extend the string.
+          /* find the second " */
+          while (end < optionStr.size() && optionStr[end] != '"')
+            end++;
+
+          if (end == optionStr.size()) {
+            printf("Warning: Unmatched \" number in build option\n");
+            free(c_str);
+            return false;
+          }
+
+          GBE_ASSERT(optionStr[end] == '"');
+          end++;
+
+          if (end < optionStr.size() && optionStr[end] != ' ') {
+            // "CC AAA"BBDDDD case, need to further extend.
+            end = optionStr.find(' ', end);
+            str = optionStr.substr(start, end - start);
+            goto EXTEND_QUOTE;
+          } else {
+            str = optionStr.substr(start, end - start);
+          }
+        }
+        start = end + 1;
 
         if(unsupportedOptions.find(str) != std::string::npos) {
+          continue;
+        }
+
+        /* if -I, we need to extract "path" to path, no " */
+        if (clOpt.back() == "-I") {
+          if (str[0] == '"') {
+            GBE_ASSERT(str[str.size() - 1] == '"');
+            if (str.size() > 2) {
+              clOpt.push_back(str.substr(1, str.size() - 2));
+            } else {
+              clOpt.push_back("");
+            }
+            continue;
+          }
+        }
+        // The -I"YYYY" like case.
+        if (str.size() > 4 && str[0] == '-' && str[1] == 'I' && str[2] == '"') {
+          GBE_ASSERT(str[str.size() - 1] == '"');
+          clOpt.push_back("-I");
+          if (str.size() > 4) {
+            clOpt.push_back(str.substr(3, str.size() - 4));
+          } else {
+            clOpt.push_back("");
+          }
           continue;
         }
 
@@ -767,7 +870,7 @@ namespace gbe {
 
         clOpt.push_back(str);
       }
-      free(str);
+      free(c_str);
     }
 
     if (useDefaultCLCVersion) {
@@ -1023,7 +1126,7 @@ namespace gbe {
   static void *kernelGetArgInfo(gbe_kernel genKernel, uint32_t argID, uint32_t value) {
     if (genKernel == NULL) return NULL;
     const gbe::Kernel *kernel = (const gbe::Kernel*) genKernel;
-    ir::FunctionArgument::InfoFromLLVM* info = kernel->getArgInfo(argID);
+    KernelArgument::ArgInfo* info = kernel->getArgInfo(argID);
 
     switch (value) {
       case GBE_GET_ARG_INFO_ADDRSPACE:

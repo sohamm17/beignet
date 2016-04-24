@@ -33,39 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "llvm/Config/llvm-config.h"
-#if LLVM_VERSION_MINOR <= 2
-#include "llvm/Function.h"
-#include "llvm/InstrTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Module.h"
-#else
-#include "llvm/IR/Function.h"
-#include "llvm/IR/InstrTypes.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/Module.h"
-#endif  /* LLVM_VERSION_MINOR <= 2 */
-#include "llvm/Pass.h"
-#if LLVM_VERSION_MINOR <= 1
-#include "llvm/Support/IRBuilder.h"
-#elif LLVM_VERSION_MINOR == 2
-#include "llvm/IRBuilder.h"
-#else
-#include "llvm/IR/IRBuilder.h"
-#endif /* LLVM_VERSION_MINOR <= 1 */
-
-#if LLVM_VERSION_MINOR >= 5
-#include "llvm/IR/CallSite.h"
-#include "llvm/IR/CFG.h"
-#else
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/CFG.h"
-#endif
-
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/IR/Attributes.h"
+#include "llvm_includes.hpp"
 
 #include "llvm/llvm_gen_backend.hpp"
 #include "sys/map.hpp"
@@ -261,7 +229,7 @@ again:
         printf("string end with %%\n");
         goto error;
       }
-      if (*(p + 1) == '%') { // %%
+      if (p + 1 < end && *(p + 1) == '%') { // %%
         p += 2;
         goto again;
       }
@@ -328,6 +296,8 @@ error:
     Module* module;
     IRBuilder<>* builder;
     Type* intTy;
+    llvm::Constant * pbuf_global;
+    llvm::Constant * index_buf_global;
     Value* pbuf_ptr;
     Value* index_buf_ptr;
     Value* g1Xg2Xg3;
@@ -342,19 +312,24 @@ error:
       PrintfSet::PrintfFmt* printf_fmt;
     };
 
-    PrintfParser(void) : FunctionPass(ID)
-    {
+    void stateInit(void) {
       module = NULL;
       builder = NULL;
       intTy = NULL;
       out_buf_sizeof_offset = 0;
-      printfs.clear();
       pbuf_ptr = NULL;
       index_buf_ptr = NULL;
       g1Xg2Xg3 = NULL;
       wg_offset = NULL;
       printf_num = 0;
       totalSizeofSize = 0;
+    }
+
+    PrintfParser(void) : FunctionPass(ID)
+    {
+      stateInit();
+      pbuf_global = NULL;
+      index_buf_global = NULL;
     }
 
     ~PrintfParser(void)
@@ -554,6 +529,7 @@ error:
 
   bool PrintfParser::runOnFunction(llvm::Function &F)
   {
+    stateInit();
     bool changed = false;
     bool hasPrintf = false;
     switch (F.getCallingConv()) {
@@ -630,29 +606,30 @@ error:
     if (!hasPrintf)
       return changed;
 
-    if (!pbuf_ptr) {
+    if (!pbuf_global) {
       /* alloc a new buffer ptr to collect the print output. */
       Type *ptrTy = Type::getInt32PtrTy(module->getContext(), 1);
-      llvm::Constant *pBuf = new GlobalVariable(*module, ptrTy, false,
+      pbuf_global= new GlobalVariable(*module, ptrTy, false,
                                 GlobalVariable::ExternalLinkage,
                                 nullptr,
                                 StringRef("__gen_ocl_printf_buf"),
                                 nullptr,
                                 GlobalVariable::NotThreadLocal,
                                 1);
-      pbuf_ptr = builder->CreatePtrToInt(pBuf, Type::getInt32Ty(module->getContext()));
     }
-    if (!index_buf_ptr) {
+    pbuf_ptr = builder->CreatePtrToInt(pbuf_global, Type::getInt32Ty(module->getContext()));
+
+    if (!index_buf_global) {
       Type *ptrTy = Type::getInt32PtrTy(module->getContext(), 1);
-      llvm::Constant *pBuf = new GlobalVariable(*module, ptrTy, false,
+      index_buf_global = new GlobalVariable(*module, ptrTy, false,
                                 GlobalVariable::ExternalLinkage,
                                 nullptr,
                                 StringRef("__gen_ocl_printf_index_buf"),
                                 nullptr,
                                 GlobalVariable::NotThreadLocal,
                                 1);
-      index_buf_ptr = builder->CreatePtrToInt(pBuf, Type::getInt32Ty(module->getContext()));
     }
+    index_buf_ptr = builder->CreatePtrToInt(index_buf_global, Type::getInt32Ty(module->getContext()));
 
     if (!wg_offset || !g1Xg2Xg3) {
       Value* op0 = NULL;

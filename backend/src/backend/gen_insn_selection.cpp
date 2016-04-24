@@ -2072,6 +2072,15 @@ namespace gbe
     this->opaque->setHasHalfType(true);
   }
 
+  SelectionBxt::SelectionBxt(GenContext &ctx) : Selection(ctx) {
+    this->opaque->setHas32X32Mul(true);
+    this->opaque->setHasLongType(true);
+    this->opaque->setLongRegRestrict(true);
+    this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
+    this->opaque->setSlowByteGather(true);
+    this->opaque->setHasHalfType(true);
+  }
+
   void Selection::Opaque::TYPED_WRITE(GenRegister *msgs, uint32_t msgNum,
                                       uint32_t bti, bool is3D) {
     uint32_t elemID = 0;
@@ -3585,9 +3594,9 @@ namespace gbe
               sel.curr.execWidth = 1;
             }
             if (elemSize == GEN_BYTE_SCATTER_WORD)
-              sel.MOV(GenRegister::retype(value, GEN_TYPE_UW), GenRegister::unpacked_uw(dst));
+              sel.MOV(GenRegister::retype(value, GEN_TYPE_UW), GenRegister::unpacked_uw(dst, isUniform));
             else if (elemSize == GEN_BYTE_SCATTER_BYTE)
-              sel.MOV(GenRegister::retype(value, GEN_TYPE_UB), GenRegister::unpacked_ub(dst));
+              sel.MOV(GenRegister::retype(value, GEN_TYPE_UB), GenRegister::unpacked_ub(dst, isUniform));
           sel.pop();
         }
       }

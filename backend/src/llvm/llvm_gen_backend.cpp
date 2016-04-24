@@ -71,86 +71,7 @@
  *   is intercepted, we just abort
  */
 
-#include "llvm/Config/llvm-config.h"
-#if LLVM_VERSION_MINOR <= 2
-#include "llvm/CallingConv.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Module.h"
-#include "llvm/Instructions.h"
-#else
-#include "llvm/IR/CallingConv.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Instructions.h"
-#endif  /* LLVM_VERSION_MINOR <= 2 */
-#include "llvm/Pass.h"
-#include "llvm/PassManager.h"
-#include "llvm/IR/IRBuilder.h"
-#if LLVM_VERSION_MINOR <= 2
-#include "llvm/Intrinsics.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/InlineAsm.h"
-#else
-#include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/InlineAsm.h"
-#endif  /* LLVM_VERSION_MINOR <= 2 */
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Analysis/ConstantsScanner.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/IntrinsicLowering.h"
-
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=5
-#include "llvm/IR/Mangler.h"
-#else
-#include "llvm/Target/Mangler.h"
-#endif
-
-#include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/MC/MCAsmInfo.h"
-#include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCSymbol.h"
-#if !defined(LLVM_VERSION_MAJOR) || (LLVM_VERSION_MINOR == 1)
-#include "llvm/Target/TargetData.h"
-#elif LLVM_VERSION_MINOR == 2
-#include "llvm/DataLayout.h"
-#else
-#include "llvm/IR/DataLayout.h"
-#endif
-
-#if LLVM_VERSION_MINOR >= 5
-#include "llvm/IR/CallSite.h"
-#include "llvm/IR/CFG.h"
-#else
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/CFG.h"
-#endif
-
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/FormattedStream.h"
-#if (LLVM_VERSION_MAJOR == 3) && (LLVM_VERSION_MINOR <= 2)
-#include "llvm/Support/InstVisitor.h"
-#elif LLVM_VERSION_MINOR >= 5
-#include "llvm/IR/InstVisitor.h"
-#else
-#include "llvm/InstVisitor.h"
-#endif
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/Host.h"
-#include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Support/SourceMgr.h"
+#include "llvm_includes.hpp"
 
 #include "llvm/llvm_gen_backend.hpp"
 #include "ir/context.hpp"
@@ -527,14 +448,22 @@ namespace gbe
         TheModule(0),
         btiBase(BTI_RESERVED_NUM)
     {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=7
+      initializeLoopInfoWrapperPassPass(*PassRegistry::getPassRegistry());
+#else
       initializeLoopInfoPass(*PassRegistry::getPassRegistry());
+#endif
       pass = PASS_EMIT_REGISTERS;
     }
 
     virtual const char *getPassName() const { return "Gen Back-End"; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=7
+      AU.addRequired<LoopInfoWrapperPass>();
+#else
       AU.addRequired<LoopInfo>();
+#endif
       AU.setPreservesAll();
     }
 
@@ -564,7 +493,11 @@ namespace gbe
       assignBti(F);
       analyzePointerOrigin(F);
 
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=7
+      LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+#else
       LI = &getAnalysis<LoopInfo>();
+#endif
       emitFunction(F);
       phiMap.clear();
       globalPointer.clear();
@@ -3094,11 +3027,21 @@ namespace gbe
         // We use a select (0,1) not a convert when the destination is a boolean
         if (srcType == ir::TYPE_BOOL) {
           const ir::RegisterFamily family = getFamily(dstType);
-          const ir::ImmediateIndex zero = ctx.newIntegerImmediate(0, dstType);
+          ir::ImmediateIndex zero;
+          if(dstType == ir::TYPE_FLOAT)
+            zero = ctx.newFloatImmediate(0);
+          else if(dstType == ir::TYPE_DOUBLE)
+            zero = ctx.newDoubleImmediate(0);
+	  else
+            zero = ctx.newIntegerImmediate(0, dstType);
           ir::ImmediateIndex one;
           if (I.getOpcode() == Instruction::SExt
               && (dstType == ir::TYPE_S8 || dstType == ir::TYPE_S16 || dstType == ir::TYPE_S32 || dstType == ir::TYPE_S64))
             one = ctx.newIntegerImmediate(-1, dstType);
+          else if(dstType == ir::TYPE_FLOAT)
+            one = ctx.newFloatImmediate(1);
+          else if(dstType == ir::TYPE_DOUBLE)
+            one = ctx.newDoubleImmediate(1);
           else
             one = ctx.newIntegerImmediate(1, dstType);
           const ir::Register zeroReg = ctx.reg(family);
@@ -4334,7 +4277,6 @@ namespace gbe
   void GenWriter::emitUnalignedDQLoadStore(ir::Register ptr, Value *llvmValues, ir::AddressSpace addrSpace, ir::Register bti, bool isLoad, bool dwAligned, bool fixedBTI)
   {
     Type *llvmType = llvmValues->getType();
-    const ir::Type type = getType(ctx, llvmType);
     unsigned byteSize = getTypeByteSize(unit, llvmType);
 
     Type *elemType = llvmType;
@@ -4344,6 +4286,7 @@ namespace gbe
       elemType = vectorType->getElementType();
       elemNum = vectorType->getNumElements();
     }
+    const ir::Type type = getType(ctx, elemType);
 
     vector<ir::Register> tupleData;
     for (uint32_t elemID = 0; elemID < elemNum; ++elemID) {
@@ -4386,7 +4329,7 @@ namespace gbe
           ctx.LOADI(ir::TYPE_S32, offset, immIndex);
           ctx.ADD(ir::TYPE_S32, addr, ptr, offset);
         }
-       ctx.STORE(type, addr, addrSpace, dwAligned, fixedBTI, bti, reg);
+       ctx.STORE(ir::TYPE_U8, addr, addrSpace, dwAligned, fixedBTI, bti, reg);
       }
     }
   }
@@ -4440,9 +4383,10 @@ namespace gbe
     else
       ptr = pointer;
 
+    unsigned primitiveBits = scalarType->getPrimitiveSizeInBits();
     if (!dwAligned
-       && (scalarType == IntegerType::get(I.getContext(), 64)
-          || scalarType == IntegerType::get(I.getContext(), 32))
+       && (primitiveBits == 64
+          || primitiveBits == 32)
        ) {
       emitUnalignedDQLoadStore(ptr, llvmValues, addrSpace, btiReg, isLoad, dwAligned, fixedBTI);
       return;

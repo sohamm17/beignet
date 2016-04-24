@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <errno.h>
@@ -86,7 +87,7 @@ typedef void (intel_gpgpu_set_base_address_t)(intel_gpgpu_t *gpgpu);
 intel_gpgpu_set_base_address_t *intel_gpgpu_set_base_address = NULL;
 
 typedef void (intel_gpgpu_setup_bti_t)(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t internal_offset,
-                                       uint32_t size, unsigned char index, uint32_t format);
+                                       size_t size, unsigned char index, uint32_t format);
 intel_gpgpu_setup_bti_t *intel_gpgpu_setup_bti = NULL;
 
 
@@ -210,7 +211,7 @@ intel_gpgpu_delete(intel_gpgpu_t *gpgpu)
     return;
 
   if(gpgpu->batch && gpgpu->batch->buffer &&
-     !drm_intel_bo_busy(gpgpu->batch->buffer)) {
+     drm_intel_bo_busy(gpgpu->batch->buffer)) {
     TRY_ALLOC_NO_ERR (node, CALLOC(struct intel_gpgpu_node));
     node->gpgpu = gpgpu;
     node->next = NULL;
@@ -282,9 +283,22 @@ intel_gpgpu_get_cache_ctrl_gen8()
 static uint32_t
 intel_gpgpu_get_cache_ctrl_gen9()
 {
-  //Pre-defined cache control registers 9:
+  //Kernel-defined cache control registers 2:
   //L3CC: WB; LeCC: WB; TC: LLC/eLLC;
-  return (0x9 << 1);
+  int major = 0, minor = 0;
+  int mocs_index = 0x2;
+
+  struct utsname buf;
+  uname(&buf);
+  sscanf(buf.release, "%d.%d", &major, &minor);
+  //From linux 4.3, kernel redefined the mocs table's value,
+  //But before 4.3, still used the hw defautl value.
+  if(strcmp(buf.sysname, "Linux") == 0 &&
+     major == 4 && minor < 3) { /* linux kernel support skl from  4.x, so check from 4 */
+    mocs_index = 0x9;
+  }
+
+  return (mocs_index << 1);
 }
 
 static void
@@ -1000,9 +1014,10 @@ intel_gpgpu_alloc_constant_buffer(intel_gpgpu_t *gpgpu, uint32_t size, uint8_t b
 
 static void
 intel_gpgpu_setup_bti_gen7(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t internal_offset,
-                                   uint32_t size, unsigned char index, uint32_t format)
+                                   size_t size, unsigned char index, uint32_t format)
 {
-  uint32_t s = size - 1;
+  assert(size <= (2ul<<30));
+  size_t s = size - 1;
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
   gen7_surface_state_t *ss0 = (gen7_surface_state_t *) &heap->surface[index * sizeof(gen7_surface_state_t)];
   memset(ss0, 0, sizeof(gen7_surface_state_t));
@@ -1030,9 +1045,10 @@ intel_gpgpu_setup_bti_gen7(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t int
 
 static void
 intel_gpgpu_setup_bti_gen75(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t internal_offset,
-                                   uint32_t size, unsigned char index, uint32_t format)
+                                   size_t size, unsigned char index, uint32_t format)
 {
-  uint32_t s = size - 1;
+  assert(size <= (2ul<<30));
+  size_t s = size - 1;
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
   gen7_surface_state_t *ss0 = (gen7_surface_state_t *) &heap->surface[index * sizeof(gen7_surface_state_t)];
   memset(ss0, 0, sizeof(gen7_surface_state_t));
@@ -1066,9 +1082,10 @@ intel_gpgpu_setup_bti_gen75(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t in
 
 static void
 intel_gpgpu_setup_bti_gen8(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t internal_offset,
-                                   uint32_t size, unsigned char index, uint32_t format)
+                                   size_t size, unsigned char index, uint32_t format)
 {
-  uint32_t s = size - 1;
+  assert(size <= (2ul<<30));
+  size_t s = size - 1;
   surface_heap_t *heap = gpgpu->aux_buf.bo->virtual + gpgpu->aux_offset.surface_heap_offset;
   gen8_surface_state_t *ss0 = (gen8_surface_state_t *) &heap->surface[index * sizeof(gen8_surface_state_t)];
   memset(ss0, 0, sizeof(gen8_surface_state_t));
@@ -1143,7 +1160,8 @@ static uint32_t get_surface_type(intel_gpgpu_t *gpgpu, int index, cl_mem_object_
         IS_HASWELL(gpgpu->drv->device_id) ||
         IS_BROADWELL(gpgpu->drv->device_id) ||
         IS_CHERRYVIEW(gpgpu->drv->device_id) ||
-        IS_SKYLAKE(gpgpu->drv->device_id))) &&
+        IS_SKYLAKE(gpgpu->drv->device_id) ||
+        IS_BROXTON(gpgpu->drv->device_id))) &&
       index >= BTI_WORKAROUND_IMAGE_OFFSET + BTI_RESERVED_NUM &&
       type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
     surface_type = I965_SURFACE_2D;
@@ -1395,7 +1413,7 @@ intel_gpgpu_bind_image_gen9(intel_gpgpu_t *gpgpu,
 
 static void
 intel_gpgpu_bind_buf(intel_gpgpu_t *gpgpu, drm_intel_bo *buf, uint32_t offset,
-                     uint32_t internal_offset, uint32_t size, uint8_t bti)
+                     uint32_t internal_offset, size_t size, uint8_t bti)
 {
   assert(gpgpu->binded_n < max_buf_n);
   gpgpu->binded_buf[gpgpu->binded_n] = buf;
@@ -2178,7 +2196,7 @@ intel_set_gpgpu_callbacks(int device_id)
 	intel_gpgpu_select_pipeline = intel_gpgpu_select_pipeline_gen7;
     return;
   }
-  if (IS_SKYLAKE(device_id)) {
+  if (IS_SKYLAKE(device_id) || IS_BROXTON(device_id)) {
     cl_gpgpu_bind_image = (cl_gpgpu_bind_image_cb *) intel_gpgpu_bind_image_gen9;
     intel_gpgpu_set_L3 = intel_gpgpu_set_L3_gen8;
     cl_gpgpu_get_cache_ctrl = (cl_gpgpu_get_cache_ctrl_cb *)intel_gpgpu_get_cache_ctrl_gen9;
