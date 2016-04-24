@@ -1,7 +1,7 @@
 Description: Accept LLVM/Clang 3.7
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: not yet
+Forwarded: https://lists.freedesktop.org/archives/beignet/2016-April/007444.html
 
 --- beignet-1.1.2.orig/CMake/FindLLVM.cmake
 +++ beignet-1.1.2/CMake/FindLLVM.cmake
