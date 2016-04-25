@@ -1,4 +1,4 @@
-beignet (1.1.2-1) UNRELEASED; urgency=medium
+beignet (1.1.2-1) unstable; urgency=medium
 
   * New upstream release.
   * Drop patches applied upstream, refresh others.
@@ -9,8 +9,10 @@ beignet (1.1.2-1) UNRELEASED; urgency=medium
   * Enable bindnow hardening.
   * Update and sort d/copyright.
   * Improve reportbug script.
+  * Update/clarify update-docs.patch and package description
+    (mostly what hardware is supported).
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 24 Apr 2016 15:31:25 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 25 Apr 2016 22:37:04 +0100
 
 beignet (1.1.1-2) unstable; urgency=medium
 

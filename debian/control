@@ -39,8 +39,12 @@ Description: OpenCL library for Intel GPUs
  CPUs, GPUs and other processors.
  .
  This package contains the shared library for the Intel implementation,
- which supports the integrated GPUs of Ivy Bridge, Bay Trail, Haswell and
- Broadwell processors.
+ which supports the integrated GPUs of Ivy Bridge (ix-3xxx)/Bay Trail and
+ later Intel processors.
+ .
+ Future processors (even in the same family) are likely to require future
+ versions of this package; in Debian stable, these will be provided in
+ -backports.
 
 Package: beignet-dev
 Section: libdevel
