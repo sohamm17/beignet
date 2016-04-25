@@ -3,6 +3,8 @@
 echo "Graphics hardware:" >&3
 xrandr --listproviders >&3
 glxinfo | grep " vendor\| renderer" >&3
+#supported processors have PCI ID [8086:nnnn] where nnnn is in src/cl_device_data.h
+lspci -nn | grep -e "\[03..\]:" >&3
 echo >&3
 echo "Processor:" >&3
 #this gives more detailed information than the above, but can't tell whether the GPU is enabled
@@ -10,6 +12,7 @@ lscpu >&3
 echo >&3
 echo "OpenCL library:" >&3
 #libopencl1: could use a reportbug control file for this, but this way avoids needing to update it with new packages
-dpkg -l *libopencl* >&3
+dpkg-query -W -f='${db:Status-Abbrev}\t${binary:Package}\t${Version}\n' *libopencl* >&3
 #ICDs: also catch any installed outside the package system, e.g. Intel SDK for CPUs
+dpkg-query -W -f='${db:Status-Abbrev}\t${binary:Package}\t${Version}\n' *opencl-icd* >&3
 head /etc/OpenCL/vendors/* >&3
