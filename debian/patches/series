@@ -8,3 +8,4 @@ printf-fix-90472.patch
 find-llvm37.patch
 std-isnan-isinf.patch
 Enable-test-debug.patch
+llvm38-support.patch

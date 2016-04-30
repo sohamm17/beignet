@@ -1,7 +1,7 @@
-Description: Accept LLVM/Clang 3.7
+Description: Accept LLVM/Clang 3.7 or 3.8
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: https://lists.freedesktop.org/archives/beignet/2016-April/007444.html
+Forwarded: (3.7 only) https://lists.freedesktop.org/archives/beignet/2016-April/007444.html
 
 --- beignet-1.1.2.orig/CMake/FindLLVM.cmake
 +++ beignet-1.1.2/CMake/FindLLVM.cmake
@@ -10,13 +10,13 @@ Forwarded: https://lists.freedesktop.org/archives/beignet/2016-April/007444.html
  if (LLVM_INSTALL_DIR)
    find_program(LLVM_CONFIG_EXECUTABLE
 -               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
-+               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-37 llvm-config-3.7 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
++               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-37 llvm-config-3.7 llvm-config-38 llvm-config-3.8 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
                 DOC "llvm-config executable"
                 PATHS ${LLVM_INSTALL_DIR} NO_DEFAULT_PATH)
  else (LLVM_INSTALL_DIR)
    find_program(LLVM_CONFIG_EXECUTABLE
 -               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
-+               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-37 llvm-config-3.7 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
++               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-37 llvm-config-3.7 llvm-config-38 llvm-config-3.8 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
                 DOC "llvm-config executable")
  endif (LLVM_INSTALL_DIR)
  
