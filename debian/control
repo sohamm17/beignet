@@ -9,9 +9,15 @@ Uploaders:
 Build-Depends:
  debhelper (>= 9),
  cmake (>= 2.8.5),
+# We use the same LLVM version as mesa (currently 3.7 in Debian,
+# 3.8 in Ubuntu); to avoid needing separate packages, build-depend
+# on both and choose in debian/rules
  clang-3.7,
  libclang-3.7-dev,
  llvm-3.7-dev,
+ clang-3.8,
+ libclang-3.8-dev,
+ llvm-3.8-dev,
  ocl-icd-dev,
  ocl-icd-opencl-dev,
  pkg-config,
