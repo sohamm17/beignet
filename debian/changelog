@@ -1,4 +1,4 @@
-beignet (1.1.2-1) unstable; urgency=medium
+beignet (1.1.2-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Drop patches applied upstream, refresh others.
@@ -11,6 +11,7 @@ beignet (1.1.2-1) unstable; urgency=medium
   * Improve reportbug script.
   * Update/clarify update-docs.patch and package description
     (mostly what hardware is supported).
+  * Use std::isnan/isinf to fix Ubuntu FTBFS.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Mon, 25 Apr 2016 22:37:04 +0100
 
