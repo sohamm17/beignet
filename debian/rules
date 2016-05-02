@@ -10,20 +10,22 @@ export DEB_CPPFLAGS_MAINT_APPEND = -DGBE_DEBUG=1
 %:
 	dh $@ --buildsystem cmake --parallel
 
+# We build with the headers from opencl-headers.
 SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platform.h cl.hpp cl_d3d11.h cl_egl.h cl_gl.h opencl.h
+
 # Use the same LLVM version as mesa (build will fail if this version is not available; this is intentional, as mixing versions may cause crashes)
 # http://lists.alioth.debian.org/pipermail/pkg-opencl-devel/Week-of-Mon-20160418/000963.html
+LLVM_VERSION_MESA	:= $(shell dpkg-query -f '$${Depends} \n' -W libgl1-mesa-dri:$(DEB_HOST_ARCH) | sed -r 's/.*libllvm([0-9.]+).*/\1/p;d')
+LLVM_VERSION_DEFAULT	 = 3.7
+LLVM_VERSION		 = $(or $(LLVM_VERSION_MESA),$(LLVM_VERSION_DEFAULT))
 
-LLVM_VERSION:=$(shell dpkg-query -f '$${Depends} \n' -W libgl1-mesa-dri:${DEB_HOST_ARCH} | grep -o -e "libllvm[0-9.]*" | grep -o -e "[0-9.]*")
-ifeq (${LLVM_VERSION},)# mesa not using LLVM at all on this architecture
-LLVM_VERSION:=3.7
-endif
 override_dh_auto_configure:
 	$(RM) $(patsubst %,include/CL/%,$(SUPERFLUOUS))
-	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-${LLVM_VERSION}/bin/
+	ls -la include/CL
+	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin
 
 override_dh_strip:
 	dh_strip --dbg-package=beignet-opencl-icd-dbg
 
 override_dh_gencontrol:
-	dh_gencontrol -- -VClang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-?.?-dev | grep -e '= [0-9]')"
+	dh_gencontrol -- -VBuilt-Using:clang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-$(LLVM_VERSION)-dev)"
