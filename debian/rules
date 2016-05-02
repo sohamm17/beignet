@@ -24,8 +24,5 @@ override_dh_auto_configure:
 	ls -la include/CL
 	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin
 
-override_dh_strip:
-	dh_strip --dbg-package=beignet-opencl-icd-dbg
-
 override_dh_gencontrol:
 	dh_gencontrol -- -VBuilt-Using:clang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-$(LLVM_VERSION)-dev)"
