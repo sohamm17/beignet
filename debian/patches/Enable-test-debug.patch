@@ -200,9 +200,9 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  export OCL_INTERP_PATH=@LOCAL_INTERP_OBJECT_DIR@
  #disable self-test so we can get something more precise than "doesn't work"
  export OCL_IGNORE_SELF_TEST=1
-+obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
++obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
 +export OCL_STRICT_CONFORMANCE=0
-+obj-`dpkg-architecture -qDEB_HOST_MULTIARCH`/utests/utest_run -a
++obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
 --- a/utests/utest_generator.py
 +++ b/utests/utest_generator.py
 @@ -159,6 +159,7 @@ def udebug(ulpSize,returnType,function):
@@ -241,3 +241,20 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    %s gpu_data[count_input] = {0}, cpu_data[count_input] = {0}, diff=0.0;
    char log[1024] = {0};
  
+--- beignet-1.1.2.orig/utests/profiling_exec.cpp
++++ beignet-1.1.2/utests/profiling_exec.cpp
+@@ -26,10 +26,10 @@ static void check_profiling_time(cl_ulon
+     double submit_to_start = (double)(start - submit)*1e-9;
+     double start_to_end = (double)(end - start)*1e-9;
+ 
+-    //printf("Profiling info:\n");
+-    //printf("Time from queue to submit : %fms\n", (double)(queue_to_submit) * 1000.f );
+-    //printf( "Time from submit to start : %fms\n", (double)(submit_to_start) * 1000.f );
+-    //printf( "Time from start to end: %fms\n", (double)(start_to_end) * 1000.f );
++    printf("Profiling info:\n");
++    printf("Time from queue to submit : %fms\n", (double)(queue_to_submit) * 1000.f );
++    printf( "Time from submit to start : %fms\n", (double)(submit_to_start) * 1000.f );
++    printf( "Time from start to end: %fms\n", (double)(start_to_end) * 1000.f );
+ 
+     OCL_ASSERTM(queued <= submit, "Enqueue time is later than submit time, invalid\n");
+     OCL_ASSERTM(submit <= start, "Submit time is later than start time, invalid\n");
