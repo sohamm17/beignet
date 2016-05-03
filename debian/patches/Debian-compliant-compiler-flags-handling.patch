@@ -35,4 +35,36 @@ Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
  set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
  set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
  set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
-
+--- beignet-1.1.2.orig/backend/src/sys/platform.hpp
++++ beignet-1.1.2/backend/src/sys/platform.hpp
+@@ -41,15 +41,6 @@
+ #define __X86__
+ #endif
+ 
+-/* We require SSE ... */
+-#ifndef __SSE__
+-#define __SSE__
+-#endif
+-
+-/* ... and SSE2 */
+-#ifndef __SSE2__
+-#define __SSE2__
+-#endif
+ 
+ #if defined(_INCLUDED_IMM)
+ // #define __AVX__
+--- beignet-1.1.2.orig/utests/CMakeLists.txt
++++ beignet-1.1.2/utests/CMakeLists.txt
+@@ -260,6 +260,12 @@ add_custom_target(utest_generator
+     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+     )
+ 
++#the test suite doesn't go into the final package, and compiler_{degrees,radians,function_argument2} use equality comparison of floats
++if (COMPILER STREQUAL "GCC")
++  SET(CMAKE_CXX_FLAGS "-msse -mfpmath=sse ${CMAKE_CXX_FLAGS}")
++  SET(CMAKE_C_FLAGS "-msse -mfpmath=sse ${CMAKE_C_FLAGS}")
++endif ()
++
+ if (EGL_FOUND AND MESA_SOURCE_FOUND)
+   SET(utests_sources ${utests_sources} compiler_fill_gl_image.cpp)
+   SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
