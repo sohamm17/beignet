@@ -1,0 +1,182 @@
+Description: Return error, don't assert-fail, on bad input
+
+As Beignet inlines all functions and does not otherwise support
+function calls, attempting to call a non-existent function is a
+codegen-time (not link-time) error, which currently print a message to
+stderr (which might not be visible in a graphical application) then
+assert-fail.  This replaces this with an error in the build log.
+
+This is mostly for the benefit of jessie-backports (llvm 3.5), as
+sid (llvm 3.7) rejects these before getting this far.
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Forwarded: https://lists.freedesktop.org/archives/beignet/2016-June/007626.html
+
+--- beignet-1.1.2.orig/backend/src/backend/program.cpp
++++ beignet-1.1.2/backend/src/backend/program.cpp
+@@ -125,7 +125,7 @@ namespace gbe {
+       cloned_module = llvm::CloneModule((llvm::Module*)module);
+ #endif
+     }
+-    if (llvmToGen(*unit, fileName, module, optLevel, OCL_STRICT_CONFORMANCE) == false) {
++    if (llvmToGen(*unit, fileName, module, optLevel, OCL_STRICT_CONFORMANCE, error) == false) {
+       if (fileName)
+         error = std::string(fileName) + " not found";
+       delete unit;
+@@ -138,19 +138,24 @@ namespace gbe {
+       unit = new ir::Unit();
+       if(cloned_module){
+         //suppose file exists and llvmToGen will not return false.
+-        llvmToGen(*unit, fileName, cloned_module, 0, OCL_STRICT_CONFORMANCE);
++        llvmToGen(*unit, fileName, cloned_module, 0, OCL_STRICT_CONFORMANCE, error);
+       }else{
+         //suppose file exists and llvmToGen will not return false.
+-        llvmToGen(*unit, fileName, module, 0, OCL_STRICT_CONFORMANCE);
++        llvmToGen(*unit, fileName, module, 0, OCL_STRICT_CONFORMANCE, error);
+       }
+     }
+-    assert(unit->getValid());
+-    this->buildFromUnit(*unit, error);
++    bool ret = false;
++    if(unit->getValid()){
++      std::string error2;
++      this->buildFromUnit(*unit, error2);
++      error = error + error2;
++      ret = true;
++    }
+     delete unit;
+     if(cloned_module){
+       delete (llvm::Module*) cloned_module;
+     }
+-    return true;
++    return ret;
+   }
+ 
+   bool Program::buildFromUnit(const ir::Unit &unit, std::string &error) {
+--- beignet-1.1.2.orig/backend/src/llvm/llvm_gen_backend.cpp
++++ beignet-1.1.2/backend/src/llvm/llvm_gen_backend.cpp
+@@ -437,6 +437,7 @@ namespace gbe
+     Function *Func;
+     const Module *TheModule;
+     int btiBase;
++    bool has_errors;
+   public:
+     static char ID;
+     explicit GenWriter(ir::Unit &unit)
+@@ -446,7 +447,8 @@ namespace gbe
+         regTranslator(ctx),
+         LI(0),
+         TheModule(0),
+-        btiBase(BTI_RESERVED_NUM)
++        btiBase(BTI_RESERVED_NUM),
++        has_errors(false)
+     {
+ #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=7
+       initializeLoopInfoWrapperPassPass(*PassRegistry::getPassRegistry());
+@@ -2662,6 +2664,9 @@ namespace gbe
+     pass = PASS_EMIT_REGISTERS;
+     for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I)
+       visit(*I);
++    
++    // Abort if this found an error (otherwise emitBasicBlock will assert)
++    if(has_errors){return;}
+ 
+     // First create all the labels (one per block) ...
+     for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB)
+@@ -3440,11 +3445,8 @@ namespace gbe
+         break;
+       case GEN_OCL_NOT_FOUND:
+       default:
+-        std::cerr << "Caller instruction: " << std::endl;
+-        I.dump();
+-        std::cerr << "Callee function: " << std::endl;
+-        Callee->dump();
+-        GBE_ASSERT(0);
++        has_errors = true;
++        Func->getContext().emitError(&I,"function '" + fnName + "' not found or cannot be inlined");
+     };
+   }
+ 
+--- beignet-1.1.2.orig/backend/src/llvm/llvm_to_gen.cpp
++++ beignet-1.1.2/backend/src/llvm/llvm_to_gen.cpp
+@@ -26,6 +26,8 @@
+ 
+ #include "llvm/llvm_gen_backend.hpp"
+ #include "llvm/llvm_to_gen.hpp"
++#include <llvm/IR/DiagnosticInfo.h>
++#include <llvm/IR/DiagnosticPrinter.h>
+ #include "sys/cvar.hpp"
+ #include "sys/platform.hpp"
+ #include "ir/unit.hpp"
+@@ -246,8 +248,36 @@ namespace gbe
+   BVAR(OCL_OUTPUT_LLVM_BEFORE_LINK, false);
+   BVAR(OCL_OUTPUT_LLVM_AFTER_LINK, false);
+   BVAR(OCL_OUTPUT_LLVM_AFTER_GEN, false);
++  
++  class gbeDiagnosticContext
++  {
++  public:
++    gbeDiagnosticContext() : _str(""), messages(_str), printer(messages), _has_errors(false) {}
++    void process(const llvm::DiagnosticInfo &diagnostic)
++    {
++      if (diagnostic.getSeverity() != DS_Remark) { // avoid noise from function inlining remarks
++        diagnostic.print(printer);
++      }
++      if (diagnostic.getSeverity() == DS_Error) {
++        _has_errors = true;
++      }
++    }
++    std::string str(){return messages.str();}
++    bool has_errors(){return _has_errors;}
++  private:
++    std::string _str;
++    llvm::raw_string_ostream messages;
++    llvm::DiagnosticPrinterRawOStream printer;
++    bool _has_errors;
++  };
++  
++  void gbeDiagnosticHandler(const llvm::DiagnosticInfo &diagnostic, void *context)
++  {
++    gbeDiagnosticContext *dc = reinterpret_cast<gbeDiagnosticContext*>(context);
++    dc->process(diagnostic);
++  }
+ 
+-  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module, int optLevel, bool strictMath)
++  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module, int optLevel, bool strictMath, std::string &errors)
+   {
+     std::string errInfo;
+     std::unique_ptr<llvm::raw_fd_ostream> o = NULL;
+@@ -284,6 +314,9 @@ namespace gbe
+ 
+     Module &mod = *M.get();
+     DataLayout DL(&mod);
++    
++    gbeDiagnosticContext dc;
++    mod.getContext().setDiagnosticHandler(&gbeDiagnosticHandler,&dc);
+ 
+ #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+     mod.setDataLayout(DL);
+@@ -339,6 +372,12 @@ namespace gbe
+       passes.add(createCFGOnlyPrinterPass());
+     passes.add(createGenPass(unit));
+     passes.run(mod);
++    errors = dc.str();
++    if(dc.has_errors()){
++      unit.setValid(false);
++      delete libraryInfo;
++      return true;
++    }
+ 
+     // Print the code extra optimization passes
+     OUTPUT_BITCODE(AFTER_GEN, mod);
+--- beignet-1.1.2.orig/backend/src/llvm/llvm_to_gen.hpp
++++ beignet-1.1.2/backend/src/llvm/llvm_to_gen.hpp
+@@ -32,7 +32,7 @@ namespace gbe {
+ 
+   /*! Convert the LLVM IR code to a GEN IR code,
+ 		  optLevel 0 equal to clang -O1 and 1 equal to clang -O2*/
+-  bool llvmToGen(ir::Unit &unit, const char *fileName, const void* module, int optLevel, bool strictMath);
++  bool llvmToGen(ir::Unit &unit, const char *fileName, const void* module, int optLevel, bool strictMath, std::string &errors);
+ 
+ } /* namespace gbe */
+ 
