@@ -9,3 +9,4 @@ std-isnan-isinf.patch
 Enable-test-debug.patch
 llvm38-support.patch
 find-python35.patch
+profiling-32on64.patch
