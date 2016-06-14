@@ -3,6 +3,7 @@ beignet (1.1.2-3) UNRELEASED; urgency=medium
   * Make profiling work on multiarch systems.
   * Return failure (instead of asserting) on input containing
     unresolvable function calls.
+  * Update update-docs.patch.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Wed, 08 Jun 2016 22:10:03 +0100
 
