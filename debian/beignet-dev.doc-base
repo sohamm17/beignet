@@ -1,0 +1,7 @@
+Document: beignet-opencl-icd
+Title: Beignet OpenCL driver for Intel GPUs
+Section: Programming
+
+Format: HTML
+Index: /usr/share/doc/beignet-dev/Beignet.html
+Files: /usr/share/doc/beignet-dev/*.html /usr/share/doc/beignet-dev/*/*.html /usr/share/doc/beignet-dev/*/*/*.html

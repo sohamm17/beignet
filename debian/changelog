@@ -1,4 +1,4 @@
-beignet (1.1.2-3) UNRELEASED; urgency=medium
+beignet (1.1.2-3) unstable; urgency=medium
 
   * Make profiling work on multiarch systems.
   * Return failure (instead of asserting) on input containing
@@ -6,8 +6,9 @@ beignet (1.1.2-3) UNRELEASED; urgency=medium
   * Update update-docs.patch.
   * Convert documentation to HTML.
   * Move most documentation to beignet-dev.
+  * Register documentation in doc-base.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Wed, 08 Jun 2016 22:10:03 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 18 Jun 2016 17:21:04 +0100
 
 beignet (1.1.2-2) unstable; urgency=medium
 
