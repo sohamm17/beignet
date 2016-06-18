@@ -13,3 +13,4 @@ src/git_sha1.h
 utests/*.bmp
 utests/*.pyc
 utests/generated/*
+docs_build

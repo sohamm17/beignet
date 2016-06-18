@@ -15,7 +15,7 @@ index e9e2c16..3227340 100644
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
 -                             "See README.md or http://www.freedesktop.org/wiki/Software/Beignet/\n",
-+                             "This can usually be fixed by upgrading Linux to >= 4.2,\nsee /usr/share/doc/beignet-opencl-icd/Beignet.mdwn.gz or http://www.freedesktop.org/wiki/Software/Beignet/\n",
++                             "This can usually be fixed by upgrading Linux to >= 4.2,\nsee /usr/share/doc/beignet-opencl-icd/Beignet.html or http://www.freedesktop.org/wiki/Software/Beignet/\n",
                               test_data[0], test_data[1], test_data[2]);
  
                      }
@@ -34,6 +34,10 @@ index 583e5d2..e0de7bf 100644
  
  - `OCL_SIMD_WIDTH` `(8 or 16)`. Select the number of lanes per hardware thread,
    Normally, you don't need to set it, we will select suitable simd width for
+--- /dev/null
++++ beignet-1.1.2/docs/index.mdwn
+@@ -0,0 +1 @@
++[[!map pages="* and !ikiwiki/*" show=title]]
 --- beignet-1.1.2.orig/docs/Beignet.mdwn
 +++ beignet-1.1.2/docs/Beignet.mdwn
 @@ -9,6 +9,19 @@ the programs and run them on the GPU. Th
@@ -47,7 +51,7 @@ index 583e5d2..e0de7bf 100644
 + * Ivy Bridge (ix-3xxx) and later Intel Core processors
 + * Bay Trail and later Intel Atom processors with Intel HD (not PowerVR) graphics
 +
-+As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within the Skylake family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or -i386): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
++As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within the Skylake family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
 +
 +Not all processor models have an integrated GPU, and systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
 +
@@ -109,11 +113,11 @@ index 583e5d2..e0de7bf 100644
 +  `sudo apt-get install -t jessie-backports linux-image-amd64`
    
 -  If you do not need \_\_local, you can override the self-test with
-+  (or -i386).  If you do not need \_\_local, you can override the self-test with
++  (or -i686-pae).  If you do not need \_\_local, you can override the self-test with
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -208,17 +215,6 @@ Known Issues
+@@ -208,16 +215,10 @@ Known Issues
    extension. This feature used to work with a previous mesa git version. But now, it's
    simply broken.
  
@@ -127,11 +131,14 @@ index 583e5d2..e0de7bf 100644
 -  store/load pointers to/from memory. As we know, this feature has been used in Luxmark
 -  3.0 and maybe the latest BOINC. Beignet could support them currently. We plan to fix
 -  it in next major release 1.1.0.
--
++* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
++  
++  This feature is unreliable on older versions of Linux, including jessie's 3.16.
++  Upgrading to Linux 3.18+ (e.g. from jessie-backports) should fix this problem.
+ 
  TODO
  ----
- 
-@@ -295,9 +292,9 @@ The official mail list is as below:
+@@ -296,9 +297,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
