@@ -15,7 +15,7 @@ index e9e2c16..3227340 100644
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
 -                             "See README.md or http://www.freedesktop.org/wiki/Software/Beignet/\n",
-+                             "This can usually be fixed by upgrading Linux to >= 4.2,\nsee /usr/share/doc/beignet-opencl-icd/Beignet.html or http://www.freedesktop.org/wiki/Software/Beignet/\n",
++                             "This can usually be fixed by upgrading Linux to >= 4.2,\nsee /usr/share/doc/beignet-dev/Beignet.html or https://www.freedesktop.org/wiki/Software/Beignet/\n",
                               test_data[0], test_data[1], test_data[2]);
  
                      }

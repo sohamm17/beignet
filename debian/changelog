@@ -8,7 +8,7 @@ beignet (1.1.2-3) unstable; urgency=medium
   * Move most documentation to beignet-dev.
   * Register documentation in doc-base.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 18 Jun 2016 17:21:04 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 18 Jun 2016 19:21:38 +0100
 
 beignet (1.1.2-2) unstable; urgency=medium
 
