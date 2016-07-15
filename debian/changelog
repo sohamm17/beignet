@@ -1,8 +1,9 @@
-beignet (1.1.2-4) UNRELEASED; urgency=medium
+beignet (1.1.2-4) unstable; urgency=medium
 
   * Fix build with GCC 6. (Closes: #831196)
+  * Fix broken internal links in documentation.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 14 Jul 2016 23:18:30 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 15 Jul 2016 07:47:59 +0100
 
 beignet (1.1.2-3) unstable; urgency=medium
 
