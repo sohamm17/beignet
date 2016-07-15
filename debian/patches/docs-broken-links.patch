@@ -1,0 +1,32 @@
+Description: Fix broken internal links in documentation
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+
+--- beignet-1.1.2.orig/docs/Beignet.mdwn
++++ beignet-1.1.2/docs/Beignet.mdwn
+@@ -24,7 +24,7 @@ Attempting to run Beignet on unsupported
+ 
+ News
+ ----
+-[[Beignet project news|Beignet/NEWS]]
++[[Beignet project news|NEWS]]
+ 
+ Prerequisite
+ ------------
+@@ -303,11 +303,11 @@ Please specify your hardware when report
+ 
+ Documents for OpenCL application developers
+ -------------------------------------------
+-- [[Cross compile (yocto)|Beignet/howto/cross-compiler-howto]]
+-- [[Work with old system without c++11|Beignet/howto/oldgcc-howto]]
+-- [[Kernel Optimization Guide|Beignet/optimization-guide]]
+-- [[Libva Buffer Sharing|Beignet/howto/libva-buffer-sharing-howto]]
+-- [[V4l2 Buffer Sharing|Beignet/howto/v4l2-buffer-sharing-howto]]
++- [[Cross compile (yocto)|howto/cross-compiler-howto]]
++- [[Work with old system without c++11|howto/oldgcc-howto]]
++- [[Kernel Optimization Guide|optimization-guide]]
++- [[Libva Buffer Sharing|howto/libva-buffer-sharing-howto]]
++- [[V4l2 Buffer Sharing|howto/v4l2-buffer-sharing-howto]]
+ 
+ The wiki URL is as below:
+ [http://www.freedesktop.org/wiki/Software/Beignet/](http://www.freedesktop.org/wiki/Software/Beignet/)
