@@ -1,3 +1,9 @@
+beignet (1.1.2-5) unstable; urgency=medium
+
+  * Stop build-depending on LLVM 3.7 on release architectures.
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Wed, 17 Aug 2016 22:34:29 +0100
+
 beignet (1.1.2-4) unstable; urgency=medium
 
   * Fix build with GCC 6. (Closes: #831196)
