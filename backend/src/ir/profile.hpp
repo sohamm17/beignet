@@ -68,14 +68,15 @@ namespace ir {
     static const Register zero = Register(24);     //  scalar register holds zero.
     static const Register one = Register(25);     //  scalar register holds one. 
     static const Register retVal = Register(26);   // helper register to do data flow analysis.
-    static const Register slmoffset = Register(27);  // Group's SLM offset in total 64K SLM
-    static const Register printfbptr = Register(28); // printf buffer address .
-    static const Register printfiptr = Register(29); // printf index buffer address.
-    static const Register dwblockip = Register(30);  // blockip
-    static const Register laneid = Register(31);  // lane id.
-    static const Register invalid = Register(32);  // used for valid comparation.
-    static const Register btiUtil = Register(33);  // used for mixed pointer as bti utility.
-    static const uint32_t regNum = 34;             // number of special registers
+    static const Register dwblockip = Register(27);  // blockip
+    static const Register profilingbptr = Register(28); // buffer addr for profiling.
+    static const Register profilingts0 = Register(29); // timestamp for profiling.
+    static const Register profilingts1 = Register(30); // timestamp for profiling.
+    static const Register profilingts2 = Register(31); // timestamp for profiling.
+    static const Register profilingts3 = Register(32); // timestamp for profiling.
+    static const Register profilingts4 = Register(33); // timestamp for profiling.
+    static const Register threadid = Register(34); // the thread id of this thread.
+    static const uint32_t regNum = 35;             // number of special registers
     extern const char *specialRegMean[];           // special register name.
   } /* namespace ocl */
 

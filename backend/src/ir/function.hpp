@@ -177,10 +177,14 @@ namespace ir {
     struct InfoFromLLVM { // All the info about passed by llvm, using -cl-kernel-arg-info
       uint32_t addrSpace;
       std::string typeName;
+      std::string typeBaseName;
       std::string accessQual;
       std::string typeQual;
       std::string argName; // My different from arg->getName()
 
+
+      // only llvm-3.6 or later has kernel_arg_base_type in metadata.
+#if (LLVM_VERSION_MAJOR == 3) && (LLVM_VERSION_MINOR <= 5)
       bool isImage1dT() const {
         return typeName.compare("image1d_t") == 0;
       }
@@ -199,14 +203,36 @@ namespace ir {
       bool isImage3dT() const {
         return typeName.compare("image3d_t") == 0;
       }
+      bool isSamplerType() const {
+        return typeName.compare("sampler_t") == 0;
+      }
+#else
+      bool isImage1dT() const {
+        return typeBaseName.compare("image1d_t") == 0;
+      }
+      bool isImage1dArrayT() const {
+        return typeBaseName.compare("image1d_array_t") == 0;
+      }
+      bool isImage1dBufferT() const {
+        return typeBaseName.compare("image1d_buffer_t") == 0;
+      }
+      bool isImage2dT() const {
+        return typeBaseName.compare("image2d_t") == 0;
+      }
+      bool isImage2dArrayT() const {
+        return typeBaseName.compare("image2d_array_t") == 0;
+      }
+      bool isImage3dT() const {
+        return typeBaseName.compare("image3d_t") == 0;
+      }
+      bool isSamplerType() const {
+        return typeBaseName.compare("sampler_t") == 0;
+      }
+#endif
 
       bool isImageType() const {
         return isImage1dT() || isImage1dArrayT() || isImage1dBufferT() ||
                isImage2dT() || isImage2dArrayT() || isImage3dT();
-      }
-
-      bool isSamplerType() const {
-        return typeName.compare("sampler_t") == 0;
       }
 
     };
@@ -247,8 +273,14 @@ namespace ir {
   struct Loop : public NonCopyable
   {
   public:
-    Loop(const vector<LabelIndex> &in, const vector<std::pair<LabelIndex, LabelIndex>> &exit) :
-    bbs(in), exits(exit) {}
+    Loop(LabelIndex pre,
+         int paren,
+         const vector<LabelIndex> &in,
+         const vector<std::pair<LabelIndex, LabelIndex>> &exit) :
+         preheader(pre), parent(paren), bbs(in), exits(exit) {}
+
+    LabelIndex preheader;
+    int parent;
     vector<LabelIndex> bbs;
     vector<std::pair<LabelIndex, LabelIndex>> exits;
     GBE_STRUCT(Loop);
@@ -273,8 +305,11 @@ namespace ir {
     /*! Get the function profile */
     INLINE Profile getProfile(void) const { return profile; }
     /*! Get a new valid register */
-    INLINE Register newRegister(RegisterFamily family, bool uniform = false) {
-      return this->file.append(family, uniform);
+    INLINE Register newRegister(RegisterFamily family,
+                                bool uniform = false,
+                                gbe_curbe_type curbeType = GBE_GEN_REG,
+                                int subType = 0) {
+      return this->file.append(family, uniform, curbeType, subType);
     }
     /*! Get the function name */
     const std::string &getName(void) const { return name; }
@@ -288,6 +323,18 @@ namespace ir {
     INLINE void setRegisterUniform(Register reg, bool uniform) { file.setUniform(reg, uniform); }
     /*! return true if the specified regsiter is uniform type */
     INLINE bool isUniformRegister(Register reg) { return file.isUniform(reg); }
+    /*! set register as specified payload type */
+    INLINE void setRegPayloadType(Register reg, gbe_curbe_type curbeType, int subType) {
+      file.setPayloadType(reg, curbeType, subType);
+    }
+    /*! get register's payload type. */
+    INLINE void getRegPayloadType(Register reg, gbe_curbe_type &curbeType, int &subType) const {
+      file.getPayloadType(reg, curbeType, subType);
+    }
+    /*! check whether a register is a payload register */
+    INLINE bool isPayloadReg(Register reg) const{
+      return file.isPayloadReg(reg);
+    }
     /*! Get the register family from the register itself */
     INLINE RegisterFamily getRegisterFamily(Register reg) const {
       return this->getRegisterData(reg).family;
@@ -299,6 +346,14 @@ namespace ir {
     /*! Set the register from the tuple vector */
     INLINE void setRegister(Tuple ID, uint32_t which, Register reg) {
       file.set(ID, which, reg);
+    }
+    /*! Get the type from the tuple vector */
+    INLINE uint8_t getType(Tuple ID, uint32_t which) const {
+      return file.getType(ID, which);
+    }
+    /*! Set the type into the tuple vector */
+    INLINE void setType(Tuple ID, uint32_t which, uint8_t type) {
+      file.setType(ID, which, type);
     }
     /*! Get the register file */
     INLINE const RegisterFile &getRegisterFile(void) const { return file; }
@@ -438,6 +493,14 @@ namespace ir {
         block->foreach(functor);
       }
     }
+    /*! Get wgBroadcastSLM in this function */
+    int32_t getwgBroadcastSLM(void) const { return wgBroadcastSLM; }
+    /*! Set wgBroadcastSLM for this function */
+    void setwgBroadcastSLM(int32_t v) { wgBroadcastSLM = v; }
+    /*! Get tidMapSLM in this function */
+    int32_t gettidMapSLM(void) const { return tidMapSLM; }
+    /*! Set tidMapSLM for this function */
+    void settidMapSLM(int32_t v) { tidMapSLM = v; }
     /*! Does it use SLM */
     INLINE bool getUseSLM(void) const { return this->useSLM; }
     /*! Change the SLM config for the function */
@@ -465,12 +528,27 @@ namespace ir {
     /*! Push stack size. */
     INLINE void pushStackSize(uint32_t step) { this->stackSize += step; }
     /*! add the loop info for later liveness analysis */
-    void addLoop(const vector<LabelIndex> &bbs, const vector<std::pair<LabelIndex, LabelIndex>> &exits);
+    void addLoop(LabelIndex preheader,
+                 int parent,
+                 const vector<LabelIndex> &bbs,
+                 const vector<std::pair<LabelIndex, LabelIndex>> &exits);
     INLINE const vector<Loop * > &getLoops() { return loops; }
+    int getLoopDepth(LabelIndex Block) const;
     vector<BasicBlock *> &getBlocks() { return blocks; }
     /*! Get surface starting address register from bti */
     Register getSurfaceBaseReg(uint8_t bti) const;
     void appendSurface(uint8_t bti, Register reg);
+    /*! Get instruction distance between two BBs include both b0 and b1,
+        and b0 must be less than b1. */
+    INLINE uint32_t getDistance(LabelIndex b0, LabelIndex b1) const {
+      uint32_t insnNum = 0;
+      GBE_ASSERT(b0.value() <= b1.value());
+      for(uint32_t i = b0.value(); i <= b1.value(); i++) {
+        BasicBlock &bb = getBlock(LabelIndex(i));
+        insnNum += bb.size();
+      }
+      return insnNum;
+    }
     /*! Output the control flow graph to .dot file */
     void outputCFG();
   private:
@@ -498,6 +576,8 @@ namespace ir {
     size_t compileWgSize[3];        //!< required work group size specified by
                                     //   __attribute__((reqd_work_group_size(X, Y, Z))).
     std::string functionAttributes; //!< function attribute qualifiers combined.
+    int32_t wgBroadcastSLM;         //!< Used for broadcast the workgroup value.
+    int32_t tidMapSLM;              //!< Used to store the map between groupid and hw thread.
     GBE_CLASS(Function);            //!< Use custom allocator
   };
 

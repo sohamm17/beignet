@@ -54,6 +54,8 @@ struct UTest
   Function fn;
   /*! Name of the test */
   const char *name;
+  /*! numbers of the jobs */
+  const char *number;
   /*! whether it is a bench mark. */
   bool isBenchMark;
   /*! Indicate whether current test cases has issue to be fixes */
@@ -64,6 +66,8 @@ struct UTest
   static std::vector<UTest> *utestList;
   /*! Run the test with the given name */
   static void run(const char *name);
+  /*! Run the test with the given name */
+  static void runMultiThread(const char *number);
   /*! Run all the tests without known issue*/
   static void runAllNoIssue(void);
   /*! Run all the benchmark. */
@@ -72,6 +76,10 @@ struct UTest
   static void runAll(void);
   /*! List all test cases */
   static void listAllCases(void);
+  /*! List test cases that can run*/
+  static void listCasesCanRun(void);
+  /*! List test cases with issue*/
+  static void listCasesWithIssue(void);
   /*! Statistics struct */
   static RStatistics retStatistics;
   /*! Do run a test case actually */
@@ -94,15 +102,15 @@ struct UTest
 /*! Register a test case which has issue to be fixed */
 #define MAKE_UTEST_FROM_FUNCTION_WITH_ISSUE(FN) \
   static void __ANON__##FN##__(void) { UTEST_EXPECT_SUCCESS(FN()); } \
-  static const UTest __##FN##__(__ANON__##FN##__, #FN, true);
+  static const UTest __##FN##__(__ANON__##FN##__, #FN, false ,true);
 
 /*! Turn a function into a unit performance test */
-#define MAKE_BENCHMARK_FROM_FUNCTION_KEEP_PROGRAM(FN, KEEP_PROGRAM) \
-  static void __ANON__##FN##__(void) { BENCHMARK(FN()); } \
+#define MAKE_BENCHMARK_FROM_FUNCTION_KEEP_PROGRAM(FN, KEEP_PROGRAM, ...) \
+  static void __ANON__##FN##__(void) { BENCHMARK(FN(), __VA_ARGS__); } \
   static const UTest __##FN##__(__ANON__##FN##__, #FN, true, false, !(KEEP_PROGRAM));
 
-#define MAKE_BENCHMARK_FROM_FUNCTION(FN) \
-  static void __ANON__##FN##__(void) { BENCHMARK(FN()); } \
+#define MAKE_BENCHMARK_FROM_FUNCTION(FN, ...) \
+  static void __ANON__##FN##__(void) { BENCHMARK(FN(), __VA_ARGS__); } \
   static const UTest __##FN##__(__ANON__##FN##__, #FN, true);
 
 
@@ -134,12 +142,12 @@ struct UTest
     } \
   } while (0)
 
-#define BENCHMARK(EXPR) \
+#define BENCHMARK(EXPR, ...) \
  do { \
     double ret = 0;\
     try { \
       ret = EXPR; \
-      std::cout << "    [Result: " << std::fixed<< std::setprecision(3) << ret << " GB/S]    [SUCCESS]" << std::endl; \
+      std::cout << "    [Result: " << std::fixed<< std::setprecision(3) << ret << " " << __VA_ARGS__ << "]    [SUCCESS]" << std::endl; \
       UTest::retStatistics.passCount += 1; \
     } \
     catch (Exception e) { \

@@ -1,3 +1,5 @@
+#ifndef __CL_EXTENSIONS_H__
+#define __CL_EXTENSIONS_H__
 /* The following approved Khronos extension
  * names must be returned by all device that
  * support OpenCL C 1.2. */
@@ -23,6 +25,11 @@
   DECL_EXT(khr_spir) \
   DECL_EXT(khr_icd)
 
+#define DECL_INTEL_EXTENSIONS \
+  DECL_EXT(intel_accelerator) \
+  DECL_EXT(intel_motion_estimation) \
+  DECL_EXT(intel_subgroups)
+
 #define DECL_GL_EXTENSIONS \
   DECL_EXT(khr_gl_sharing)\
   DECL_EXT(khr_gl_event)\
@@ -37,6 +44,7 @@
 #define DECL_ALL_EXTENSIONS \
   DECL_BASE_EXTENSIONS \
   DECL_OPT1_EXTENSIONS \
+  DECL_INTEL_EXTENSIONS \
   DECL_GL_EXTENSIONS \
   DECL_D3D_EXTENSIONS
 
@@ -54,6 +62,8 @@ cl_khr_extension_id_max
 #define BASE_EXT_END_ID EXT_ID(khr_fp64)
 #define OPT1_EXT_START_ID EXT_ID(khr_int64_base_atomics)
 #define OPT1_EXT_END_ID EXT_ID(khr_icd)
+#define INTEL_EXT_START_ID EXT_ID(intel_accelerator)
+#define INTEL_EXT_END_ID EXT_ID(intel_subgroups)
 #define GL_EXT_START_ID EXT_ID(khr_gl_sharing)
 #define GL_EXT_END_ID EXT_ID(khr_gl_msaa_sharing)
 
@@ -75,6 +85,7 @@ struct EXT_STRUCT_NAME(name) { \
 
 DECL_BASE_EXTENSIONS
 DECL_OPT1_EXTENSIONS
+DECL_INTEL_EXTENSIONS
 DECL_D3D_EXTENSIONS
 DECL_GL_EXTENSIONS
 #undef DECL_EXT
@@ -87,14 +98,16 @@ typedef union {
   #undef DECL_EXT
 } extension_union;
 
+#include "cl_device_id.h"
 typedef struct cl_extensions {
   extension_union extensions[cl_khr_extension_id_max];
-  char ext_str[256];
+  char ext_str[EXTENSTION_LENGTH];
 } cl_extensions_t;
 
 extern void
 cl_intel_platform_extension_init(cl_platform_id intel_platform);
 extern void
-cl_intel_platform_enable_fp16_extension(cl_device_id device);
+cl_intel_platform_enable_extension(cl_device_id device, uint32_t name);
 extern void
 cl_intel_platform_get_default_extension(cl_device_id device);
+#endif /* __CL_EXTENSIONS_H__ */

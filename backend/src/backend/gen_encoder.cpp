@@ -258,7 +258,7 @@ namespace gbe
     else
       NOT_SUPPORTED;
   }
-#if 0
+
   static void setOBlockRW(GenEncoder *p,
                           GenNativeInstruction *insn,
                           uint32_t bti,
@@ -269,13 +269,27 @@ namespace gbe
   {
     const GenMessageTarget sfid = GEN_SFID_DATAPORT_DATA;
     p->setMessageDescriptor(insn, sfid, msg_length, response_length);
-    assert(size == 2 || size == 4);
+    assert(size == 2 || size == 4 || size == 8);
     insn->bits3.gen7_oblock_rw.msg_type = msg_type;
     insn->bits3.gen7_oblock_rw.bti = bti;
-    insn->bits3.gen7_oblock_rw.block_size = size == 2 ? 2 : 3;
+    insn->bits3.gen7_oblock_rw.block_size = size == 2 ? 2 : (size == 4 ? 3 : 4);
     insn->bits3.gen7_oblock_rw.header_present = 1;
   }
-#endif
+
+  static void setMBlockRW(GenEncoder *p,
+                          GenNativeInstruction *insn,
+                          uint32_t bti,
+                          uint32_t msg_type,
+                          uint32_t msg_length,
+                          uint32_t response_length)
+  {
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
+    p->setMessageDescriptor(insn, sfid, msg_length, response_length);
+    insn->bits3.gen7_mblock_rw.msg_type = msg_type;
+    insn->bits3.gen7_mblock_rw.bti = bti;
+    insn->bits3.gen7_mblock_rw.header_present = 1;
+  }
+
 
   static void setDWordScatterMessgae(GenEncoder *p,
                                      GenNativeInstruction *insn,
@@ -451,7 +465,7 @@ namespace gbe
     this->setHeader(insn);
     insn->header.destreg_or_condmod = GEN_SFID_DATAPORT_DATA;
 
-    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setDst(insn, GenRegister::ud8grf(dst.nr, 0));
     this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
 
     if (bti.file == GEN_IMMEDIATE_VALUE) {
@@ -591,11 +605,23 @@ namespace gbe
       this->setSrc1(insn, bti);
     }
   }
+
+  extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
+  void GenEncoder::setDBGInfo(DebugInfo in, bool hasHigh)
+  {
+    if(OCL_DEBUGINFO)
+    {
+      storedbg.push_back(in);
+      if(hasHigh) storedbg.push_back(in);
+    }
+  }
+  
   GenCompactInstruction *GenEncoder::nextCompact(uint32_t opcode) {
     GenCompactInstruction insn;
     std::memset(&insn, 0, sizeof(GenCompactInstruction));
     insn.bits1.opcode = opcode;
     this->store.push_back(insn.low);
+    setDBGInfo(DBGInfo, false);
     return (GenCompactInstruction *)&this->store.back();
   }
 
@@ -605,66 +631,27 @@ namespace gbe
      insn.header.opcode = opcode;
      this->store.push_back(insn.low);
      this->store.push_back(insn.high);
+     setDBGInfo(DBGInfo, true);
      return (GenNativeInstruction *)(&this->store.back()-1);
   }
 
   bool GenEncoder::canHandleLong(uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1)
   {
-	/* By now, just alu1 insn will come to here. So just MOV */
+    /* By now, just alu1 insn will come to here. So just MOV */
     this->MOV(dst.bottom_half(), src0.bottom_half());
     this->MOV(dst.top_half(this->simdWidth), src0.top_half(this->simdWidth));
     return true;
   }
 
-  INLINE void _handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst,
-                            GenRegister src0, GenRegister src1 = GenRegister::null()) {
-       int w = p->curr.execWidth;
-       p->push();
-       p->curr.execWidth = p->getDoubleExecWidth();
-       p->curr.nibControl = 0;
-       GenNativeInstruction *insn = p->next(opcode);
-       p->setHeader(insn);
-       p->setDst(insn, dst);
-       p->setSrc0(insn, src0);
-       if (!GenRegister::isNull(src1))
-         p->setSrc1(insn, src1);
-       if (w == 8)
-         p->curr.nibControl = 1; // second 1/8 mask
-       insn = p->next(opcode);
-       p->setHeader(insn);
-       p->setDst(insn, GenRegister::suboffset(dst, w / 2));
-       p->setSrc0(insn, GenRegister::suboffset(src0, w / 2));
-       if (!GenRegister::isNull(src1))
-         p->setSrc1(insn, GenRegister::suboffset(src1, w / 2));
-       p->pop();
-  }
-
-  // Double register accessing is a little special,
-  // Per Gen spec, then only supported mode is SIMD8 and, it only
-  // handles four doubles each time.
-  // We need to lower down SIMD16 to two SIMD8 and lower down SIMD8
-  // to two SIMD1x4.
-  INLINE void handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst,
-                           GenRegister src0, GenRegister src1 = GenRegister::null()) {
-      if (p->curr.execWidth == 8)
-        _handleDouble(p, opcode, dst, src0, src1);
-      else if (p->curr.execWidth == 16) {
-        p->push();
-        p->curr.execWidth = 8;
-        p->curr.quarterControl = GEN_COMPRESSION_Q1;
-        _handleDouble(p, opcode, dst, src0, src1);
-        p->curr.quarterControl = GEN_COMPRESSION_Q2;
-        if (!GenRegister::isNull(src1))
-          src1 = GenRegister::offset(src1, 2);
-        _handleDouble(p, opcode, GenRegister::offset(dst, 2), GenRegister::offset(src0, 2), src1);
-        p->pop();
-      }
+  void GenEncoder::handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1) {
+    /* For platform before gen8, we do not support double and can not get here. */
+    GBE_ASSERT(0);
   }
 
   void alu1(GenEncoder *p, uint32_t opcode, GenRegister dst,
             GenRegister src, uint32_t condition) {
      if (dst.isdf() && src.isdf()) {
-       handleDouble(p, opcode, dst, src);
+       p->handleDouble(p, opcode, dst, src);
      } else if (dst.isint64() && src.isint64()
                 && p->canHandleLong(opcode, dst, src)) { // handle int64
        return;
@@ -709,7 +696,7 @@ namespace gbe
             uint32_t condition)
   {
     if (dst.isdf() && src0.isdf() && src1.isdf()) {
-       handleDouble(p, opcode, dst, src0, src1);
+       p->handleDouble(p, opcode, dst, src0, src1);
     } else if (needToSplitAlu2(p, dst, src0, src1) == false) {
        if(compactAlu2(p, opcode, dst, src0, src1, condition, false))
          return;
@@ -768,82 +755,10 @@ namespace gbe
     this->alu3(GEN_OPCODE_##OP, dest, src0, src1, src2); \
   }
 
-  void GenEncoder::LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value) {
-    union { double d; unsigned u[2]; } u;
-    u.d = value;
-    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_UD);
-    push();
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    curr.execWidth = 1;
-    MOV(r, GenRegister::immud(u.u[1]));
-    MOV(GenRegister::suboffset(r, 1), GenRegister::immud(u.u[0]));
-    pop();
-    r.type = GEN_TYPE_DF;
-    r.vstride = GEN_VERTICAL_STRIDE_0;
-    r.width = GEN_WIDTH_1;
-    r.hstride = GEN_HORIZONTAL_STRIDE_0;
-    push();
-    uint32_t width = curr.execWidth;
-    curr.execWidth = 8;
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    curr.quarterControl = GEN_COMPRESSION_Q1;
-    MOV(dest, r);
-    if (width == 16) {
-      curr.quarterControl = GEN_COMPRESSION_Q2;
-      MOV(GenRegister::offset(dest, 2), r);
-    }
-    pop();
-  }
-
   void GenEncoder::LOAD_INT64_IMM(GenRegister dest, GenRegister value) {
     GenRegister u0 = GenRegister::immd((int)value.value.i64), u1 = GenRegister::immd(value.value.i64 >> 32);
     MOV(dest.bottom_half(), u0);
     MOV(dest.top_half(this->simdWidth), u1);
-  }
-
-  void GenEncoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp) {
-    GBE_ASSERT((src0.type == GEN_TYPE_F && dest.isdf()) || (src0.isdf() && dest.type == GEN_TYPE_F));
-    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_F);
-    int w = curr.execWidth;
-    GenRegister r0;
-    int factor = 1;
-    if (dest.type == GEN_TYPE_F) {
-      r0 = r;
-      r = GenRegister::h2(r);
-      factor = 2;
-    } else {
-      r0 = GenRegister::h2(r);
-    }
-    push();
-    curr.execWidth = 8;
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    MOV(r0, src0);
-    MOV(GenRegister::suboffset(r0, 4 * factor), GenRegister::suboffset(src0, 4));
-    curr.noMask = 0;
-    curr.quarterControl = 0;
-    curr.nibControl = 0;
-    MOV(dest, r);
-    curr.nibControl = 1;
-    MOV(GenRegister::suboffset(dest, 4), GenRegister::suboffset(r, 8 / factor));
-    pop();
-    if (w == 16) {
-      push();
-      curr.execWidth = 8;
-      curr.predicate = GEN_PREDICATE_NONE;
-      curr.noMask = 1;
-      MOV(r0, GenRegister::suboffset(src0, 8));
-      MOV(GenRegister::suboffset(r0, 4 * factor), GenRegister::suboffset(src0, 12));
-      curr.noMask = 0;
-      curr.quarterControl = 1;
-      curr.nibControl = 0;
-      MOV(GenRegister::suboffset(dest, 8), r);
-      curr.nibControl = 1;
-      MOV(GenRegister::suboffset(dest, 12), GenRegister::suboffset(r, 8 / factor));
-      pop();
-    }
   }
 
   void GenEncoder::F16TO32(GenRegister dest, GenRegister src0) {
@@ -879,6 +794,7 @@ namespace gbe
   ALU2(PLN)
   ALU2(MACH)
   ALU3(MAD)
+  ALU3(LRP)
  // ALU2(BRC)
  // ALU1(ENDIF)
  //  ALU1(IF)
@@ -961,6 +877,18 @@ namespace gbe
      insn->bits3.msg_gateway.sub_function_id = GEN_BARRIER_MSG;
      insn->bits3.msg_gateway.notify = 0x1;
   }
+
+  void GenEncoder::FWD_GATEWAY_MSG(GenRegister src, uint32_t notifyN) {
+     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+     this->setHeader(insn);
+     this->setDst(insn, GenRegister::null());
+     this->setSrc0(insn, src);
+     setMessageDescriptor(insn, GEN_SFID_MESSAGE_GATEWAY, 1, 0);
+     insn->bits3.msg_gateway.sub_function_id = GEN_FORWARD_MSG;
+     GBE_ASSERT(notifyN <= 2);
+     insn->bits3.msg_gateway.notify = notifyN;
+  }
+
   void GenEncoder::FENCE(GenRegister dst) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
     this->setHeader(insn);
@@ -1106,9 +1034,10 @@ namespace gbe
     this->setSrc1(insn, src1);
   }
 
-  void GenEncoder::WAIT(void) {
+  void GenEncoder::WAIT(uint32_t n) {
      GenNativeInstruction *insn = this->next(GEN_OPCODE_WAIT);
-     GenRegister src = GenRegister::notification1();
+     GBE_ASSERT(curr.predicate == GEN_PREDICATE_NONE);
+     GenRegister src = GenRegister::notification0(n);
      this->setDst(insn, GenRegister::null());
      this->setSrc0(insn, src);
      this->setSrc1(insn, GenRegister::null());
@@ -1231,6 +1160,50 @@ namespace gbe
                        simd_mode, return_format);
   }
 
+  void GenEncoder::setVmeMessage(GenNativeInstruction *insn,
+                                unsigned char bti,
+                                uint32_t response_length,
+                                uint32_t msg_length,
+                                uint32_t msg_type,
+                                unsigned char vme_search_path_lut,
+                                unsigned char lut_sub)
+  {
+     const GenMessageTarget sfid = GEN_SFID_VIDEO_MOTION_EST;
+     setMessageDescriptor(insn, sfid, msg_length, response_length, true);
+     insn->bits3.vme_gen7.bti = bti;
+     insn->bits3.vme_gen7.vme_search_path_lut = vme_search_path_lut;
+     insn->bits3.vme_gen7.lut_sub = lut_sub;
+     insn->bits3.vme_gen7.msg_type = msg_type;
+     insn->bits3.vme_gen7.stream_in = 0;
+     insn->bits3.vme_gen7.stream_out = 0;
+     insn->bits3.vme_gen7.reserved_mbz = 0;
+
+  }
+
+  void GenEncoder::VME(unsigned char bti,
+                       GenRegister dest,
+                       GenRegister msg,
+                       uint32_t msg_type,
+                       uint32_t vme_search_path_lut,
+                       uint32_t lut_sub)
+  {
+    /* Currectly we just support inter search only, we will support other
+     * modes in future.
+     */
+    GBE_ASSERT(msg_type == 1);
+    uint32_t msg_length, response_length;
+    if(msg_type == 1){
+      msg_length = 5;
+      response_length = 6;
+    }
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    this->setHeader(insn);
+    this->setDst(insn, dest);
+    this->setSrc0(insn, msg);
+    setVmeMessage(insn, bti, response_length, msg_length,
+                  msg_type, vme_search_path_lut, lut_sub);
+  }
+
   void GenEncoder::TYPED_WRITE(GenRegister msg, bool header_present, unsigned char bti)
   {
      GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
@@ -1283,6 +1256,72 @@ namespace gbe
      this->setSrc1(insn, GenRegister::immud(0));
       // here dst_num is the register that will be write-back: in terms of 32byte register
      setScratchMessage(this, insn, offset, block_size, channel_mode, GEN_SCRATCH_READ, 1, dst_num);
+  }
+
+  void GenEncoder::OBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1;
+    const uint32_t response_length = size / 2; // Size is in regs
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setOBlockRW(this,
+                insn,
+                bti,
+                size,
+                GEN7_OBLOCK_READ,
+                msg_length,
+                response_length);
+  }
+
+  void GenEncoder::OBWRITE(GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1 + size / 2; // Size is in owords
+    const uint32_t response_length = 0;
+    this->setHeader(insn);
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+    setOBlockRW(this,
+                insn,
+                bti,
+                size,
+                GEN7_OBLOCK_WRITE,
+                msg_length,
+                response_length);
+  }
+
+  void GenEncoder::MBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1;
+    const uint32_t response_length = size; // Size of registers
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::ud8grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setMBlockRW(this,
+                insn,
+                bti,
+                GEN75_P1_MEDIA_BREAD,
+                msg_length,
+                response_length);
+  }
+
+  void GenEncoder::MBWRITE(GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1 + size;
+    const uint32_t response_length = 0; // Size of registers
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setMBlockRW(this,
+                insn,
+                bti,
+                GEN75_P1_MEDIA_TYPED_BWRITE,
+                msg_length,
+                response_length);
   }
 
   void GenEncoder::EOT(uint32_t msg) {

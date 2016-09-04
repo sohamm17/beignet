@@ -173,6 +173,8 @@ namespace gbe {
     }
 
     Type* GetBasicType(Type* type) {
+      if(!type)
+        return type;
       switch(type->getTypeID()) {
       case Type::VectorTyID:
       case Type::ArrayTyID:
@@ -184,20 +186,20 @@ namespace gbe {
     }
 
     int GetComponentCount(const Type* type)  {
-      if (type->getTypeID() == Type::VectorTyID)
+      if (type && type->getTypeID() == Type::VectorTyID)
         return llvm::dyn_cast<VectorType>(type)->getNumElements();
       else
         return 1;
     }
 
     int GetComponentCount(const Value* value) {
-      return GetComponentCount(value->getType());
+      return GetComponentCount(value ? value->getType() : NULL);
     }
 
     /* set to insert new instructions after the specified instruction.*/
     void setAppendPoint(Instruction *insn)  {
       BasicBlock::iterator next(insn);
-      builder->SetInsertPoint(++next);
+      builder->SetInsertPoint(&*++next);
     }
 
     DenseMap<Value*, VectorValues> vectorVals;
@@ -227,13 +229,16 @@ namespace gbe {
     // of their operands hadn't before been visited (i.e. loop variant
     // variables)
     SmallVector<PHINode*, 16> incompletePhis;
+
+    // Map for alloca vec uesd for Extractelememt < vec, alloca >
+    std::map<Value*, Value*> vectorAlloca;
   };
 
   Value* Scalarize::getComponent(int component, Value* v)
   {
     assert(canGetComponent(v) && "getComponent called on unhandled vector");
 
-    if (v->getType()->isVectorTy()) {
+    if (v && v->getType() && v->getType()->isVectorTy()) {
       if (ConstantDataVector* c = dyn_cast<ConstantDataVector>(v)) {
         return c->getElementAsConstant(component);
       } else if (ConstantVector* c = dyn_cast<ConstantVector>(v)) {
@@ -266,6 +271,7 @@ namespace gbe {
           case Intrinsic::sqrt:
           case Intrinsic::ceil:
           case Intrinsic::trunc:
+          case Intrinsic::fmuladd:
               return true;
         }
     }
@@ -333,7 +339,7 @@ namespace gbe {
   }
   bool Scalarize::canGetComponent(Value* v)
   {
-    if (v->getType()->isVectorTy()) {
+    if (v && v->getType() && v->getType()->isVectorTy()) {
       if (isa<ConstantDataVector>(v) || isa<ConstantVector>(v) || isa<ConstantAggregateZero>(v) || isa<UndefValue>(v)) {
         return true;
       } else {
@@ -537,13 +543,18 @@ namespace gbe {
     VectorValues& vVals = vectorVals[sv];
 
     int size = GetComponentCount(sv);
-    int srcSize = GetComponentCount(sv->getOperand(0)->getType());
+
+    Value* Op0 = sv->getOperand(0);
+    if(!Op0)
+      return false;
+
+    int srcSize = GetComponentCount(Op0->getType());
 
     for (int i = 0; i < size; ++i) {
       int select = sv->getMaskValue(i);
 
       if (select < 0) {
-        setComponent(vVals, i, UndefValue::get(GetBasicType(sv->getOperand(0))));
+        setComponent(vVals, i, UndefValue::get(GetBasicType(Op0)));
         continue;
       }
 
@@ -671,6 +682,41 @@ namespace gbe {
             *CI = InsertToVector(call, *CI);
             break;
           }
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_IMAGE:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_IMAGE2:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_IMAGE4:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_IMAGE8:
+          {
+            ++CI;
+            ++CI;
+            if ((*CI)->getType()->isVectorTy())
+              *CI = InsertToVector(call, *CI);
+            break;
+          }
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_MEM:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_MEM2:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_MEM4:
+          case GEN_OCL_SUB_GROUP_BLOCK_WRITE_MEM8:
+          {
+            if ((*CI)->getType()->isVectorTy())
+              *CI = InsertToVector(call, *CI);
+            break;
+          }
+          case GEN_OCL_VME:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_MEM2:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_MEM4:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_MEM8:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_IMAGE2:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_IMAGE4:
+          case GEN_OCL_SUB_GROUP_BLOCK_READ_IMAGE8:
+            setAppendPoint(call);
+            extractFromVector(call);
+            break;
+          case GEN_OCL_PRINTF:
+            for (; CI != CS.arg_end(); ++CI)
+              if ((*CI)->getType()->isVectorTy())
+                *CI = InsertToVector(call, *CI);
+            break;
         }
       }
     }
@@ -719,17 +765,52 @@ namespace gbe {
     if (! isa<Constant>(extr->getOperand(1))) {
         // TODO: Variably referenced components. Probably handle/emulate through
         // a series of selects.
-        NOT_IMPLEMENTED; //gla::UnsupportedFunctionality("Variably referenced vector components");
+        //NOT_IMPLEMENTED; //gla::UnsupportedFunctionality("Variably referenced vector components");
+        //TODO: This is a implement for the non-constant index, we use an allocated new vector
+        //to store the need vector elements.
+        Value* foo = extr->getOperand(0);
+        Type* fooTy = foo ? foo->getType() : NULL;
+
+        Value* Alloc;
+        if(vectorAlloca.find(foo) == vectorAlloca.end())
+        {
+          BasicBlock &entry = extr->getParent()->getParent()->getEntryBlock();
+          BasicBlock::iterator bbIter = entry.begin();
+          while (isa<AllocaInst>(bbIter)) ++bbIter;
+
+          IRBuilder<> allocBuilder(&entry);
+          allocBuilder.SetInsertPoint(&*bbIter);
+
+          Alloc = allocBuilder.CreateAlloca(fooTy, nullptr, "");
+          for (int i = 0; i < GetComponentCount(foo); ++i)
+          {
+            Value* foo_i = getComponent(i, foo);
+            assert(foo_i && "There is unhandled vector component");
+            Value* idxs_i[] = {ConstantInt::get(intTy,0), ConstantInt::get(intTy,i)};
+            Value* storePtr_i = builder->CreateGEP(Alloc, idxs_i);
+            builder->CreateStore(foo_i, storePtr_i);
+          }
+          vectorAlloca[foo] = Alloc;
+        }
+        else Alloc = vectorAlloca[foo];
+
+        Value* Idxs[] = {ConstantInt::get(intTy,0), extr->getOperand(1)};
+        Value* getPtr = builder->CreateGEP(Alloc, Idxs);
+        Value* loadComp = builder->CreateLoad(getPtr);
+        extr->replaceAllUsesWith(loadComp);
+        return true;
     }
     //if (isa<Argument>(extr->getOperand(0)))
     //  return false;
-    int component = GetConstantInt(extr->getOperand(1));
-    Value* v = getComponent(component, extr->getOperand(0));
-    if(extr == v)
-      return false;
-    replaceAllUsesOfWith(dyn_cast<Instruction>(extr), dyn_cast<Instruction>(v));
+    else{
+      int component = GetConstantInt(extr->getOperand(1));
+      Value* v = getComponent(component, extr->getOperand(0));
+      if(extr == v)
+        return false;
+      replaceAllUsesOfWith(dyn_cast<Instruction>(extr), dyn_cast<Instruction>(v));
 
-    return true;
+      return true;
+    }
   }
 
   bool Scalarize::scalarizeInsert(InsertElementInst* ins)
@@ -759,7 +840,10 @@ namespace gbe {
       return;
     ReversePostOrderTraversal<Function*> rpot(&F);
     BasicBlock::iterator instI = (*rpot.begin())->begin();
-    builder->SetInsertPoint(instI);
+    Instruction* instVal = &*instI;
+    if(instVal == nullptr)
+      return;
+    builder->SetInsertPoint(instVal);
 
     Function::arg_iterator I = F.arg_begin(), E = F.arg_end();
 
@@ -767,7 +851,7 @@ namespace gbe {
       Type *type = I->getType();
 
       if(type->isVectorTy())
-        extractFromVector(I);
+        extractFromVector(&*I);
     }
     return;
   }
@@ -804,11 +888,11 @@ namespace gbe {
     RPOTType rpot(&F);
     for (RPOTType::rpo_iterator bbI = rpot.begin(), bbE = rpot.end(); bbI != bbE; ++bbI) {
       for (BasicBlock::iterator instI = (*bbI)->begin(), instE = (*bbI)->end(); instI != instE; ++instI) {
-        bool scalarized = scalarize(instI);
+        bool scalarized = scalarize(&*instI);
         if (scalarized) {
           changed = true;
           // TODO: uncomment when done
-          deadList.push_back(instI);
+          deadList.push_back(&*instI);
         }
       }
     }
@@ -836,6 +920,7 @@ namespace gbe {
     incompletePhis.clear();
     vectorVals.clear();
     usedVecVals.clear();
+    vectorAlloca.clear();
 
     delete builder;
     builder = 0;

@@ -31,6 +31,7 @@
 #include "cl_khr_icd.h"
 #include "cl_event.h"
 #include "performance.h"
+#include "cl_cmrt.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -47,6 +48,7 @@ cl_command_queue_new(cl_context ctx)
   queue->magic = CL_MAGIC_QUEUE_HEADER;
   queue->ref_n = 1;
   queue->ctx = ctx;
+  queue->cmrt_event = NULL;
   if ((queue->thread_data = cl_thread_data_create()) == NULL) {
     goto error;
   }
@@ -76,6 +78,11 @@ cl_command_queue_delete(cl_command_queue queue)
   assert(queue);
   if (atomic_dec(&queue->ref_n) != 1) return;
 
+#ifdef HAS_CMRT
+  if (queue->cmrt_event != NULL)
+    cmrt_destroy_event(queue);
+#endif
+
   // If there is a list of valid events, we need to give them
   // a chance to call the call-back function.
   cl_event_update_last_events(queue,1);
@@ -95,6 +102,7 @@ cl_command_queue_delete(cl_command_queue queue)
   cl_mem_delete(queue->perf);
   cl_context_delete(queue->ctx);
   cl_free(queue->wait_events);
+  cl_free(queue->barrier_events);
   queue->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
   cl_free(queue);
 }
@@ -133,19 +141,25 @@ cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
     struct _cl_mem_image *image;
     assert(interp_kernel_get_arg_type(k->opaque, id) == GBE_ARG_IMAGE);
 
-    //currently, user ptr is not supported for cl image, so offset should be always zero
-    assert(k->args[id].mem->offset == 0);
-
     image = cl_mem_image(k->args[id].mem);
     set_image_info(k->curbe, &k->images[i], image);
-    cl_gpgpu_bind_image(gpgpu, k->images[i].idx, image->base.bo, image->offset,
-                        image->intel_fmt, image->image_type, image->bpp,
-                        image->w, image->h, image->depth,
-                        image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
+    if(k->vme){
+      if( (image->fmt.image_channel_order != CL_R) || (image->fmt.image_channel_data_type != CL_UNORM_INT8) )
+        return CL_IMAGE_FORMAT_NOT_SUPPORTED;
+      cl_gpgpu_bind_image_for_vme(gpgpu, k->images[i].idx, image->base.bo, image->offset + k->args[id].mem->offset,
+                          image->intel_fmt, image->image_type, image->bpp,
+                          image->w, image->h, image->depth,
+                          image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
+    }
+    else
+      cl_gpgpu_bind_image(gpgpu, k->images[i].idx, image->base.bo, image->offset + k->args[id].mem->offset,
+                          image->intel_fmt, image->image_type, image->bpp,
+                          image->w, image->h, image->depth,
+                          image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
     // TODO, this workaround is for GEN7/GEN75 only, we may need to do it in the driver layer
     // on demand.
     if (image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
-      cl_gpgpu_bind_image(gpgpu, k->images[i].idx + BTI_WORKAROUND_IMAGE_OFFSET, image->base.bo, image->offset,
+      cl_gpgpu_bind_image(gpgpu, k->images[i].idx + BTI_WORKAROUND_IMAGE_OFFSET, image->base.bo, image->offset + k->args[id].mem->offset,
                           image->intel_fmt, image->image_type, image->bpp,
                           image->w, image->h, image->depth,
                           image->row_pitch, image->slice_pitch, (cl_gpgpu_tiling)image->tiling);
@@ -162,11 +176,13 @@ cl_command_queue_bind_surface(cl_command_queue queue, cl_kernel k)
   uint32_t i;
   enum gbe_arg_type arg_type; /* kind of argument */
   for (i = 0; i < k->arg_n; ++i) {
-    uint32_t offset; // location of the address in the curbe
+    int32_t offset; // location of the address in the curbe
     arg_type = interp_kernel_get_arg_type(k->opaque, i);
     if (arg_type != GBE_ARG_GLOBAL_PTR || !k->args[i].mem)
       continue;
     offset = interp_kernel_get_curbe_offset(k->opaque, GBE_CURBE_KERNEL_ARGUMENT, i);
+    if (offset < 0)
+      continue;
     if (k->args[i].mem->type == CL_MEM_SUBBUFFER_TYPE) {
       struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)k->args[i].mem;
       cl_gpgpu_bind_buf(gpgpu, k->args[i].mem->bo, offset, k->args[i].mem->offset + buffer->sub_offset, k->args[i].mem->size, interp_kernel_get_arg_bti(k->opaque, i));
@@ -218,31 +234,28 @@ error:
 LOCAL int
 cl_command_queue_flush_gpgpu(cl_command_queue queue, cl_gpgpu gpgpu)
 {
-  size_t global_wk_sz[3];
-  size_t outbuf_sz = 0;
-  void* printf_info = cl_gpgpu_get_printf_info(gpgpu, global_wk_sz, &outbuf_sz);
+  void* printf_info = cl_gpgpu_get_printf_info(gpgpu);
+  void* profiling_info;
 
   if (cl_gpgpu_flush(gpgpu) < 0)
     return CL_OUT_OF_RESOURCES;
 
   if (printf_info && interp_get_printf_num(printf_info)) {
-    void *index_addr = cl_gpgpu_map_printf_buffer(gpgpu, 0);
-    void *buf_addr = NULL;
-    if (interp_get_printf_sizeof_size(printf_info))
-      buf_addr = cl_gpgpu_map_printf_buffer(gpgpu, 1);
-
-    interp_output_printf(printf_info, index_addr, buf_addr, global_wk_sz[0],
-                      global_wk_sz[1], global_wk_sz[2], outbuf_sz);
-
-    cl_gpgpu_unmap_printf_buffer(gpgpu, 0);
-    if (interp_get_printf_sizeof_size(printf_info))
-      cl_gpgpu_unmap_printf_buffer(gpgpu, 1);
+    void *addr = cl_gpgpu_map_printf_buffer(gpgpu);
+    interp_output_printf(printf_info, addr);
+    cl_gpgpu_unmap_printf_buffer(gpgpu);
   }
 
   if (printf_info) {
     interp_release_printf_info(printf_info);
-    global_wk_sz[0] = global_wk_sz[1] = global_wk_sz[2] = 0;
-    cl_gpgpu_set_printf_info(gpgpu, NULL, global_wk_sz);
+    cl_gpgpu_set_printf_info(gpgpu, NULL);
+  }
+
+  /* If have profiling info, output it. */
+  profiling_info = cl_gpgpu_get_profiling_info(gpgpu);
+  if (profiling_info) {
+    interp_output_profiling(profiling_info, cl_gpgpu_map_profiling_buffer(gpgpu));
+    cl_gpgpu_unmap_profiling_buffer(gpgpu);
   }
   return CL_SUCCESS;
 }

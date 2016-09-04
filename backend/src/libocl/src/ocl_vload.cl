@@ -120,6 +120,7 @@ OVERLOADABLE void vstore16(TYPE##16 v, size_t offset, SPACE TYPE *p) { \
   DECL_BYTE_WR_SPACE(TYPE, __private)
 
 DECL_BYTE_RW_ALL(char)
+DECL_BYTE_RW_ALL(half)
 DECL_BYTE_RW_ALL(uchar)
 DECL_BYTE_RW_ALL(short)
 DECL_BYTE_RW_ALL(ushort)
@@ -179,9 +180,16 @@ OVERLOADABLE short f32to16_rtz(float f) {
 OVERLOADABLE float vload_half(size_t offset, const SPACE half *p) { \
   return __gen_ocl_f16to32(*(SPACE short *)(p + offset)); \
 } \
+OVERLOADABLE float vloada_half(size_t offset, const SPACE half *p) { \
+  return vload_half(offset, p); \
+} \
 OVERLOADABLE float2 vload_half2(size_t offset, const SPACE half *p) { \
   return (float2)(vload_half(offset*2, p), \
                   vload_half(offset*2 + 1, p)); \
+} \
+OVERLOADABLE float2 vloada_half2(size_t offset, const SPACE half *p) { \
+  return (float2)(vloada_half(offset*2, p), \
+                  vloada_half(offset*2 + 1, p)); \
 } \
 OVERLOADABLE float3 vload_half3(size_t offset, const SPACE half *p) { \
   return (float3)(vload_half(offset*3, p), \
@@ -197,14 +205,26 @@ OVERLOADABLE float4 vload_half4(size_t offset, const SPACE half *p) { \
   return (float4)(vload_half2(offset*2, p), \
                   vload_half2(offset*2 + 1, p)); \
 } \
+OVERLOADABLE float4 vloada_half4(size_t offset, const SPACE half *p) { \
+  return (float4)(vloada_half2(offset*2, p), \
+                  vloada_half2(offset*2 + 1, p)); \
+} \
 OVERLOADABLE float8 vload_half8(size_t offset, const SPACE half *p) { \
   return (float8)(vload_half4(offset*2, p), \
                   vload_half4(offset*2 + 1, p)); \
 } \
+OVERLOADABLE float8 vloada_half8(size_t offset, const SPACE half *p) { \
+  return (float8)(vloada_half4(offset*2, p), \
+                  vloada_half4(offset*2 + 1, p)); \
+} \
 OVERLOADABLE float16 vload_half16(size_t offset, const SPACE half *p) { \
   return (float16)(vload_half8(offset*2, p), \
                    vload_half8(offset*2 + 1, p)); \
-}
+}\
+OVERLOADABLE float16 vloada_half16(size_t offset, const SPACE half *p) { \
+  return (float16)(vloada_half8(offset*2, p), \
+                   vloada_half8(offset*2 + 1, p)); \
+}\
 
 #define DECL_HALF_ST_SPACE_ROUND(SPACE, ROUND, FUNC) \
 OVERLOADABLE void vstore_half##ROUND(float data, size_t offset, SPACE half *p) { \

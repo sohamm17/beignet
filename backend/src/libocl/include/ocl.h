@@ -31,6 +31,7 @@
 #include "ocl_integer.h"
 #include "ocl_math.h"
 #include "ocl_memcpy.h"
+#include "ocl_memset.h"
 #include "ocl_misc.h"
 #include "ocl_printf.h"
 #include "ocl_relational.h"
@@ -38,6 +39,7 @@
 #include "ocl_vload.h"
 #include "ocl_workitem.h"
 #include "ocl_simd.h"
+#include "ocl_work_group.h"
 #pragma OPENCL EXTENSION cl_khr_fp64 : disable
 #pragma OPENCL EXTENSION cl_khr_fp16 : disable
 #endif

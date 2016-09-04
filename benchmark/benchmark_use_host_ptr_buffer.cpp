@@ -28,7 +28,6 @@ double benchmark_use_host_ptr_buffer(void)
   }
   gettimeofday(&stop,0);
 
-  clReleaseMemObject(buf[0]);
   free(buf_data[0]);
   buf_data[0] = NULL;
 
@@ -37,4 +36,4 @@ double benchmark_use_host_ptr_buffer(void)
   return BANDWIDTH(n*sizeof(uint32_t)*100*2, elapsed);
 }
 
-MAKE_BENCHMARK_FROM_FUNCTION(benchmark_use_host_ptr_buffer);
+MAKE_BENCHMARK_FROM_FUNCTION(benchmark_use_host_ptr_buffer, "GB/S");

@@ -8,12 +8,12 @@
 # LLVM_FOUND       - True if llvm found.
 if (LLVM_INSTALL_DIR)
   find_program(LLVM_CONFIG_EXECUTABLE
-               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
+               NAMES llvm-config-37 llvm-config-3.7 llvm-config-36 llvm-config-3.6 llvm-config-38 llvm-config-3.8 llvm-config llvm-config-35 llvm-config-3.5 llvm-config-34 llvm-config-3.4
                DOC "llvm-config executable"
                PATHS ${LLVM_INSTALL_DIR} NO_DEFAULT_PATH)
 else (LLVM_INSTALL_DIR)
   find_program(LLVM_CONFIG_EXECUTABLE
-               NAMES llvm-config-35 llvm-config-3.5 llvm-config-36 llvm-config-3.6 llvm-config-33 llvm-config-3.3 llvm-config-34 llvm-config-3.4 llvm-config
+               NAMES llvm-config-37 llvm-config-3.7 llvm-config-36 llvm-config-3.6 llvm-config-38 llvm-config-3.8 llvm-config llvm-config-35 llvm-config-3.5 llvm-config-34 llvm-config-3.4
                DOC "llvm-config executable")
 endif (LLVM_INSTALL_DIR)
 
@@ -99,7 +99,9 @@ execute_process(
   OUTPUT_VARIABLE LLVM_SYSTEM_LIBS_ORIG
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+if (LLVM_SYSTEM_LIBS_ORIG)
 string(REGEX REPLACE " *\n" "" LLVM_SYSTEM_LIBS ${LLVM_SYSTEM_LIBS_ORIG})
+endif (LLVM_SYSTEM_LIBS_ORIG)
 endif (LLVM_VERSION_NODOT VERSION_GREATER 34)
 
 macro(add_one_lib name)

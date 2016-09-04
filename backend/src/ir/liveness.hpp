@@ -48,7 +48,7 @@ namespace ir {
   class Liveness : public NonCopyable
   {
   public:
-    Liveness(Function &fn);
+    Liveness(Function &fn, bool isInGenBackend = false);
     ~Liveness(void);
     /*! Set of variables used upwards in the block (before a definition) */
     typedef set<Register> UEVar;
@@ -116,6 +116,13 @@ namespace ir {
         }
       }
     }
+
+    // remove some registers from the liveness information.
+    void removeRegs(const set<Register> &removes);
+
+    // replace some registers according to (from, to) register map.
+    void replaceRegs(const map<Register, Register> &replaceMap);
+
   private:
     /*! Store the liveness of all blocks */
     Info liveness;

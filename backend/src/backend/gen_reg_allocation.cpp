@@ -35,6 +35,7 @@
 #include <iomanip>
 
 
+#define HALF_REGISTER_FILE_OFFSET (32*64)
 namespace gbe
 {
   /////////////////////////////////////////////////////////////////////////////
@@ -48,47 +49,22 @@ namespace gbe
    */
   struct GenRegInterval {
     INLINE GenRegInterval(ir::Register reg) :
-      reg(reg), minID(INT_MAX), maxID(-INT_MAX) {}
+      reg(reg), minID(INT_MAX), maxID(-INT_MAX), accessCount(0),
+      conflictReg(0), b3OpAlign(0) {}
     ir::Register reg;     //!< (virtual) register of the interval
     int32_t minID, maxID; //!< Starting and ending points
+    int32_t accessCount;
+    ir::Register conflictReg; // < has banck conflict with this register
+    bool b3OpAlign;
   };
 
-  typedef struct GenRegIntervalKey {
-    GenRegIntervalKey(uint32_t reg, int32_t maxID) {
-      key = ((uint64_t)maxID << 32) | reg;
-    }
-    const ir::Register getReg() const {
-      return (ir::Register)(key & 0xFFFFFFFF);
-    }
-    int32_t getMaxID() const {
-      return key >> 32;
-    }
-    uint64_t key;
-  } GenRegIntervalKey;
-
-  struct spillCmp {
-    bool operator () (const GenRegIntervalKey &lhs, const GenRegIntervalKey &rhs) const
-    { return lhs.key > rhs.key; }
+  struct SpillInterval {
+    SpillInterval(const ir::Register r, float c):
+      reg(r), cost(c) {}
+    ir::Register reg;
+    float cost;
   };
-
-  typedef set <GenRegIntervalKey, spillCmp> SpillSet;
-
-  class SpillCandidateSet : public SpillSet
-  {
-  public:
-    std::set<GenRegIntervalKey, spillCmp>::iterator find(GenRegInterval interval) {
-      GenRegIntervalKey key(interval.reg, interval.maxID);
-      return SpillSet::find(key);
-    }
-    void insert(GenRegInterval interval) {
-      GenRegIntervalKey key(interval.reg, interval.maxID);
-      SpillSet::insert(key);
-    }
-    void erase(GenRegInterval interval) {
-      GenRegIntervalKey key(interval.reg, interval.maxID);
-      SpillSet::erase(key);
-    }
-  };
+  typedef std::vector<SpillInterval>::iterator SpillIntervalIter;
 
   /*! Implements the register allocation */
   class GenRegAllocator::Opaque
@@ -102,6 +78,9 @@ namespace gbe
     bool allocate(Selection &selection);
     /*! Return the Gen register from the selection register */
     GenRegister genReg(const GenRegister &reg);
+    INLINE bool isAllocated(const ir::Register &reg) {
+      return RA.contains(reg);
+    }
     /*! Output the register allocation */
     void outputAllocation(void);
     INLINE void getRegAttrib(ir::Register reg, uint32_t &regSize, ir::RegisterFamily *regFamily = NULL) const {
@@ -125,6 +104,9 @@ namespace gbe
     bool expireFlag(const GenRegInterval &limit);
     /*! Allocate the virtual boolean (== flags) registers */
     void allocateFlags(Selection &selection);
+    /*! calculate the spill cost, what we store here is 'use count',
+     * we use [use count]/[live range] as spill cost */
+    void calculateSpillCost(Selection &selection);
     /*! validated flags which contains valid value in the physical flag register */
     set<uint32_t> validatedFlags;
     /*! validated temp flag register which indicate the flag 0,1 contains which virtual flag register. */
@@ -133,8 +115,8 @@ namespace gbe
     void validateFlag(Selection &selection, SelectionInstruction &insn);
     /*! Allocate the GRF registers */
     bool allocateGRFs(Selection &selection);
-    /*! Create gen registers for all preallocated curbe registers. */
-    void allocatePayloadRegs(void);
+    /*! Create gen registers for all preallocated special registers. */
+    void allocateSpecialRegs(void);
     /*! Create a Gen register from a register set in the payload */
     void allocatePayloadReg(ir::Register, uint32_t offset, uint32_t subOffset = 0);
     /*! Create the intervals for each register */
@@ -175,7 +157,9 @@ namespace gbe
     /*! registers that are spilled */
     SpilledRegs spilledRegs;
     /*! register which could be spilled.*/
-    SpillCandidateSet spillCandidate;
+    std::set<GenRegInterval*> spillCandidate;
+    /*! BBs last instruction ID map */
+    map<const ir::BasicBlock *, int32_t> bbLastInsnIDMap;
     /* reserved registers for register spill/reload */
     uint32_t reservedReg;
     /*! Current vector to expire */
@@ -183,11 +167,14 @@ namespace gbe
     INLINE void insertNewReg(const Selection &selection, ir::Register reg, uint32_t grfOffset, bool isVector = false);
     INLINE bool expireReg(ir::Register reg);
     INLINE bool spillAtInterval(GenRegInterval interval, int size, uint32_t alignment);
+    INLINE bool findNextSpillCandidate(std::vector<SpillInterval> &candidate,
+                int &remainSize, int &offset, SpillIntervalIter &nextCand);
     INLINE uint32_t allocateReg(GenRegInterval interval, uint32_t size, uint32_t alignment);
     INLINE bool spillReg(GenRegInterval interval, bool isAllocated = false);
     INLINE bool spillReg(ir::Register reg, bool isAllocated = false);
     INLINE bool vectorCanSpill(SelectionVector *vector);
-    INLINE void allocateScratchForSpilled();
+    INLINE bool allocateScratchForSpilled();
+    void allocateCurbePayload(void);
 
     /*! replace specified source/dst register with temporary register and update interval */
     INLINE ir::Register replaceReg(Selection &sel, SelectionInstruction *insn,
@@ -196,11 +183,13 @@ namespace gbe
       ir::Register reg;
       if (isSrc) {
         reg = sel.replaceSrc(insn, regID, type, needMov);
+        assert(reg == intervals.size());
         intervals.push_back(reg);
         intervals[reg].minID = insn->ID - 1;
         intervals[reg].maxID = insn->ID;
       } else {
         reg = sel.replaceDst(insn, regID, type, needMov);
+        assert(reg == intervals.size());
         intervals.push_back(reg);
         intervals[reg].minID = insn->ID;
         intervals[reg].maxID = insn->ID + 1;
@@ -208,6 +197,7 @@ namespace gbe
       return reg;
     }
     /*! Use custom allocator */
+    friend GenRegAllocator;
     GBE_CLASS(Opaque);
   };
 
@@ -223,12 +213,12 @@ namespace gbe
     assert(offset >= GEN_REG_SIZE);
     offset += subOffset;
     RA.insert(std::make_pair(reg, offset));
-    GBE_ASSERT(reg != ocl::blockip || (offset % GEN_REG_SIZE == 0));
-    this->intervals[reg].minID = 0;
-    this->intervals[reg].maxID = 0;
+    //GBE_ASSERT(reg != ocl::blockip || (offset % GEN_REG_SIZE == 0));
+    //this->intervals[reg].minID = 0;
+    //this->intervals[reg].maxID = 0;
   }
 
-  INLINE void GenRegAllocator::Opaque::allocatePayloadRegs(void) {
+  INLINE void GenRegAllocator::Opaque::allocateSpecialRegs(void) {
     using namespace ir;
     for(auto &it : this->ctx.curbeRegs)
       allocatePayloadReg(it.first, it.second);
@@ -240,13 +230,51 @@ namespace gbe
     for (auto rit = pushMap.rbegin(); rit != pushMap.rend(); ++rit) {
       const uint32_t argID = rit->second.argID;
       const FunctionArgument arg = fn.getArg(argID);
-
       const uint32_t subOffset = rit->second.offset;
       const Register reg = rit->second.getRegister();
+
+      if (intervals[reg].maxID == - INT_MAX)
+        continue;
       auto it = this->ctx.curbeRegs.find(arg.reg);
       assert(it != ctx.curbeRegs.end());
       allocatePayloadReg(reg, it->second, subOffset);
       ctx.splitBlock(it->second, subOffset);
+    }
+
+    // Group and barrier IDs are always allocated by the hardware in r0
+    RA.insert(std::make_pair(ocl::groupid0,  1*sizeof(float))); // r0.1
+    RA.insert(std::make_pair(ocl::groupid1,  6*sizeof(float))); // r0.6
+    RA.insert(std::make_pair(ocl::groupid2,  7*sizeof(float))); // r0.7
+    RA.insert(std::make_pair(ocl::barrierid, 2*sizeof(float))); // r0.2
+  }
+
+  template <bool sortStartingPoint>
+  inline bool cmp(const GenRegInterval *i0, const GenRegInterval *i1) {
+    if (sortStartingPoint) {
+      if (i0->minID == i1->minID)
+        return (i0->maxID < i1->maxID);
+      return i0->minID < i1->minID;
+    } else {
+      if (i0->maxID == i1->maxID)
+        return (i0->minID < i1->minID);
+      return i0->maxID < i1->maxID;
+    }
+  }
+
+  void GenRegAllocator::Opaque::allocateCurbePayload(void) {
+    vector <GenRegInterval *> payloadInterval;
+    for (auto interval : starting) {
+      if (!ctx.isPayloadReg(interval->reg))
+        continue;
+      if (interval->minID > 0)
+        break;
+      payloadInterval.push_back(interval);
+    }
+    std::sort(payloadInterval.begin(), payloadInterval.end(), cmp<false>);
+    for(auto interval : payloadInterval) {
+      if (interval->maxID < 0)
+        continue;
+      ctx.allocCurbeReg(interval->reg);
     }
   }
 
@@ -300,12 +328,13 @@ namespace gbe
       // case 1: the register is not already in a vector, so it can stay in this
       // vector. Note that local IDs are *non-scalar* special registers but will
       // require a MOV anyway since pre-allocated in the CURBE
-      // If an element has very long interval, we don't want to put it into a
-      // vector as it will add more pressure to the register allocation.
+      // for dst SelectionVector, we can always try to allocate them even under
+      // spilling, reason is that its components can be expired separately, so,
+      // it does not introduce too much register pressure.
       if (it == vectorMap.end() &&
           ctx.sel->isScalarReg(reg) == false &&
           ctx.isSpecialReg(reg) == false &&
-          (intervals[reg].maxID - intervals[reg].minID) < 2048)
+          (ctx.reservedSpillRegs == 0 || !vector->isSrc) )
       {
         const VectorLocation location = std::make_pair(vector, regID);
         this->vectorMap.insert(std::make_pair(reg, location));
@@ -327,7 +356,7 @@ namespace gbe
   }
 
   /*! Will sort vector in decreasing order */
-  inline bool cmp(const SelectionVector *v0, const SelectionVector *v1) {
+  inline bool cmpVec(const SelectionVector *v0, const SelectionVector *v1) {
     return v0->regNum > v1->regNum;
   }
 
@@ -344,7 +373,7 @@ namespace gbe
 
     // Heuristic (really simple...): sort them by the number of registers they
     // contain
-    std::sort(this->vectors.begin(), this->vectors.end(), cmp);
+    std::sort(this->vectors.begin(), this->vectors.end(), cmpVec);
 
     // Insert MOVs when this is required
     for (vectorID = 0; vectorID < vectorNum; ++vectorID) {
@@ -352,19 +381,6 @@ namespace gbe
       if (this->isAllocated(vector))
         continue;
       this->coalesce(selection, vector);
-    }
-  }
-
-  template <bool sortStartingPoint>
-  inline bool cmp(const GenRegInterval *i0, const GenRegInterval *i1) {
-    if (sortStartingPoint) {
-      if (i0->minID == i1->minID)
-        return (i0->maxID < i1->maxID);
-      return i0->minID < i1->minID;
-    } else {
-      if (i0->maxID == i1->maxID)
-        return (i0->minID < i1->minID);
-      return i0->maxID < i1->maxID;
     }
   }
 
@@ -475,6 +491,7 @@ namespace gbe
     // policy is to spill the allocate flag which live to the last time end point.
 
     // we have three flags we use for booleans f0.0 , f1.0 and f1.1
+    set<const ir::BasicBlock *> liveInSet01;
     for (auto &block : *selection.blockList) {
       // Store the registers allocated in the map
       map<ir::Register, uint32_t> allocatedFlags;
@@ -644,6 +661,7 @@ namespace gbe
             sel0->src(0) = GenRegister::uw1grf(ir::ocl::one);
             sel0->src(1) = GenRegister::uw1grf(ir::ocl::zero);
             sel0->dst(0) = GET_FLAG_REG(insn);
+            liveInSet01.insert(insn.parent->bb);
             insn.append(*sel0);
             // We use the zero one after the liveness analysis, we have to update
             // the liveness data manually here.
@@ -662,6 +680,30 @@ namespace gbe
         }
       }
     }
+
+    // As we introduce two global variables zero and one, we have to
+    // recompute its liveness information here!
+    if (liveInSet01.size()) {
+      set<const ir::BasicBlock *> liveOutSet01;
+      set<const ir::BasicBlock *> workSet(liveInSet01.begin(), liveInSet01.end());
+      while(workSet.size()) {
+        for (auto bb = workSet.begin(); bb != workSet.end(); ) {
+          for(auto predBB : (*bb)->getPredecessorSet()) {
+            liveOutSet01.insert(predBB);
+            if (liveInSet01.find(predBB) != liveInSet01.end())
+              continue;
+            liveInSet01.insert(predBB);
+            workSet.insert(predBB);
+          }
+          bb = workSet.erase(bb);
+        }
+      }
+      int32_t maxID = 0;
+      for(auto bb : liveOutSet01)
+        maxID = std::max(maxID, bbLastInsnIDMap.find(bb)->second);
+      intervals[ir::ocl::zero].maxID = std::max(intervals[ir::ocl::zero].maxID, maxID);
+      intervals[ir::ocl::one].maxID = std::max(intervals[ir::ocl::one].maxID, maxID);
+    }
   }
 
   IVAR(OCL_SIMD16_SPILL_THRESHOLD, 0, 16, 256);
@@ -672,11 +714,11 @@ namespace gbe
     for (uint32_t startID = 0; startID < regNum; ++startID) {
       const GenRegInterval &interval = *this->starting[startID];
       const ir::Register reg = interval.reg;
+
       if (interval.maxID == -INT_MAX)
         continue; // Unused register
       if (RA.contains(reg))
         continue; // already allocated
-
       if (flagBooleans.contains(reg))
         continue;
 
@@ -732,7 +774,10 @@ namespace gbe
           return false;
         }
       }
-      allocateScratchForSpilled();
+      if (!allocateScratchForSpilled()) {
+        ctx.errCode = REGISTER_SPILL_NO_SPACE;
+        return false;
+      }
       bool success = selection.spillRegs(spilledRegs, reservedReg);
       if (!success) {
         ctx.errCode = REGISTER_SPILL_FAIL;
@@ -743,7 +788,7 @@ namespace gbe
     return true;
   }
 
-  INLINE void GenRegAllocator::Opaque::allocateScratchForSpilled()
+  INLINE bool GenRegAllocator::Opaque::allocateScratchForSpilled()
   {
     const uint32_t regNum = spilledRegs.size();
     this->starting.resize(regNum);
@@ -777,7 +822,10 @@ namespace gbe
       ir::RegisterFamily family = ctx.sel->getRegisterFamily(cur->reg);
       it->second.addr = ctx.allocateScratchMem(getFamilySize(family)
                                              * ctx.getSimdWidth());
-      }
+      if (it->second.addr == -1)
+        return false;
+    }
+    return true;
   }
 
   INLINE bool GenRegAllocator::Opaque::expireReg(ir::Register reg)
@@ -792,8 +840,8 @@ namespace gbe
 
     ctx.deallocate(it->second);
     if (reservedReg != 0
-        && (spillCandidate.find(intervals[reg]) != spillCandidate.end())) {
-        spillCandidate.erase(intervals[reg]);
+        && (spillCandidate.find(&intervals[reg]) != spillCandidate.end())) {
+        spillCandidate.erase(&intervals[reg]);
         /* offset --> reg map should keep updated. */
         offsetReg.erase(it->second);
     }
@@ -826,7 +874,7 @@ namespace gbe
           && !selection.isPartialWrite(reg)) {
          GBE_ASSERT(offsetReg.find(grfOffset) == offsetReg.end());
          offsetReg.insert(std::make_pair(grfOffset, reg));
-         spillCandidate.insert(intervals[reg]);
+         spillCandidate.insert(&intervals[reg]);
        }
      }
   }
@@ -871,10 +919,70 @@ namespace gbe
   // FIXME we may need to fix those unspillable vector in the furture.
   INLINE bool GenRegAllocator::Opaque::vectorCanSpill(SelectionVector *vector) {
     for(uint32_t id = 0; id < vector->regNum; id++)
-      if (spillCandidate.find(intervals[(ir::Register)(vector->reg[id].value.reg)])
+      if (spillCandidate.find(&intervals[(ir::Register)(vector->reg[id].value.reg)])
           == spillCandidate.end())
         return false;
     return true;
+  }
+
+  INLINE float getSpillCost(const GenRegInterval &v) {
+    // check minID maxId value
+    assert(v.maxID >= v.minID);
+    if (v.maxID == v.minID)
+      return 1.0f;
+    // FIXME some register may get access count of 0, need to be fixed.
+    float count = v.accessCount == 0 ? (float)2 : (float)v.accessCount;
+    return count / (float)(v.maxID - v.minID);
+  }
+
+  bool spillinterval_cmp(const SpillInterval &v1, const SpillInterval &v2) {
+    return v1.cost < v2.cost;
+  }
+
+  INLINE SpillIntervalIter findRegisterInSpillQueue(
+                           std::vector<SpillInterval> &cand, ir::Register reg) {
+    for (SpillIntervalIter it = cand.begin(); it != cand.end(); ++it) {
+      if (it->reg == reg)
+        return it;
+    }
+    return cand.end();
+  }
+  // The function tries to search in 'free physical register' and 'candidate'.
+  // so, the result may be on of the three possible situations:
+  // 1. search completed, find the next valid iterator to a candidate.
+  // 2. search ended, because we met unspillable register, we have to drop the iteration
+  // 3. search completed, there are enough free physical register.
+  //
+  // return value: should we break? because of:
+  // 1. search end, found enough free register
+  // 2. search end, because met unspillable register
+  INLINE bool GenRegAllocator::Opaque::findNextSpillCandidate(
+              std::vector<SpillInterval> &candidate, int &remainSize,
+              int &offset, SpillIntervalIter &nextCand) {
+    bool isFree = false;
+    bool shouldBreak = false;
+    do {
+      // check is free?
+      isFree = ctx.isSuperRegisterFree(offset);
+
+      if (isFree) {
+        remainSize -= GEN_REG_SIZE;
+        offset += GEN_REG_SIZE;
+      }
+    } while(isFree && remainSize > 0);
+
+    // done
+    if (remainSize <= 0) return true;
+
+    auto registerIter = offsetReg.find(offset);
+    shouldBreak = registerIter == offsetReg.end();
+
+    if (!shouldBreak) {
+      ir::Register reg = registerIter->second;
+      nextCand = findRegisterInSpillQueue(candidate, reg);
+    }
+    // if shouldBreak is false, means we need go on
+    return shouldBreak;
   }
 
   INLINE bool GenRegAllocator::Opaque::spillAtInterval(GenRegInterval interval,
@@ -882,88 +990,128 @@ namespace gbe
                                                        uint32_t alignment) {
     if (reservedReg == 0)
       return false;
-    auto it = spillCandidate.begin();
-    // If there is no spill candidate or current register is spillable and current register's
-    // endpoint is after all the spillCandidate register's endpoint we return false. The
-    // caller will spill current register.
-    // At simd16 mode, we will always try to spill here rather than return to the caller.
-    // The reason is that the caller may have a vector to allocate, and some element may be
-    // temporary registers which could not be spilled.
-    if (it == spillCandidate.end()
-        || (ctx.getSimdWidth() == 8 && (it->getMaxID() <= interval.maxID
-            && alignment == ctx.getSimdWidth()/8 * GEN_REG_SIZE)))
+
+    if (spillCandidate.empty())
       return false;
 
-    ir::Register reg = it->getReg();
-    set<ir::Register> spillSet;
-    int32_t savedSize = size;
-    while(size > 0) {
-      auto vectorIt = vectorMap.find(reg);
-      bool isVector = vectorIt != vectorMap.end();
-      bool needRestart = false;
-      ir::RegisterFamily family = ctx.sel->getRegisterFamily(reg);
-      if (isVector
-          && (vectorCanSpill(vectorIt->second.first))) {
-        const SelectionVector *vector = vectorIt->second.first;
-        for (uint32_t id = 0; id < vector->regNum; id++) {
-          GBE_ASSERT(spilledRegs.find(vector->reg[id].reg())
-                     == spilledRegs.end());
-          spillSet.insert(vector->reg[id].reg());
-          reg = vector->reg[id].reg();
-          family = ctx.sel->getRegisterFamily(reg);
-          size -= family == ir::FAMILY_QWORD ? 2 * GEN_REG_SIZE * ctx.getSimdWidth()/8
-                                             : GEN_REG_SIZE * ctx.getSimdWidth()/8;
+    // push spill candidate into a vector in ascending order of spill-cost.
+    std::vector<SpillInterval> candQ;
+    for (auto &p : spillCandidate) {
+      float cost = getSpillCost(*p);
+      candQ.push_back(SpillInterval(p->reg, cost));
+    }
+    std::sort(candQ.begin(), candQ.end(), spillinterval_cmp);
+
+    bool scalarAllocationFail = (vectorMap.find(interval.reg) == vectorMap.end());
+
+    int remainSize = size;
+    float spillCostTotal = 0.0f;
+    std::set<ir::Register> spillSet;
+    // if we search the whole register, it will take lots of time.
+    // so, I just add this max value to make the compile time not
+    // grow too much, although this method may not find truely lowest
+    // spill cost candidates.
+    const int spillGroupMax = 8;
+    int spillGroupID = 0;
+
+    std::vector<std::set<ir::Register>> spillGroups;
+    std::vector<float> spillGroupCost;
+
+    auto searchBegin = candQ.begin();
+    while (searchBegin != candQ.end() && spillGroupID < spillGroupMax) {
+      auto contiguousIter = searchBegin;
+
+      while (contiguousIter != candQ.end()) {
+        ir::Register reg = contiguousIter->reg;
+
+        auto vectorIt = vectorMap.find(reg);
+        bool spillVector = (vectorIt != vectorMap.end());
+        int32_t nextOffset = -1;
+
+        // is register allocation failed at scalar register?
+        // if so, don't try to spill a vector register,
+        // which is obviously of no benefit.
+        if (scalarAllocationFail && spillVector) break;
+
+        if (spillVector) {
+          if (vectorCanSpill(vectorIt->second.first)) {
+            const SelectionVector *vector = vectorIt->second.first;
+            for (uint32_t id = 0; id < vector->regNum; id++) {
+              GBE_ASSERT(spilledRegs.find(vector->reg[id].reg())
+                         == spilledRegs.end());
+              spillSet.insert(vector->reg[id].reg());
+              reg = vector->reg[id].reg();
+              uint32_t s;
+              getRegAttrib(reg, s);
+              remainSize-= s;
+              spillCostTotal += contiguousIter->cost;
+            }
+          } else {
+            break;
+          }
+        } else {
+          spillSet.insert(reg);
+          uint32_t s;
+          getRegAttrib(reg, s);
+          spillCostTotal += contiguousIter->cost;
+          remainSize -= s;
         }
-      } else if (!isVector) {
-        spillSet.insert(reg);
-        size -= family == ir::FAMILY_QWORD ? 2 * GEN_REG_SIZE * ctx.getSimdWidth()/8
-                                           : GEN_REG_SIZE * ctx.getSimdWidth()/8;
-      } else
-        needRestart = true; // is a vector which could not be spilled.
-
-      if (size <= 0)
-        break;
-      if (!needRestart) {
-        uint32_t offset = RA.find(reg)->second;
-        uint32_t nextOffset = (family == ir::FAMILY_QWORD) ? (offset + 2 * GEN_REG_SIZE * ctx.getSimdWidth() / 8)
-                                                           : (offset + GEN_REG_SIZE * ctx.getSimdWidth() / 8);
-        auto nextRegIt = offsetReg.find(nextOffset);
-        if (nextRegIt != offsetReg.end())
-          reg = nextRegIt->second;
-        else
-          needRestart = true;
-      }
-
-      if (needRestart) {
-#if 0
-        // FIXME, we should enable this code block in the future.
-        // If the spill set is not zero and we need a restart, we can
-        // simply return to try to allocate the registers at first.
-        // As some vectors which have expired elements may be marked as
-        // unspillable vector.
-        if (spillSet.size() > 0)
+        if (remainSize <= 0)
           break;
-#endif
-        it++;
-        // next register is not in spill candidate.
-        // let's move to next candidate and start over.
-        if (it == spillCandidate.end())
-          return false;
-        reg = it->getReg();
-        size = savedSize;
-        spillSet.clear();
+
+        uint32_t offset = RA.find(reg)->second;
+        uint32_t s; getRegAttrib(reg, s);
+        nextOffset = offset + s;
+
+        SpillIntervalIter nextValid = candQ.end();
+
+        bool shouldBreak = findNextSpillCandidate(candQ, remainSize, nextOffset,
+                                                  nextValid);
+        contiguousIter = nextValid;
+        if (shouldBreak)
+          break;
       }
+
+      if (remainSize <= 0) {
+        if (scalarAllocationFail) {
+          // Done
+          break;
+        } else {
+          // Add as one spillGroup
+          spillGroups.push_back(spillSet);
+          spillGroupCost.push_back(spillCostTotal);
+          ++spillGroupID;
+        }
+      }
+
+      ++searchBegin;
+      // restore states
+      remainSize = size;
+      spillCostTotal = 0.0f;
+      spillSet.clear();
+    }
+    // failed to spill
+    if (scalarAllocationFail && remainSize > 0) return false;
+    if (!scalarAllocationFail && spillGroups.size() == 0) return false;
+
+    if (!scalarAllocationFail) {
+      // push min spillcost group into spillSet
+      int minIndex = std::distance(spillGroupCost.begin(),
+                                   std::min_element(spillGroupCost.begin(),
+                                                    spillGroupCost.end()));
+      spillSet.swap(spillGroups[minIndex]);
     }
 
-    for(auto spillreg : spillSet)
+    for(auto spillreg : spillSet) {
       spillReg(spillreg, true);
+    }
     return true;
   }
 
   INLINE uint32_t GenRegAllocator::Opaque::allocateReg(GenRegInterval interval,
                                                        uint32_t size,
                                                        uint32_t alignment) {
-    uint32_t grfOffset;
+    int32_t grfOffset;
     // Doing expireGRF too freqently will cause the post register allocation
     // scheduling very hard. As it will cause a very high register conflict rate.
     // The tradeoff here is to reduce the freqency here. And if we are under spilling
@@ -976,7 +1124,20 @@ namespace gbe
     // and the source is a scalar Dword. If that is the case, the byte register
     // must get 4byte alignment register offset.
     alignment = (alignment + 3) & ~3;
-    while ((grfOffset = ctx.allocate(size, alignment)) == 0) {
+
+    bool direction = true;
+    if (interval.conflictReg != 0) {
+      // try to allocate conflict registers in top/bottom half.
+      if (RA.contains(interval.conflictReg)) {
+        if (RA.find(interval.conflictReg)->second < HALF_REGISTER_FILE_OFFSET) {
+          direction = false;
+        }
+      }
+    }
+    if (interval.b3OpAlign != 0) {
+      alignment = (alignment + 15) & ~15;
+    }
+    while ((grfOffset = ctx.allocate(size, alignment, direction)) == -1) {
       const bool success = this->expireGRF(interval);
       if (success == false) {
         if (spillAtInterval(interval, size, alignment) == false)
@@ -986,30 +1147,65 @@ namespace gbe
     return grfOffset;
   }
 
+  int UseCountApproximate(int loopDepth) {
+    int ret = 1;
+    for (int i = 0; i < loopDepth; i++) {
+      ret = ret * 10;
+    }
+    return ret;
+  }
+
+  void GenRegAllocator::Opaque::calculateSpillCost(Selection &selection) {
+    int BlockIndex = 0;
+    for (auto &block : *selection.blockList) {
+      int LoopDepth = ctx.fn.getLoopDepth(ir::LabelIndex(BlockIndex));
+      for (auto &insn : block.insnList) {
+        const uint32_t srcNum = insn.srcNum, dstNum = insn.dstNum;
+        for (uint32_t srcID = 0; srcID < srcNum; ++srcID) {
+          const GenRegister &selReg = insn.src(srcID);
+          const ir::Register reg = selReg.reg();
+          if (selReg.file == GEN_GENERAL_REGISTER_FILE)
+            this->intervals[reg].accessCount += UseCountApproximate(LoopDepth);
+        }
+        for (uint32_t dstID = 0; dstID < dstNum; ++dstID) {
+          const GenRegister &selReg = insn.dst(dstID);
+          const ir::Register reg = selReg.reg();
+          if (selReg.file == GEN_GENERAL_REGISTER_FILE)
+            this->intervals[reg].accessCount += UseCountApproximate(LoopDepth);
+        }
+      }
+      BlockIndex++;
+    }
+  }
+
   INLINE bool GenRegAllocator::Opaque::allocate(Selection &selection) {
     using namespace ir;
+    const Function::PushMap &pushMap = ctx.fn.getPushMap();
+
     if (ctx.reservedSpillRegs != 0) {
-      reservedReg = ctx.allocate(ctx.reservedSpillRegs * GEN_REG_SIZE, GEN_REG_SIZE);
+      reservedReg = ctx.allocate(ctx.reservedSpillRegs * GEN_REG_SIZE, GEN_REG_SIZE, false);
       reservedReg /= GEN_REG_SIZE;
     } else {
       reservedReg = 0;
     }
-    // schedulePreRegAllocation(ctx, selection);
 
     // Now start the linear scan allocation
-    for (uint32_t regID = 0; regID < ctx.sel->getRegNum(); ++regID)
+    for (uint32_t regID = 0; regID < ctx.sel->getRegNum(); ++regID) {
       this->intervals.push_back(ir::Register(regID));
+      // Set all payload register's liveness minID to 0.
+      gbe_curbe_type curbeType;
+      int subType;
+      ctx.getRegPayloadType(ir::Register(regID), curbeType, subType);
+      if (curbeType != GBE_GEN_REG) {
+        intervals[regID].minID = 0;
 
-    // Allocate the special registers (only those which are actually used)
-    this->allocatePayloadRegs();
-
-    // Group and barrier IDs are always allocated by the hardware in r0
-    RA.insert(std::make_pair(ocl::groupid0,  1*sizeof(float))); // r0.1
-    RA.insert(std::make_pair(ocl::groupid1,  6*sizeof(float))); // r0.6
-    RA.insert(std::make_pair(ocl::groupid2,  7*sizeof(float))); // r0.7
-    RA.insert(std::make_pair(ocl::barrierid, 2*sizeof(float))); // r0.2
-
-    // block IP used to handle the mask in SW is always allocated
+        // FIXME stack buffer is not used, we may need to remove it in the furture.
+        if (curbeType == GBE_CURBE_EXTRA_ARGUMENT && subType == GBE_STACK_BUFFER)
+          intervals[regID].maxID = 1;
+      }
+      if (regID == ir::ocl::zero.value() || regID ==  ir::ocl::one.value())
+        intervals[regID].minID = 0;
+    }
 
     // Compute the intervals
     int32_t insnID = 0;
@@ -1024,6 +1220,7 @@ namespace gbe
       for (auto &insn : block.insnList) {
         const uint32_t srcNum = insn.srcNum, dstNum = insn.dstNum;
         insn.ID  = insnID;
+        bool is3SrcOp = insn.opcode == SEL_OP_MAD;
         for (uint32_t srcID = 0; srcID < srcNum; ++srcID) {
           const GenRegister &selReg = insn.src(srcID);
           const ir::Register reg = selReg.reg();
@@ -1033,6 +1230,20 @@ namespace gbe
               reg == ir::ocl::groupid1  ||
               reg == ir::ocl::groupid2)
             continue;
+          ir::Register conflictReg = ir::Register(0);
+          if (is3SrcOp) {
+            if (srcID == 1)
+              conflictReg = insn.src(2).reg();
+            else if (srcID == 2)
+              conflictReg = insn.src(1).reg();
+          }
+          // we only let it conflict with one register, and with smaller reg number,
+          // as smaller virtual register usually comes first,
+          // and linear scan allocator allocate from smaller to larger register
+          // so, conflict with larger register number will not make any effect.
+          if (this->intervals[reg].conflictReg == 0 ||
+              this->intervals[reg].conflictReg > conflictReg)
+          this->intervals[reg].conflictReg = conflictReg;
           this->intervals[reg].minID = std::min(this->intervals[reg].minID, insnID);
           this->intervals[reg].maxID = std::max(this->intervals[reg].maxID, insnID);
         }
@@ -1045,6 +1256,9 @@ namespace gbe
               reg == ir::ocl::groupid1 ||
               reg == ir::ocl::groupid2)
             continue;
+          if (is3SrcOp) {
+              this->intervals[reg].b3OpAlign = 1;
+          }
           this->intervals[reg].minID = std::min(this->intervals[reg].minID, insnID);
           this->intervals[reg].maxID = std::max(this->intervals[reg].maxID, insnID);
         }
@@ -1094,6 +1308,7 @@ namespace gbe
 
       // All registers alive at the begining of the block must update their intervals.
       const ir::BasicBlock *bb = block.bb;
+      bbLastInsnIDMap.insert(std::make_pair(bb, lastID));
       for (auto reg : ctx.getLiveIn(bb))
         this->intervals[reg].minID = std::min(this->intervals[reg].minID, firstID);
 
@@ -1108,6 +1323,62 @@ namespace gbe
         delete boolsMap;
     }
 
+    for (auto &it : this->intervals) {
+      if (it.maxID == -INT_MAX)  continue;
+      if(pushMap.find(it.reg) != pushMap.end()) {
+        uint32_t argID = ctx.fn.getPushLocation(it.reg)->argID;
+        ir::Register argReg = ctx.fn.getArg(argID).reg;
+        intervals[argReg].maxID = std::max(intervals[argReg].maxID, 1);
+      }
+    }
+
+    if (ctx.inProfilingMode) {
+      /* If we are in profiling mode, we always need xyz dim info and timestamp curbes.
+         xyz dim info related curbe registers just live for the first INSN, but timestamp
+         curbes will live the whole execution life. */
+#define ADD_CURB_REG_FOR_PROFILING(REG_NAME, LIFE_START, LIFE_END) \
+do { \
+  bool hasIt = false; \
+  for (auto& itv : this->intervals) { \
+    if (itv.reg == REG_NAME) { \
+      hasIt = true; \
+      if (itv.minID > LIFE_START) itv.minID = LIFE_START; \
+      if (itv.maxID < LIFE_END) itv.maxID = LIFE_END; \
+      break; \
+    } \
+  } \
+  if (!hasIt) { \
+    GenRegInterval regInv(REG_NAME);  \
+    regInv.minID = LIFE_START; \
+    regInv.maxID = LIFE_END; \
+    this->intervals.push_back(regInv); \
+  } \
+} while(0)
+
+      ADD_CURB_REG_FOR_PROFILING(ocl::lsize0, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::lsize1, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::lsize2, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::goffset0, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::goffset1, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::goffset2, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::groupid0, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::groupid1, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::groupid2, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::lid0, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::lid1, 0, 1);
+      ADD_CURB_REG_FOR_PROFILING(ocl::lid2, 0, 1);
+
+      ADD_CURB_REG_FOR_PROFILING(ocl::profilingbptr, 0, INT_MAX);
+      ADD_CURB_REG_FOR_PROFILING(ocl::profilingts0, 0, INT_MAX);
+      ADD_CURB_REG_FOR_PROFILING(ocl::profilingts1, 0, INT_MAX);
+      ADD_CURB_REG_FOR_PROFILING(ocl::profilingts2, 0, INT_MAX);
+      if (ctx.simdWidth == 8) {
+        ADD_CURB_REG_FOR_PROFILING(ocl::profilingts3, 0, INT_MAX);
+        ADD_CURB_REG_FOR_PROFILING(ocl::profilingts4, 0, INT_MAX);
+      }
+    }
+#undef ADD_CURB_REG_FOR_PROFILING
+
     this->intervals[ocl::retVal].minID = INT_MAX;
     this->intervals[ocl::retVal].maxID = -INT_MAX;
 
@@ -1116,6 +1387,7 @@ namespace gbe
 
     // First we try to put all booleans registers into flags
     this->allocateFlags(selection);
+    this->calculateSpillCost(selection);
 
     // Sort both intervals in starting point and ending point increasing orders
     const uint32_t regNum = ctx.sel->getRegNum();
@@ -1135,6 +1407,12 @@ namespace gbe
       else
         break;
     }
+
+    this->allocateCurbePayload();
+    ctx.buildPatchList();
+
+    // Allocate the special registers (only those which are actually used)
+    this->allocateSpecialRegs();
 
     // Allocate all the GRFs now (regular register and boolean that are not in
     // flag registers)
@@ -1158,7 +1436,7 @@ namespace gbe
              << "  " << setw(-3) << regSize  << "B\t"
              << "[  " << setw(8) << this->intervals[(uint)vReg].minID
              << " -> " << setw(8) << this->intervals[(uint)vReg].maxID
-             << "]" << endl;
+             << "]" << setw(8) << "use count: " << this->intervals[(uint)vReg].accessCount << endl;
     }
     if (!spilledRegs.empty())
       cout << "## spilled registers: " << spilledRegs.size() << endl;
@@ -1173,7 +1451,7 @@ namespace gbe
            <<  "  " << setw(-3) << regSize << "B\t"
            << "[  " << setw(8) << this->intervals[(uint)vReg].minID
            << " -> " << setw(8) << this->intervals[(uint)vReg].maxID
-           << "]" << endl;
+           << "]" << setw(8) << "use count: " << this->intervals[(uint)vReg].accessCount << endl;
     }
     cout << endl;
   }
@@ -1225,14 +1503,33 @@ namespace gbe
     return this->opaque->genReg(reg);
   }
 
+  bool GenRegAllocator::isAllocated(const ir::Register &reg) {
+    return this->opaque->isAllocated(reg);
+  }
+
   void GenRegAllocator::outputAllocation(void) {
     this->opaque->outputAllocation();
   }
 
   uint32_t GenRegAllocator::getRegSize(ir::Register reg) {
-     uint32_t regSize; 
-     this->opaque->getRegAttrib(reg, regSize); 
-     return regSize;
+    uint32_t regSize;
+    gbe_curbe_type curbeType = GBE_GEN_REG;
+    int subType = 0;
+    this->opaque->ctx.getRegPayloadType(reg, curbeType, subType);
+    if (curbeType == GBE_CURBE_IMAGE_INFO)
+      regSize = 4;
+    else if (curbeType == GBE_CURBE_KERNEL_ARGUMENT) {
+      const ir::FunctionArgument &arg = this->opaque->ctx.getFunction().getArg(subType);
+      if (arg.type == ir::FunctionArgument::GLOBAL_POINTER ||
+          arg.type == ir::FunctionArgument::LOCAL_POINTER  ||
+          arg.type == ir::FunctionArgument::CONSTANT_POINTER)
+        regSize = this->opaque->ctx.getPointerSize();
+      else
+        regSize = arg.size;
+      GBE_ASSERT(arg.reg == reg);
+    } else
+      this->opaque->getRegAttrib(reg, regSize);
+    return regSize;
   }
 
 } /* namespace gbe */

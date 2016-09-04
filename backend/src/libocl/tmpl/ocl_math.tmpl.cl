@@ -57,7 +57,7 @@ OVERLOADABLE float native_tan(float x) {
 }
 OVERLOADABLE float native_exp2(float x) { return __gen_ocl_exp(x); }
 OVERLOADABLE float native_exp(float x) { return __gen_ocl_exp(M_LOG2E_F*x); }
-OVERLOADABLE float native_exp10(float x) { return __gen_ocl_pow(10, x); }
+OVERLOADABLE float native_exp10(float x) { return __gen_ocl_exp(M_LOG210_F*x); }
 OVERLOADABLE float native_divide(float x, float y) { return x/y; }
 
 /* Fast path */
@@ -164,7 +164,7 @@ OVERLOADABLE float __gen_ocl_internal_copysign(float x, float y) {
   return ux.f;
 }
 
-OVERLOADABLE float __gen_ocl_internal_log(float x) {
+OVERLOADABLE float inline __gen_ocl_internal_log_valid(float x) {
 /*
  *  Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com
  * ====================================================
@@ -178,192 +178,105 @@ OVERLOADABLE float __gen_ocl_internal_log(float x) {
  */
   union { unsigned int i; float f; } u;
   const float
-  ln2_hi =   6.9313812256e-01,  /* 0x3f317180 */
-  ln2_lo =   9.0580006145e-06,  /* 0x3717f7d1 */
-  two25 =    3.355443200e+07, /* 0x4c000000 */
+  ln2_hi = 6.9313812256e-01,  /* 0x3f317180 */
+  ln2_lo = 9.0580006145e-06,  /* 0x3717f7d1 */
+  two25 =  3.355443200e+07, /* 0x4c000000 */
   Lg1 = 6.6666668653e-01, /* 3F2AAAAB */
   Lg2 = 4.0000000596e-01, /* 3ECCCCCD */
   Lg3 = 2.8571429849e-01, /* 3E924925 */
-  Lg4 = 2.2222198546e-01, /* 3E638E29 */
-  Lg5 = 1.8183572590e-01, /* 3E3A3325 */
-  Lg6 = 1.5313838422e-01, /* 3E1CD04F */
-  Lg7 = 1.4798198640e-01; /* 3E178897 */
+  Lg4 = 2.2222198546e-01; /* 3E638E29 */
 
   const float zero   =  0.0;
-  float hfsq,f,s,z,R,w,t1,t2,dk;
-  int k,ix,i,j;
+  float fsq, f, s, z, R, w, t1, t2, partial;
+  int k, ix, i, j;
 
   u.f = x;  ix = u.i;
-  k=0;
-  if (ix < 0x00800000) {      /* x < 2**-126  */
-      if ((ix&0x7fffffff)==0)
-    return -two25/zero;   /* log(+-0)=-inf */
-      if (ix<0) return (x-x)/zero;  /* log(-#) = NaN */
-      return -INFINITY;  /* Gen does not support subnormal number now */
-      //k -= 25; x *= two25; /* subnormal number, scale up x */
-      //u.f = x;  ix = u.i;
-  }
-  if (ix >= 0x7f800000) return x+x;
-  k += (ix>>23)-127;
+  k = 0;
+
+  k += (ix>>23) - 127;
   ix &= 0x007fffff;
-  i = (ix+(0x95f64<<3))&0x800000;
-  u.i = ix|(i^0x3f800000); x = u.f;
+  i = (ix + (0x95f64<<3)) & 0x800000;
+  u.i = ix | (i^0x3f800000); x = u.f;
   k += (i>>23);
-  f = x-(float)1.0;
-  if((0x007fffff&(15+ix))<16) { /* |f| < 2**-20 */
-      if(f==zero) {
-        if(k==0) return zero;
-        else {
-          dk=(float)k; return dk*ln2_hi+dk*ln2_lo;
-        }
-      }
-      R = f*f*((float)0.5-(float)0.33333333333333333*f);
-      if(k==0)
-        return f-R;
-      else {
-        dk=(float)k;  return dk*ln2_hi-((R-dk*ln2_lo)-f);
-      }
+  f = x - 1.0f;
+  fsq = f * f;
+
+  if((0x007fffff & (15 + ix)) < 16) { /* |f| < 2**-20 */
+      R = fsq * (0.5f - 0.33333333333333333f * f);
+      return k * ln2_hi + k * ln2_lo + f - R;
   }
-  s = f/((float)2.0+f);
-  dk = (float)k;
-  z = s*s;
-  i = ix-(0x6147a<<3);
-  w = z*z;
-  j = (0x6b851<<3)-ix;
-  t1= w*(Lg2+w*(Lg4+w*Lg6));
-  t2= z*(Lg1+w*(Lg3+w*(Lg5+w*Lg7)));
+
+  s = f / (2.0f + f);
+  z = s * s;
+  i = ix - (0x6147a << 3);
+  w = z * z;
+  j = (0x6b851 << 3) - ix;
+  t1= w * mad(w, Lg4, Lg2);
+  t2= z * mad(w, Lg3, Lg1);
   i |= j;
-  R = t2+t1;
-  if(i>0) {
-      hfsq=(float)0.5*f*f;
-      if(k==0) return f-(hfsq-s*(hfsq+R)); else
-         return dk*ln2_hi-((hfsq-(s*(hfsq+R)+dk*ln2_lo))-f);
-  } else {
-      if(k==0) return f-s*(f-R); else
-         return dk*ln2_hi-((s*(f-R)-dk*ln2_lo)-f);
-  }
+  R = t2 + t1;
+  partial = (i > 0) ? -mad(s, 0.5f * fsq, -0.5f * fsq) : (s * f);
+
+  return mad(s, R, f) - partial + k * ln2_hi + k * ln2_lo;;
 }
 
+OVERLOADABLE float __gen_ocl_internal_log(float x)
+{
+  union { unsigned int i; float f; } u;
+  u.f = x;
+  int ix = u.i;
 
-OVERLOADABLE float __gen_ocl_internal_log10(float x) {
-/*
- *  Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com
- * ====================================================
- * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
- *
- * Developed at SunPro, a Sun Microsystems, Inc. business.
- * Permission to use, copy, modify, and distribute this
- * software is freely granted, provided that this notice
- * is preserved.
- * ====================================================
- */
-  union {float f; unsigned i; }u;
+  if (ix < 0 )
+	return NAN;  /* log(-#) = NaN */
+  if (ix >= 0x7f800000)
+    return NAN;
+
+  return __gen_ocl_internal_log_valid(x);
+}
+
+OVERLOADABLE float __gen_ocl_internal_log10(float x)
+{
+  union { float f; unsigned i; } u;
   const float
-  zero       = 0.0,
-  two25      =  3.3554432000e+07, /* 0x4c000000 */
   ivln10     =  4.3429449201e-01, /* 0x3ede5bd9 */
   log10_2hi  =  3.0102920532e-01, /* 0x3e9a2080 */
   log10_2lo  =  7.9034151668e-07; /* 0x355427db */
 
-  float y,z;
-  int i,k,hx;
+  float y, z;
+  int i, k, hx;
 
   u.f = x; hx = u.i;
-  k=0;
-  if (hx < 0x00800000) {                  /* x < 2**-126  */
-    if ((hx&0x7fffffff)==0)
-      return -two25/zero;             /* log(+-0)=-inf */
-    if (hx<0) return NAN;        /* log(-#) = NaN */
-    return -INFINITY;      /* Gen does not support subnormal now */
-    //k -= 25; x *= two25; /* subnormal number, scale up x */
-    //u.f = x; hx = u.i;
-  }
-  if (hx >= 0x7f800000) return x+x;
-  k += (hx>>23)-127;
-  i  = ((unsigned)k&0x80000000)>>31;
-  hx = (hx&0x007fffff)|((0x7f-i)<<23);
-  y  = (float)(k+i);
+
+  if (hx<0)
+    return NAN; /* log(-#) = NaN */
+  if (hx >= 0x7f800000)
+    return NAN;
+
+  k = (hx >> 23) - 127;
+  i  = ((unsigned)k & 0x80000000) >> 31;
+  hx = (hx&0x007fffff) | ((0x7f-i) << 23);
+  y  = (float)(k + i);
   u.i = hx; x = u.f;
-  z  = y*log10_2lo + ivln10*__gen_ocl_internal_log(x);
-  return  z+y*log10_2hi;
+
+  return  y * log10_2lo + y * log10_2hi + ivln10 * __gen_ocl_internal_log_valid(x);
 }
 
 
-OVERLOADABLE float __gen_ocl_internal_log2(float x) {
-/*
- *  Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com
- *  adapted for log2 by Ulrich Drepper <drepper@cygnus.com>
- * ====================================================
- * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
- *
- * Developed at SunPro, a Sun Microsystems, Inc. business.
- * Permission to use, copy, modify, and distribute this
- * software is freely granted, provided that this notice
- * is preserved.
- * ====================================================
- */
+OVERLOADABLE float __gen_ocl_internal_log2(float x)
+{
   const float zero   =  0.0,
-  ln2 = 0.69314718055994530942,
-  two25 =    3.355443200e+07, /** 0x4c000000 */
-  Lg1 = 6.6666668653e-01, /** 3F2AAAAB */
-  Lg2 = 4.0000000596e-01, /** 3ECCCCCD */
-  Lg3 = 2.8571429849e-01, /** 3E924925 */
-  Lg4 = 2.2222198546e-01, /** 3E638E29 */
-  Lg5 = 1.8183572590e-01, /** 3E3A3325 */
-  Lg6 = 1.5313838422e-01, /** 3E1CD04F */
-  Lg7 = 1.4798198640e-01; /** 3E178897 */
+  invln2 = 0x1.715476p+0f;
+  int ix;
 
-  float hfsq,f,s,z,R,w,t1,t2,dk;
-  int k,ix,i,j;
-
-  union {float f; int i; }u;//GET_FLOAT_WORD(ix,x);
+  union { float f; int i; } u;
   u.f = x; ix = u.i;
 
-  k=0;
-  if (ix < 0x00800000) {           /** x < 2**-126  */
-      if ((ix&0x7fffffff)==0)
-      return -two25/(x-x);        /** log(+-0)=-inf */
+  if (ix < 0)
+	return NAN;    /** log(-#) = NaN */
+  if (ix >= 0x7f800000)
+	return NAN;
 
-      if (ix<0) return (x-x)/(x-x);    /** log(-#) = NaN */
-      return -INFINITY;
-      k -= 25; x *= two25; /** subnormal number, scale up x */
-      u.f = x; ix = u.i; //GET_FLOAT_WORD(ix,x);
-  }
-
-  if (ix >= 0x7f800000) return x+x;
-
-  k += (ix>>23)-127;
-  ix &= 0x007fffff;
-  i = (ix+(0x95f64<<3))&0x800000;
-
-  u.i = ix|(i^0x3f800000); x = u.f;//SET_FLOAT_WORD(x,ix|(i^0x3f800000));    /** normalize x or x/2 */
-  k += (i>>23);
-  dk = (float)k;
-  f = x-(float)1.0;
-
-  if((0x007fffff&(15+ix))<16) {    /** |f| < 2**-20 */
-      if(f==zero) return dk;
-
-      R = f*f*((float)0.5-(float)0.33333333333333333*f);
-      return dk-(R-f)/ln2;
-  }
-
-  s = f/((float)2.0+f);
-  z = s*s;
-  i = ix-(0x6147a<<3);
-  w = z*z;
-  j = (0x6b851<<3)-ix;
-  t1= w*(Lg2+w*(Lg4+w*Lg6));
-  t2= z*(Lg1+w*(Lg3+w*(Lg5+w*Lg7)));
-  i |= j;
-  R = t2+t1;
-
-  if(i>0) {
-      hfsq=(float)0.5*f*f;
-      return dk-((hfsq-(s*(hfsq+R)))-f)/ln2;
-  } else {
-      return dk-((s*(f-R))-f)/ln2;
-  }
+  return invln2 * __gen_ocl_internal_log_valid(x);
 }
 
 
@@ -543,18 +456,16 @@ OVERLOADABLE float __kernel_sinf(float x)
 {
   /* copied from fdlibm */
   const float
-  half_value =  5.0000000000e-01,/* 0x3f000000 */
   S1  = -1.6666667163e-01, /* 0xbe2aaaab */
   S2  =  8.3333337680e-03, /* 0x3c088889 */
   S3  = -1.9841270114e-04, /* 0xb9500d01 */
-  S4  =  2.7557314297e-06, /* 0x3638ef1b */
-  S5  = -2.5050759689e-08, /* 0xb2d72f34 */
-  S6  =  1.5896910177e-10; /* 0x2f2ec9d3 */
+  S4  =  2.7557314297e-06; /* 0x3638ef1b */
   float z,r,v;
   z =  x*x;
   v =  z*x;
-  r =  S2+z*(S3+z*(S4+z*(S5+z*S6)));
-  return x+v*(S1+z*r);
+  r = mad(z, mad(z, mad(z, S4, S3), S2), S1);
+
+  return mad(v, r, x);
 }
 
 float __kernel_cosf(float x, float y)
@@ -564,16 +475,14 @@ float __kernel_cosf(float x, float y)
   one =  1.0000000000e+00, /* 0x3f800000 */
   C1  =  4.1666667908e-02, /* 0x3d2aaaab */
   C2  = -1.3888889225e-03, /* 0xbab60b61 */
-  C3  =  2.4801587642e-05, /* 0x37d00d01 */
-  C4  = -2.7557314297e-07, /* 0xb493f27c */
-  C5  =  2.0875723372e-09, /* 0x310f74f6 */
-  C6  = -1.1359647598e-11; /* 0xad47d74e */
+  C3  =  2.4801587642e-05; /* 0x37d00d01 */
   float a,hz,z,r,qx;
   int ix;
   GEN_OCL_GET_FLOAT_WORD(ix,x);
   ix &= 0x7fffffff;     /* ix = |x|'s high word*/
   z  = x*x;
-  r  = z*(C1+z*(C2+z*(C3+z*(C4+z*(C5+z*C6)))));
+  r = z * mad(z, mad(z, C3, C2), C1);
+
   if(ix < 0x3e99999a)       /* if |x| < 0.3 */
       return one - ((float)0.5*z - (z*r - x*y));
   else {
@@ -584,24 +493,27 @@ float __kernel_cosf(float x, float y)
   }
 }
 
-OVERLOADABLE float sin(float x) {
+OVERLOADABLE float sin(float x)
+{
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_sin(x);
 
+  const float pio4  =  7.8539812565e-01; /* 0x3f490fda */
   float y,z=0.0;
   int n, ix;
 
   float negative = x < 0.0f? -1.0f : 1.0f;
-  x = negative * x;
+  x = fabs(x);
 
   GEN_OCL_GET_FLOAT_WORD(ix,x);
-
   ix &= 0x7fffffff;
 
     /* sin(Inf or NaN) is NaN */
-  if (ix>=0x7f800000) return x-x;
+  if (ix >= 0x7f800000) return x-x;
 
-    /* argument reduction needed */
+  if(x <= pio4)
+	  return negative * __kernel_sinf(x);
+  /* argument reduction needed */
   else {
       n = __ieee754_rem_pio2f(x,&y);
       float s = __kernel_sinf(y);
@@ -611,10 +523,12 @@ OVERLOADABLE float sin(float x) {
   }
 }
 
-OVERLOADABLE float cos(float x) {
+OVERLOADABLE float cos(float x)
+{
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_cos(x);
 
+  const float pio4  =  7.8539812565e-01; /* 0x3f490fda */
   float y,z=0.0;
   int n, ix;
   x = __gen_ocl_fabs(x);
@@ -623,9 +537,11 @@ OVERLOADABLE float cos(float x) {
   ix &= 0x7fffffff;
 
     /* cos(Inf or NaN) is NaN */
-  if (ix>=0x7f800000) return x-x;
+  if (ix >= 0x7f800000) return x-x;
 
-    /* argument reduction needed */
+  if(x <= pio4)
+	  return __kernel_cosf(x, 0.f);
+  /* argument reduction needed */
   else {
       n = __ieee754_rem_pio2f(x,&y);
       n &= 3;
@@ -662,12 +578,6 @@ float __kernel_tanf(float x, float y, int iy)
          T[5] = 3.5920790397e-03; /* 0x3b6b6916 */
          T[6] = 1.4562094584e-03; /* 0x3abede48 */
          T[7] = 5.8804126456e-04; /* 0x3a1a26c8 */
-         T[8] = 2.4646313977e-04; /* 0x398137b9 */
-         T[9] = 7.8179444245e-05; /* 0x38a3f445 */
-         T[10] = 7.1407252108e-05; /* 0x3895c07a */
-         T[11] = -1.8558637748e-05; /* 0xb79bae5f */
-         T[12] = 2.5907305826e-05; /* 0x37d95384 */
-
 
         GEN_OCL_GET_FLOAT_WORD(hx,x);
         ix = hx&0x7fffffff;     /* high word of |x| */
@@ -679,22 +589,22 @@ float __kernel_tanf(float x, float y, int iy)
             }
         if(ix>=0x3f2ca140) {                    /* |x|>=0.6744 */
             if(hx<0) {x = -x; y = -y;}
-
-
             z = pio4-x;
             w = pio4lo-y;
             x = z+w; y = 0.0;
         }
         z       =  x*x;
         w       =  z*z;
-    /* Break x^5*(T[1]+x^2*T[2]+...) into
-     *    x^5(T[1]+x^4*T[3]+...+x^20*T[11]) +
-     *    x^5(x^2*(T[2]+x^4*T[4]+...+x^22*[T12]))
-     */
-        r = T[1]+w*(T[3]+w*(T[5]+w*(T[7]+w*(T[9]+w*T[11]))));
-        v = z*(T[2]+w*(T[4]+w*(T[6]+w*(T[8]+w*(T[10]+w*T[12])))));
+		/* Break x^5*(T[1]+x^2*T[2]+...) into
+		 *    x^5(T[1]+x^4*T[3]+...+x^20*T[11]) +
+		 *    x^5(x^2*(T[2]+x^4*T[4]+...+x^22*[T12]))
+		 */
+
+        r = mad(w, mad(w, mad(w, T[7], T[5]), T[3]), T[1]);
+        v = z* mad(w, mad(w, T[6], T[4]), T[2]);
+
         s = z*x;
-        r = y + z*(s*(r+v)+y);
+        r = mad(z, mad(s, r + v, y), y);
         r += T[0]*s;
         w = x+r;
         if(ix>=0x3f2ca140) {
@@ -702,21 +612,8 @@ float __kernel_tanf(float x, float y, int iy)
             return (float)(1-((hx>>30)&2))*(v-(float)2.0*(x-(w*w/(w+v)-r)));
         }
         if(iy==1) return w;
-        else {          /* if allow error up to 2 ulp
-                           simply return -1.0/(x+r) here */
-     /*  compute -1.0/(x+r) accurately */
-            float a,t;
-            int i;
-            z  = w;
-            GEN_OCL_GET_FLOAT_WORD(i,z);
-            GEN_OCL_SET_FLOAT_WORD(z,i&0xfffff000);
-            v  = r-(z - x);     /* z+v = r+x */
-            t = a  = -(float)1.0/w;     /* a = -1.0/w */
-            GEN_OCL_GET_FLOAT_WORD(i,t);
-            GEN_OCL_SET_FLOAT_WORD(t,i&0xfffff000);
-            s  = (float)1.0+t*z;
-            return t+a*(s+t*v);
-        }
+        else
+        	return -1.0/(x+r);
 }
 
 OVERLOADABLE float tan(float x)
@@ -937,44 +834,46 @@ OVERLOADABLE float lgamma(float x) {
 		switch (i) {
 		case 0:
 			z = y * y;
-			p1 = a0 + z * (a2 + z * (a4 + z * (a6 + z * (a8 + z * a10))));
-			p2 = z * (a1 + z * (a3 + z * (a5 + z * (a7 + z * (a9 + z * a11)))));
-			p = y * p1 + p2;
+			p1 = mad(z, mad(z, mad(z, mad(z, mad(z, a10, a8), a6), a4), a2), a0);
+			p2 = z * mad(z, mad(z, mad(z, mad(z, mad(z, a11, a9), a7), a5), a3), a1);
+			p = mad(y, p1, p2);
 			r += (p - (float) 0.5 * y);
 			break;
 		case 1:
 			z = y * y;
 			w = z * y;
-			p1 = t0 + w * (t3 + w * (t6 + w * (t9 + w * t12)));
-			p2 = t1 + w * (t4 + w * (t7 + w * (t10 + w * t13)));
-			p3 = t2 + w * (t5 + w * (t8 + w * (t11 + w * t14)));
-			p = z * p1 - (tt - w * (p2 + y * p3));
+			p1 = mad(w, mad(w, mad(w, mad(w, t12, t9), t6), t3), t0);
+			p2 = mad(w, mad(w, mad(w, mad(w, t13, t10), t7), t4), t1);
+			p3 = mad(w, mad(w, mad(w, mad(w, t14, t11), t8), t5), t2);
+			p = mad(p1, z, mad(w, mad(y, p3, p2), -tt));
 			r += (tf + p);
 			break;
 		case 2:
-			p1 = y * (u0 + y * (u1 + y * (u2 + y * (u3 + y * (u4 + y * u5)))));
-			p2 = one + y * (v1 + y * (v2 + y * (v3 + y * (v4 + y * v5))));
+			p1 = y * mad(y, mad(y, mad(y, mad(y, mad(y, u5, u4), u3), u2), u1), u0);
+			p2 = mad(y, mad(y, mad(y, mad(y, mad(y, v5, v4), v3), v2), v1), one);
 			r += (-(float) 0.5 * y + p1 / p2);
 		}
 	} else if (ix < 0x41000000) {
 		i = (int) x;
 		t = zero;
 		y = x - (float) i;
-		p = y * (s0 + y * (s1 + y * (s2 + y * (s3 + y * (s4 + y * (s5 + y * s6))))));
-		q = one + y * (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))));
+
+		p =y * mad(y, mad(y, mad(y, mad(y, mad(y, mad(y, s6, s5), s4), s3), s2), s1), s0);
+		q = mad(y, mad(y, mad(y, mad(y, mad(y, mad(y, r6, r5), r4), r3), r2), r1), one);
 		r = .5f * y + p / q;
 		z = one;
+
 		switch (i) {
 		case 7:
-			z *= (y + (float) 6.0);
+			z *= (y + 6.0f);
 		case 6:
-			z *= (y + (float) 5.0);
+			z *= (y + 5.0f);
 		case 5:
-			z *= (y + (float) 4.0);
+			z *= (y + 4.0f);
 		case 4:
-			z *= (y + (float) 3.0);
+			z *= (y + 3.0f);
 		case 3:
-			z *= (y + (float) 2.0);
+			z *= (y + 2.0f);
 			r += native_log(z);
 			break;
 		}
@@ -983,7 +882,7 @@ OVERLOADABLE float lgamma(float x) {
 		t = native_log(x);
 		z = one / x;
 		y = z * z;
-		w = w0 + z * (w1 + y * (w2 + y * (w3 + y * (w4 + y * (w5 + y * w6)))));
+		w = mad(z, mad(y, mad(y, mad(y, mad(y, mad(y, w6, w5), w4), w3), w2), w1), w0);
 		r = (x - .5f) * (t - one) + w;
 	} else
 		r = x * (native_log(x) - one);
@@ -1129,32 +1028,32 @@ OVERLOADABLE float lgamma(float x) {
 		switch (i) {  \
 		case 0:  \
 			z = y * y;  \
-			p1 = a0 + z * (a2 + z * (a4 + z * (a6 + z * (a8 + z * a10))));  \
-			p2 = z * (a1 + z * (a3 + z * (a5 + z * (a7 + z * (a9 + z * a11)))));  \
-			p = y * p1 + p2;  \
-			r += (p - (float) 0.5 * y);  \
+			p1 = mad(z, mad(z, mad(z, mad(z, mad(z, a10, a8), a6), a4), a2), a0);	\
+			p2 = z * mad(z, mad(z, mad(z, mad(z, mad(z, a11, a9), a7), a5), a3), a1);	\
+			p = mad(y, p1, p2);	\
+			r = r - mad(y, 0.5f, -p);	\
 			break;  \
 		case 1:  \
 			z = y * y;  \
 			w = z * y;  \
-			p1 = t0 + w * (t3 + w * (t6 + w * (t9 + w * t12)));  \
-			p2 = t1 + w * (t4 + w * (t7 + w * (t10 + w * t13)));  \
-			p3 = t2 + w * (t5 + w * (t8 + w * (t11 + w * t14)));  \
-			p = z * p1 - (tt - w * (p2 + y * p3));  \
+			p1 = mad(w, mad(w, mad(w, mad(w, t12, t9), t6), t3), t0);	\
+			p2 = mad(w, mad(w, mad(w, mad(w, t13, t10), t7), t4), t1);	\
+			p3 = mad(w, mad(w, mad(w, mad(w, t14, t11), t8), t5), t2);	\
+			p = z * p1 + mad(w, mad(y, p3, p2), -tt);	\
 			r += (tf + p);  \
 			break;  \
 		case 2:  \
-			p1 = y * (u0 + y * (u1 + y * (u2 + y * (u3 + y * (u4 + y * u5)))));  \
-			p2 = one + y * (v1 + y * (v2 + y * (v3 + y * (v4 + y * v5))));  \
-			r += (-(float) 0.5 * y + p1 / p2);  \
+			p1 = y * mad(y, mad(y, mad(y, mad(y, mad(y, u5, u4), u3), u2), u1), u0);	\
+			p2 = mad(y, mad(y, mad(y, mad(y, mad(y, v5, v4), v3), v2), v1), one);	\
+			r = r + mad(y, -0.5f, p1 / p2);	\
 		}  \
 	} else if (ix < 0x41000000) {  \
 		i = (int) x;  \
 		t = zero;  \
 		y = x - (float) i;  \
-		p = y * (s0 + y * (s1 + y * (s2 + y * (s3 + y * (s4 + y * (s5 + y * s6))))));  \
-		q = one + y * (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))));  \
-		r = .5f * y + p / q;  \
+		p = y * mad(y, mad(y, mad(y, mad(y, mad(y, mad(y, s6, s5), s4), s3), s2), s1), s0);		\
+		q = mad(y, mad(y, mad(y, mad(y, mad(y, mad(y, r6, r5), r4), r3), r2), r1), one);	\
+		r = mad(y, 0.5f, p / q);	\
 		z = one;  \
 		switch (i) {  \
 		case 7:  \
@@ -1175,10 +1074,10 @@ OVERLOADABLE float lgamma(float x) {
 		t = native_log(x);  \
 		z = one / x;  \
 		y = z * z;  \
-		w = w0 + z * (w1 + y * (w2 + y * (w3 + y * (w4 + y * (w5 + y * w6)))));  \
+		w = mad(z, mad(y, mad(y, mad(y, mad(y, mad(y, w6, w5), w4), w3), w2), w1), w0);  \
 		r = (x - .5f) * (t - one) + w;  \
 	} else  \
-		r = x * (native_log(x) - one);  \
+		r = x * (native_log(x) - one);	\
 	if (hx < 0)  \
 		r = nadj - r;  \
 	return r;
@@ -1208,10 +1107,7 @@ OVERLOADABLE float log1p(float x) {
   Lp1 = 6.6666668653e-01, /* 3F2AAAAB */
   Lp2 = 4.0000000596e-01, /* 3ECCCCCD */
   Lp3 = 2.8571429849e-01, /* 3E924925 */
-  Lp4 = 2.2222198546e-01, /* 3E638E29 */
-  Lp5 = 1.8183572590e-01, /* 3E3A3325 */
-  Lp6 = 1.5313838422e-01, /* 3E1CD04F */
-  Lp7 = 1.4798198640e-01; /* 3E178897 */
+  Lp4 = 2.2222198546e-01; /* 3E638E29 */
   const float zero = 0.0;
   float hfsq,f,c,s,z,R,u;
   int k,hx,hu,ax;
@@ -1262,20 +1158,26 @@ OVERLOADABLE float log1p(float x) {
       f = u-(float)1.0;
   }
   hfsq=(float)0.5*f*f;
-  if(hu==0) { /* |f| < 2**-20 */
-      if(f==zero) { if(k==0) return zero;
-      else {c += k*ln2_lo; return k*ln2_hi+c;} }
-      R = hfsq*((float)1.0-(float)0.66666666666666666*f);
+  if(hu==0)
+  { /* |f| < 2**-20 */
+      if(f==zero)
+      {
+    	  if(k==0) return zero;
+    	  else {c = mad(k , ln2_lo, c); return mad(k, ln2_hi, c);}
+      }
+      R = mad(hfsq, 1.0f, -0.66666666666666666f * f);
       if(k==0) return f-R; else
-             return k*ln2_hi-((R-(k*ln2_lo+c))-f);
+    	  return k * ln2_hi - (R - mad(k, ln2_lo, c) - f);
   }
   s = f/((float)2.0+f);
   z = s*s;
-  R = z*(Lp1+z*(Lp2+z*(Lp3+z*(Lp4+z*(Lp5+z*(Lp6+z*Lp7))))));
-  if(k==0) return f-(hfsq-s*(hfsq+R)); else
-     return k*ln2_hi-((hfsq-(s*(hfsq+R)+(k*ln2_lo+c)))-f);
-
+  R = z * mad(z, mad(z, mad(z, Lp4, Lp3), Lp2), Lp1);
+  if(k==0)
+	  return f + mad(hfsq + R, s, -hfsq);
+  else
+	  return k*ln2_hi-( (hfsq - mad(s, hfsq + R, mad(k, ln2_lo, c))) - f);
 }
+
 OVERLOADABLE float logb(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_logb(x);
@@ -1387,14 +1289,14 @@ OVERLOADABLE float __gen_ocl_internal_cbrt(float x) {
 
     /* new cbrt to 23 bits */
   r=t*t/x;
-  s=C+r*t;
+  s=mad(r, t, C);
   t*=G+F/(s+E+D/s);
     /* one step newton iteration to 53 bits with error less than 0.667 ulps */
   s=t*t;    /* t*t is exact */
   r=x/s;
   w=t+t;
   r=(r-t)/(w+r);  /* r-s is exact */
-  t=t+t*r;
+  t=mad(t, r, t);
 
     /* retore the sign bit */
   GEN_OCL_GET_FLOAT_WORD(high,t);
@@ -1440,17 +1342,16 @@ INLINE float __gen_ocl_asin_util(float x) {
   pS2 =  2.01212532134862925881e-01,
   pS3 = -4.00555345006794114027e-02,
   pS4 =  7.91534994289814532176e-04,
-  pS5 =  3.47933107596021167570e-05,
   qS1 = -2.40339491173441421878e+00,
   qS2 =  2.02094576023350569471e+00,
   qS3 = -6.88283971605453293030e-01,
   qS4 =  7.70381505559019352791e-02;
 
   float t = x*x;
-  float p = t*(pS0+t*(pS1+t*(pS2+t*(pS3+t*(pS4+t*pS5)))));
-  float q = 1.0+t*(qS1+t*(qS2+t*(qS3+t*qS4)));
+  float p = t * mad(t, mad(t, mad(t, mad(t, pS4, pS3), pS2), pS1), pS0);
+  float q = mad(t, mad(t, mad(t, mad(t, qS4, qS3), qS2), qS1), 1.0f);
   float w = p / q;
-  return x + x*w;
+  return mad(x, w, x);
 }
 
 OVERLOADABLE float __gen_ocl_internal_asin(float x) {
@@ -1512,10 +1413,6 @@ OVERLOADABLE float __gen_ocl_internal_atan(float x) {
   aT[4] =   9.0908870101e-02; /* 0x3dba2e6e */
   aT[5] =  -7.6918758452e-02; /* 0xbd9d8795 */
   aT[6] =   6.6610731184e-02; /* 0x3d886b35 */
-  aT[7] =  -5.8335702866e-02; /* 0xbd6ef16b */
-  aT[8] =   4.9768779427e-02; /* 0x3d4bda59 */
-  aT[9] =  -3.6531571299e-02; /* 0xbd15a221 */
-  aT[10] =   1.6285819933e-02; /* 0x3c8569d7 */
   const float one = 1.0, huge = 1.0e30;
 
   float w,s1,s2,z;
@@ -1552,8 +1449,8 @@ OVERLOADABLE float __gen_ocl_internal_atan(float x) {
   z = x*x;
   w = z*z;
     /* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
-  s1 = z*(aT[0]+w*(aT[2]+w*(aT[4]+w*(aT[6]+w*(aT[8]+w*aT[10])))));
-  s2 = w*(aT[1]+w*(aT[3]+w*(aT[5]+w*(aT[7]+w*aT[9]))));
+  s1 = z * mad(w, mad(w, mad(w, aT[6], aT[4]), aT[2]), aT[0]);
+  s2 = w * mad(w, mad(w, aT[5], aT[3]), aT[1]);
   if (id<0) return x - x*(s1+s2);
   else {
       z = atanhi[id] - ((x*(s1+s2) - atanlo[id]) - x);
@@ -1666,12 +1563,6 @@ OVERLOADABLE float __gen_ocl_internal_rint(float x) {
 }
 
 OVERLOADABLE float __gen_ocl_internal_exp(float x) {
-  //use native instruction when it has enough precision
-  if (x > -0x1.6p1 && x < 0x1.6p1)
-  {
-    return native_exp(x);
-  }
-
   float o_threshold = 8.8721679688e+01,  /* 0x42b17180 */
   u_threshold = -1.0397208405e+02,  /* 0xc2cff1b5 */
   twom100 = 7.8886090522e-31, 	 /* 2**-100=0x0d800000 */
@@ -1679,10 +1570,7 @@ OVERLOADABLE float __gen_ocl_internal_exp(float x) {
   one = 1.0,
   huge = 1.0e+30,
   P1 = 1.6666667163e-01, /* 0x3e2aaaab */
-  P2 = -2.7777778450e-03, /* 0xbb360b61 */
-  P3 = 6.6137559770e-05, /* 0x388ab355 */
-  P4 = -1.6533901999e-06, /* 0xb5ddea0e */
-  P5 =	4.1381369442e-08; /* 0x3331bb4c */
+  P2 = -2.7777778450e-03; /* 0xbb360b61 */
   float y,hi=0.0,lo=0.0,c,t;
   int k=0,xsb;
   unsigned hx;
@@ -1726,7 +1614,7 @@ OVERLOADABLE float __gen_ocl_internal_exp(float x) {
 
   /* x is now in primary range */
   t  = x*x;
-  c  = x - t*(P1+t*(P2+t*(P3+t*(P4+t*P5))));
+  c  = x - t*(P1+t*P2);
   if(k==0)
     return one-((x*c)/(c-(float)2.0)-x);
   else
@@ -1852,15 +1740,15 @@ sb7  = -2.2440952301e+01; /* 0xc1b38712 */
 		return x + efx*x;
 	    }
 	    z = x*x;
-	    r = pp0+z*(pp1+z*(pp2+z*(pp3+z*pp4)));
-	    s = one+z*(qq1+z*(qq2+z*(qq3+z*(qq4+z*qq5))));
-	    y = r/s;
-	    return x + x*y;
+	    r = mad(z, mad(z, mad(z, mad(z, pp4, pp3), pp2), pp1), pp0);
+	    s = mad(z, mad(z, mad(z, mad(z, mad(z, qq5,qq4), qq3), qq2), qq1), one);
+	    y = r / s;
+	    return mad(x, y, x);
 	}
 	if(ix < 0x3fa00000) {		/* 0.84375 <= |x| < 1.25 */
 	    s = __gen_ocl_internal_fabs(x)-one;
-	    P = pa0+s*(pa1+s*(pa2+s*(pa3+s*(pa4+s*(pa5+s*pa6)))));
-	    Q = one+s*(qa1+s*(qa2+s*(qa3+s*(qa4+s*(qa5+s*qa6)))));
+	    P = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, pa6, pa5), pa4), pa3), pa2), pa1), pa0);
+	    Q = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, qa6, qa5), qa4), qa3), qa2), qa1), one);
 	    if(hx>=0) return erx + P/Q; else return -erx - P/Q;
 	}
 	if (ix >= 0x40c00000) {		/* inf>|x|>=6 */
@@ -1869,15 +1757,15 @@ sb7  = -2.2440952301e+01; /* 0xc1b38712 */
 	x = __gen_ocl_internal_fabs(x);
     s = one/(x*x);
 	if(ix< 0x4036DB6E) {	/* |x| < 1/0.35 */
-	    R=ra0+s*(ra1+s*(ra2+s*(ra3+s*(ra4+s*(
-				ra5+s*(ra6+s*ra7))))));
-	    S=one+s*(sa1+s*(sa2+s*(sa3+s*(sa4+s*(
-				sa5+s*(sa6+s*(sa7+s*sa8)))))));
+	    R = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+	    		ra7, ra6), ra5), ra4), ra3), ra2), ra1), ra0);
+	    S = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+	    		sa8, sa7), sa6), sa5), sa4), sa3), sa2), sa1), one);
 	} else {	/* |x| >= 1/0.35 */
-	    R=rb0+s*(rb1+s*(rb2+s*(rb3+s*(rb4+s*(
-				rb5+s*rb6)))));
-	    S=one+s*(sb1+s*(sb2+s*(sb3+s*(sb4+s*(
-				sb5+s*(sb6+s*sb7))))));
+	    R = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+	    		rb6, rb5), rb4), rb3), rb2), rb1), rb0);
+	    S = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+	    		sb7, sb6), sb5), sb4), sb3), sb2), sb1), one);
 	}
 	GEN_OCL_GET_FLOAT_WORD(ix,x);
 	GEN_OCL_SET_FLOAT_WORD(z,ix&0xfffff000);
@@ -1972,8 +1860,8 @@ sb7  = -2.2440952301e+01; /* 0xc1b38712 */
 	    if(ix < 0x23800000)  	/* |x|<2**-56 */
 		return one-x;
 	    z = x*x;
-	    r = pp0+z*(pp1+z*(pp2+z*(pp3+z*pp4)));
-	    s = one+z*(qq1+z*(qq2+z*(qq3+z*(qq4+z*qq5))));
+	    r = mad(z, mad(z, mad(z, mad(z, pp4, pp3), pp2), pp1), pp0);
+	    s = mad(z, mad(z, mad(z, mad(z, mad(z, qq5, qq4), qq3), qq2), qq1), one);
 	    y = r/s;
 	    if(hx < 0x3e800000) {  	/* x<1/4 */
 		return one-(x+x*y);
@@ -1985,8 +1873,8 @@ sb7  = -2.2440952301e+01; /* 0xc1b38712 */
 	}
 	if(ix < 0x3fa00000) {		/* 0.84375 <= |x| < 1.25 */
 	    s = __gen_ocl_internal_fabs(x)-one;
-	    P = pa0+s*(pa1+s*(pa2+s*(pa3+s*(pa4+s*(pa5+s*pa6)))));
-	    Q = one+s*(qa1+s*(qa2+s*(qa3+s*(qa4+s*(qa5+s*qa6)))));
+	    P = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, pa6, pa5), pa4), pa3), pa2), pa1), pa0);
+	    Q = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, qa6, qa5), qa4), qa3), qa2), qa1), one);
 	    if(hx>=0) {
 	        z  = one-erx; return z - P/Q;
 	    } else {
@@ -1997,16 +1885,16 @@ sb7  = -2.2440952301e+01; /* 0xc1b38712 */
 	    x = __gen_ocl_internal_fabs(x);
         s = one/(x*x);
 	    if(ix< 0x4036DB6D) {	/* |x| < 1/.35 ~ 2.857143*/
-	        R=ra0+s*(ra1+s*(ra2+s*(ra3+s*(ra4+s*(
-				ra5+s*(ra6+s*ra7))))));
-	        S=one+s*(sa1+s*(sa2+s*(sa3+s*(sa4+s*(
-				sa5+s*(sa6+s*(sa7+s*sa8)))))));
+		    R = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+		    		ra7, ra6), ra5), ra4), ra3), ra2), ra1), ra0);
+		    S = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+		    		sa8, sa7), sa6), sa5), sa4), sa3), sa2), sa1), one);
 	    } else {			/* |x| >= 1/.35 ~ 2.857143 */
 		if(hx<0&&ix>=0x40c00000) return two-tiny;/* x < -6 */
-	        R=rb0+s*(rb1+s*(rb2+s*(rb3+s*(rb4+s*(
-				rb5+s*rb6)))));
-	        S=one+s*(sb1+s*(sb2+s*(sb3+s*(sb4+s*(
-				sb5+s*(sb6+s*sb7))))));
+		    R = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+		    		rb6, rb5), rb4), rb3), rb2), rb1), rb0);
+		    S = mad(s, mad(s, mad(s, mad(s, mad(s, mad(s, mad(s,
+		    		sb7, sb6), sb5), sb4), sb3), sb2), sb1), one);
 	    }
 	    GEN_OCL_GET_FLOAT_WORD(ix,x);
 	    GEN_OCL_SET_FLOAT_WORD(z,ix&0xffffe000);
@@ -2107,9 +1995,6 @@ OVERLOADABLE float __gen_ocl_internal_expm1(float x) {
   ln2_hi = 6.9313812256e-01,	/* 0x3f317180 */
   ln2_lo = 9.0580006145e-06,	/* 0x3717f7d1 */
   Q2 = 1.5873016091e-03, /* 0x3ad00d01 */
-  Q3 = -7.9365076090e-05, /* 0xb8a670cd */
-  Q4 = 4.0082177293e-06, /* 0x36867e54 */
-  Q5 = -2.0109921195e-07, /* 0xb457edbb */
   huge = 1.0e30,
   tiny = 1.0e-30,
   ivln2 = 1.4426950216e+00, /* 0x3fb8aa3b =1/ln2 */
@@ -2166,7 +2051,7 @@ OVERLOADABLE float __gen_ocl_internal_expm1(float x) {
   /* x is now in primary range */
   hfx = (float)0.5*x;
   hxs = x*hfx;
-  r1 = one+hxs*(Q1+hxs*(Q2+hxs*(Q3+hxs*(Q4+hxs*Q5))));
+  r1 = one+hxs*(Q1+hxs*Q2);
   t = (float)3.0-r1*hfx;
   e = hxs*((r1-t)/((float)6.0 - x*t));
   if(k==0)
@@ -2250,7 +2135,7 @@ OVERLOADABLE float __gen_ocl_internal_asinh(float x){
   } else {
     float xa = __gen_ocl_internal_fabs(x);
     if (ix>0x40000000) {/* 2**14 > |x| > 2.0 */
-      w = __gen_ocl_internal_log(2.0f*xa+one/(__gen_ocl_sqrt(xa*xa+one)+xa));
+      w = __gen_ocl_internal_log(mad(xa, 2.0f, one / (__gen_ocl_sqrt(mad(xa, xa, one)) + xa)));
     } else {		/* 2.0 > |x| > 2**-14 */
       float t = xa*xa;
       w =log1p(xa+t/(one+__gen_ocl_sqrt(one+t)));
@@ -2609,7 +2494,8 @@ OVERLOADABLE float ldexp(float x, int n) {
   return __gen_ocl_internal_ldexp(x, n);
 }
 
-CONST float __gen_ocl_mad(float a, float b, float c) __asm("llvm.fma" ".f32");
+CONST OVERLOADABLE float __gen_ocl_mad(float a, float b, float c) __asm("llvm.fma" ".f32");
+CONST OVERLOADABLE half __gen_ocl_mad(half a, half b, half c) __asm("llvm.fma" ".f16");
 PURE CONST float __gen_ocl_fmax(float a, float b);
 PURE CONST float __gen_ocl_fmin(float a, float b);
 
@@ -2652,6 +2538,10 @@ OVERLOADABLE float nextafter(float x, float y) {
   hy = as_int(y);
   ix = hx & 0x7fffffff;
   iy = hy & 0x7fffffff;
+  if(ix == 0)
+    ix = hx & 0x7fffff;
+  if(iy == 0)
+    iy = hy & 0x7fffff;
   if(ix>0x7f800000 || iy>0x7f800000)
     return x+y;
   if(hx == hy)
@@ -2745,15 +2635,8 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
   /* poly coefs for (3/2)*(log(x)-2s-2/3*s**3 */
   L1  =  6.0000002384e-01, /* 0x3f19999a */
   L2  =  4.2857143283e-01, /* 0x3edb6db7 */
-  L3  =  3.3333334327e-01, /* 0x3eaaaaab */
-  L4  =  2.7272811532e-01, /* 0x3e8ba305 */
-  L5  =  2.3066075146e-01, /* 0x3e6c3255 */
-  L6  =  2.0697501302e-01, /* 0x3e53f142 */
   P1   =  1.6666667163e-01, /* 0x3e2aaaab */
   P2   = -2.7777778450e-03, /* 0xbb360b61 */
-  P3   =  6.6137559770e-05, /* 0x388ab355 */
-  P4   = -1.6533901999e-06, /* 0xb5ddea0e */
-  P5   =  4.1381369442e-08, /* 0x3331bb4c */
   lg2  =  6.9314718246e-01, /* 0x3f317218 */
   lg2_h  =  6.93145752e-01, /* 0x3f317200 */
   lg2_l  =  1.42860654e-06, /* 0x35bfbe8c */
@@ -2881,7 +2764,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
 
     /* compute log(ax) */
     s2 = s*s;
-    r = s2*s2*(L1+s2*(L2+s2*(L3+s2*(L4+s2*(L5+s2*L6)))));
+    r = s2*s2*(L1+s2*L2);
     r += s_l*(s_h+s);
     s2  = s_h*s_h;
     t_h = 3.0f+s2+r;
@@ -2946,7 +2829,7 @@ OVERLOADABLE float __gen_ocl_internal_pow(float x, float y) {
   z = u+v;
   w = v-(z-u);
   t  = z*z;
-  t1  = z - t*(P1+t*(P2+t*(P3+t*(P4+t*P5))));
+  t1  = z - t*(P1+t*P2);
   r  = (z*t1)/(t1-two)-(w+z*w);
   z  = one-(r-z);
   GEN_OCL_GET_FLOAT_WORD(j,z);
@@ -3059,15 +2942,8 @@ float __gen_ocl_internal_pown(float x, int y) {
     /* poly coefs for (3/2)*(log(x)-2s-2/3*s**3 */
   L1  =  6.0000002384e-01, /* 0x3f19999a */
   L2  =  4.2857143283e-01, /* 0x3edb6db7 */
-  L3  =  3.3333334327e-01, /* 0x3eaaaaab */
-  L4  =  2.7272811532e-01, /* 0x3e8ba305 */
-  L5  =  2.3066075146e-01, /* 0x3e6c3255 */
-  L6  =  2.0697501302e-01, /* 0x3e53f142 */
   P1   =  1.6666667163e-01, /* 0x3e2aaaab */
   P2   = -2.7777778450e-03, /* 0xbb360b61 */
-  P3   =  6.6137559770e-05, /* 0x388ab355 */
-  P4   = -1.6533901999e-06, /* 0xb5ddea0e */
-  P5   =  4.1381369442e-08, /* 0x3331bb4c */
   lg2  =  6.9314718246e-01, /* 0x3f317218 */
   lg2_h  =  0x1.62ep-1,
   lg2_l  =  0x1.0bfbe8p-15,
@@ -3167,7 +3043,7 @@ float __gen_ocl_internal_pown(float x, int y) {
 
     /* compute log(ax) */
     s2 = s*s;
-    r = s2*s2*(L1+s2*(L2+s2*(L3+s2*(L4+s2*(L5+s2*L6)))));
+    r = s2*s2*(L1+s2*L2);
     r += s_l*(s_h+s);
     s2  = s_h*s_h;
     t_h = (float)3.0+s2+r;
@@ -3239,7 +3115,7 @@ float __gen_ocl_internal_pown(float x, int y) {
   z = u+v;
   w = v-(z-u);
   t  = z*z;
-  t1  = z - t*(P1+t*(P2+t*(P3+t*(P4+t*P5))));
+  t1  = z - t*(P1+t*P2);
   r  = (z*t1)/(t1-two)-(w+z*w);
   z  = one-(r-z);
   GEN_OCL_GET_FLOAT_WORD(j,z);
@@ -3527,11 +3403,19 @@ OVERLOADABLE float log(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_log(x);
 
+  /* Use native instruction when it has enough precision */
+  if((x > 0x1.1p0) || (x <= 0))
+    return __gen_ocl_internal_fastpath_log(x);
+
   return  __gen_ocl_internal_log(x);
 }
 
 OVERLOADABLE float log2(float x) {
   if (__ocl_math_fastpath_flag)
+    return __gen_ocl_internal_fastpath_log2(x);
+
+  /* Use native instruction when it has enough precision */
+  if((x > 0x1.1p0) || (x <= 0))
     return __gen_ocl_internal_fastpath_log2(x);
 
   return  __gen_ocl_internal_log2(x);
@@ -3541,6 +3425,10 @@ OVERLOADABLE float log10(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_log10(x);
 
+  /* Use native instruction when it has enough precision */
+  if((x > 0x1.1p0) || (x <= 0))
+    return __gen_ocl_internal_fastpath_log10(x);
+
   return  __gen_ocl_internal_log10(x);
 }
 
@@ -3548,10 +3436,15 @@ OVERLOADABLE float exp(float x) {
   if (__ocl_math_fastpath_flag)
     return __gen_ocl_internal_fastpath_exp(x);
 
+  /* Use native instruction when it has enough precision */
+  if (x > -0x1.6p1 && x < 0x1.6p1)
+    return __gen_ocl_internal_fastpath_exp(x);
+
   return  __gen_ocl_internal_exp(x);
 }
 
 OVERLOADABLE float exp2(float x) {
+  /* Use native instruction when it has enough precision, exp2 always */
   return native_exp2(x);
 }
 
@@ -3607,6 +3500,48 @@ OVERLOADABLE half cosh(half x) {
 OVERLOADABLE half acos(half x) {
   float _x = (float)x;
   return (half)acos(_x);
+}
+OVERLOADABLE float half_cos(float x) {
+  return (float)cos(x);
+}
+OVERLOADABLE float half_divide(float x, float y) {
+  return (float)native_divide(x, y);
+}
+OVERLOADABLE float half_exp(float x) {
+  return (float)native_exp(x);
+}
+OVERLOADABLE float half_exp2(float x){
+  return (float)native_exp2(x);
+}
+OVERLOADABLE float half_exp10(float x){
+  return (float)native_exp10(x);
+}
+OVERLOADABLE float half_log(float x){
+  return (float)native_log(x);
+}
+OVERLOADABLE float half_log2(float x){
+  return (float)native_log2(x);
+}
+OVERLOADABLE float half_log10(float x){
+  return (float)native_log10(x);
+}
+OVERLOADABLE float half_powr(float x, float y){
+  return (float)powr(x, y);
+}
+OVERLOADABLE float half_recip(float x){
+  return (float)native_recip(x);
+}
+OVERLOADABLE float half_rsqrt(float x){
+  return (float)native_rsqrt(x);
+}
+OVERLOADABLE float half_sin(float x){
+  return (float)sin(x);
+}
+OVERLOADABLE float half_sqrt(float x){
+  return (float)native_sqrt(x);
+}
+OVERLOADABLE float half_tan(float x){
+  return (float)tan(x);
 }
 OVERLOADABLE half acospi(half x) {
   float _x = (float)x;
@@ -3788,10 +3723,7 @@ OVERLOADABLE half exp2(half x) {
   return (half)exp2(_x);
 }
 OVERLOADABLE half mad(half a, half b, half c) {
-  float _a = (float)a;
-  float _b = (float)b;
-  float _c = (float)c;
-  return (half)mad(_a, _b, _c);
+  return __gen_ocl_mad(a,b,c);
 }
 OVERLOADABLE half sin(half x) {
   float _x = (float)x;

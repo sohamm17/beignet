@@ -88,12 +88,14 @@ namespace gbe {
 
   Kernel::Kernel(const std::string &name) :
     name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false),
-        slmSize(0), ctx(NULL), samplerSet(NULL), imageSet(NULL), printfSet(NULL) {}
+        slmSize(0), ctx(NULL), samplerSet(NULL), imageSet(NULL), printfSet(NULL),
+        profilingInfo(NULL) {}
   Kernel::~Kernel(void) {
     if(ctx) GBE_DELETE(ctx);
     if(samplerSet) GBE_DELETE(samplerSet);
     if(imageSet) GBE_DELETE(imageSet);
     if(printfSet) GBE_DELETE(printfSet);
+    if(profilingInfo) GBE_DELETE(profilingInfo);
     GBE_SAFE_DELETE_ARRAY(args);
   }
   int32_t Kernel::getCurbeOffset(gbe_curbe_type type, uint32_t subType) const {
@@ -104,7 +106,7 @@ namespace gbe {
     return it->offset; // we found it!
   }
 
-  Program::Program(void) : constantSet(NULL) {}
+  Program::Program(uint32_t fast_relaxed_math) : fast_relaxed_math(fast_relaxed_math), constantSet(NULL) {}
   Program::~Program(void) {
     for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it)
       GBE_DELETE(it->second);
@@ -114,14 +116,24 @@ namespace gbe {
 #ifdef GBE_COMPILER_AVAILABLE
   BVAR(OCL_OUTPUT_GEN_IR, false);
   BVAR(OCL_STRICT_CONFORMANCE, true);
+  IVAR(OCL_PROFILING_LOG, 0, 0, 1); // Int for different profiling types.
+  BVAR(OCL_OUTPUT_BUILD_LOG, false);
 
   bool Program::buildFromLLVMFile(const char *fileName, const void* module, std::string &error, int optLevel) {
     ir::Unit *unit = new ir::Unit();
     llvm::Module * cloned_module = NULL;
+    bool ret = false;
     if(module){
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+      cloned_module = llvm::CloneModule((llvm::Module*)module).release();
+#else
       cloned_module = llvm::CloneModule((llvm::Module*)module);
+#endif
     }
-    if (llvmToGen(*unit, fileName, module, optLevel, OCL_STRICT_CONFORMANCE) == false) {
+    bool strictMath = true;
+    if (fast_relaxed_math || !OCL_STRICT_CONFORMANCE)
+      strictMath = false;
+    if (llvmToGen(*unit, fileName, module, optLevel, strictMath, OCL_PROFILING_LOG, error) == false) {
       if (fileName)
         error = std::string(fileName) + " not found";
       delete unit;
@@ -134,19 +146,24 @@ namespace gbe {
       unit = new ir::Unit();
       if(cloned_module){
         //suppose file exists and llvmToGen will not return false.
-        llvmToGen(*unit, fileName, cloned_module, 0, OCL_STRICT_CONFORMANCE);
+        llvmToGen(*unit, fileName, cloned_module, 0, strictMath, OCL_PROFILING_LOG, error);
       }else{
         //suppose file exists and llvmToGen will not return false.
-        llvmToGen(*unit, fileName, module, 0, OCL_STRICT_CONFORMANCE);
+        llvmToGen(*unit, fileName, module, 0, strictMath, OCL_PROFILING_LOG, error);
       }
     }
-    assert(unit->getValid());
-    this->buildFromUnit(*unit, error);
+    if(unit->getValid()){
+      std::string error2;
+      if (this->buildFromUnit(*unit, error2)){
+        ret = true;
+      }
+      error = error + error2;
+    }
     delete unit;
     if(cloned_module){
       delete (llvm::Module*) cloned_module;
     }
-    return true;
+    return ret;
   }
 
   bool Program::buildFromUnit(const ir::Unit &unit, std::string &error) {
@@ -155,10 +172,23 @@ namespace gbe {
     const uint32_t kernelNum = set.size();
     if (OCL_OUTPUT_GEN_IR) std::cout << unit;
     if (kernelNum == 0) return true;
+
+    bool strictMath = true;
+    if (fast_relaxed_math || !OCL_STRICT_CONFORMANCE)
+      strictMath = false;
+
     for (const auto &pair : set) {
       const std::string &name = pair.first;
-      Kernel *kernel = this->compileKernel(unit, name, !OCL_STRICT_CONFORMANCE);
+      Kernel *kernel = this->compileKernel(unit, name, !strictMath, OCL_PROFILING_LOG);
+      if (!kernel) {
+        error +=  name;
+        error += ":(GBE): error: failed in Gen backend.\n";
+        if (OCL_OUTPUT_BUILD_LOG)
+          llvm::errs() << error;
+        return false;
+      }
       kernel->setSamplerSet(pair.second->getSamplerSet());
+      kernel->setProfilingInfo(new ir::ProfilingInfo(*unit.getProfilingInfo()));
       kernel->setImageSet(pair.second->getImageSet());
       kernel->setPrintfSet(pair.second->getPrintfSet());
       kernel->setCompileWorkGroupSize(pair.second->getCompileWorkGroupSize());
@@ -172,17 +202,17 @@ namespace gbe {
 #define OUT_UPDATE_SZ(elt) SERIALIZE_OUT(elt, outs, ret_size)
 #define IN_UPDATE_SZ(elt) DESERIALIZE_IN(elt, ins, total_size)
 
-  size_t Program::serializeToBin(std::ostream& outs) {
-    size_t ret_size = 0;
-    size_t ker_num = kernels.size();
-    int has_constset = 0;
+  uint32_t Program::serializeToBin(std::ostream& outs) {
+    uint32_t ret_size = 0;
+    uint32_t ker_num = kernels.size();
+    uint32_t has_constset = 0;
 
     OUT_UPDATE_SZ(magic_begin);
 
     if (constantSet) {
       has_constset = 1;
       OUT_UPDATE_SZ(has_constset);
-      size_t sz = constantSet->serializeToBin(outs);
+      uint32_t sz = constantSet->serializeToBin(outs);
       if (!sz)
         return 0;
 
@@ -193,7 +223,7 @@ namespace gbe {
 
     OUT_UPDATE_SZ(ker_num);
     for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it) {
-      size_t sz = it->second->serializeToBin(outs);
+      uint32_t sz = it->second->serializeToBin(outs);
       if (!sz)
         return 0;
 
@@ -206,10 +236,10 @@ namespace gbe {
     return ret_size;
   }
 
-  size_t Program::deserializeFromBin(std::istream& ins) {
-    size_t total_size = 0;
+  uint32_t Program::deserializeFromBin(std::istream& ins) {
+    uint32_t total_size = 0;
     int has_constset = 0;
-    size_t ker_num;
+    uint32_t ker_num;
     uint32_t magic;
 
     IN_UPDATE_SZ(magic);
@@ -219,19 +249,18 @@ namespace gbe {
     IN_UPDATE_SZ(has_constset);
     if(has_constset) {
       constantSet = new ir::ConstantSet;
-      size_t sz = constantSet->deserializeFromBin(ins);
+      uint32_t sz = constantSet->deserializeFromBin(ins);
 
-      if (sz == 0) {
+      if (sz == 0)
         return 0;
-      }
 
       total_size += sz;
     }
 
     IN_UPDATE_SZ(ker_num);
 
-    for (size_t i = 0; i < ker_num; i++) {
-      size_t ker_serial_sz;
+    for (uint32_t i = 0; i < ker_num; i++) {
+      uint32_t ker_serial_sz;
       std::string ker_name; // Just a empty name here.
       Kernel* ker = allocateKernel(ker_name);
 
@@ -246,7 +275,7 @@ namespace gbe {
     if (magic != magic_end)
       return 0;
 
-    size_t total_bytes;
+    uint32_t total_bytes;
     IN_UPDATE_SZ(total_bytes);
     if (total_bytes + sizeof(total_size) != total_size)
       return 0;
@@ -254,15 +283,17 @@ namespace gbe {
     return total_size;
   }
 
-  size_t Kernel::serializeToBin(std::ostream& outs) {
+  uint32_t Kernel::serializeToBin(std::ostream& outs) {
     unsigned int i;
-    size_t ret_size = 0;
+    uint32_t ret_size = 0;
     int has_samplerset = 0;
     int has_imageset = 0;
+    uint32_t sz = 0;
 
     OUT_UPDATE_SZ(magic_begin);
 
-    OUT_UPDATE_SZ(name.size());
+    sz = name.size();
+    OUT_UPDATE_SZ(sz);
     outs.write(name.c_str(), name.size());
     ret_size += sizeof(char)*name.size();
 
@@ -276,25 +307,30 @@ namespace gbe {
 
       OUT_UPDATE_SZ(arg.info.addrSpace);
 
-      OUT_UPDATE_SZ(arg.info.typeName.size());
+      sz = arg.info.typeName.size();
+      OUT_UPDATE_SZ(sz);
       outs.write(arg.info.typeName.c_str(), arg.info.typeName.size());
       ret_size += sizeof(char)*arg.info.typeName.size();
 
-      OUT_UPDATE_SZ(arg.info.accessQual.size());
+      sz = arg.info.accessQual.size();
+      OUT_UPDATE_SZ(sz);
       outs.write(arg.info.accessQual.c_str(), arg.info.accessQual.size());
       ret_size += sizeof(char)*arg.info.accessQual.size();
 
-      OUT_UPDATE_SZ(arg.info.typeQual.size());
+      sz = arg.info.typeQual.size();
+      OUT_UPDATE_SZ(sz);
       outs.write(arg.info.typeQual.c_str(), arg.info.typeQual.size());
       ret_size += sizeof(char)*arg.info.typeQual.size();
 
-      OUT_UPDATE_SZ(arg.info.argName.size());
+      sz = arg.info.argName.size();
+      OUT_UPDATE_SZ(sz);
       outs.write(arg.info.argName.c_str(), arg.info.argName.size());
       ret_size += sizeof(char)*arg.info.argName.size();
     }
 
-    OUT_UPDATE_SZ(patches.size());
-    for (size_t i = 0; i < patches.size(); ++i) {
+    sz = patches.size();
+    OUT_UPDATE_SZ(sz);
+    for (uint32_t i = 0; i < patches.size(); ++i) {
       const PatchInfo& patch = patches[i];
       unsigned int tmp;
       tmp = patch.type;
@@ -318,7 +354,7 @@ namespace gbe {
     if (!samplerSet->empty()) {   //samplerSet is always valid, allocated in Function::Function
       has_samplerset = 1;
       OUT_UPDATE_SZ(has_samplerset);
-      size_t sz = samplerSet->serializeToBin(outs);
+      uint32_t sz = samplerSet->serializeToBin(outs);
       if (!sz)
         return 0;
 
@@ -331,7 +367,7 @@ namespace gbe {
     if (!imageSet->empty()) {   //imageSet is always valid, allocated in Function::Function
       has_imageset = 1;
       OUT_UPDATE_SZ(has_imageset);
-      size_t sz = imageSet->serializeToBin(outs);
+      uint32_t sz = imageSet->serializeToBin(outs);
       if (!sz)
         return 0;
 
@@ -352,19 +388,19 @@ namespace gbe {
     return ret_size;
   }
 
-  size_t Kernel::deserializeFromBin(std::istream& ins) {
-    size_t total_size = 0;
+  uint32_t Kernel::deserializeFromBin(std::istream& ins) {
+    uint32_t total_size = 0;
     int has_samplerset = 0;
     int has_imageset = 0;
-    size_t code_size = 0;
+    uint32_t code_size = 0;
     uint32_t magic = 0;
-    size_t patch_num = 0;
+    uint32_t patch_num = 0;
 
     IN_UPDATE_SZ(magic);
     if (magic != magic_begin)
       return 0;
 
-    size_t name_len;
+    uint32_t name_len;
     IN_UPDATE_SZ(name_len);
     char* c_name = new char[name_len+1];
     ins.read(c_name, name_len*sizeof(char));
@@ -384,7 +420,7 @@ namespace gbe {
 
       IN_UPDATE_SZ(arg.info.addrSpace);
 
-      size_t len;
+      uint32_t len;
       char* a_name = NULL;
 
       IN_UPDATE_SZ(len);
@@ -447,7 +483,7 @@ namespace gbe {
     IN_UPDATE_SZ(has_samplerset);
     if (has_samplerset) {
       samplerSet = GBE_NEW(ir::SamplerSet);
-      size_t sz = samplerSet->deserializeFromBin(ins);
+      uint32_t sz = samplerSet->deserializeFromBin(ins);
       if (sz == 0) {
         return 0;
       }
@@ -460,7 +496,7 @@ namespace gbe {
     IN_UPDATE_SZ(has_imageset);
     if (has_imageset) {
       imageSet = GBE_NEW(ir::ImageSet);
-      size_t sz = imageSet->deserializeFromBin(ins);
+      uint32_t sz = imageSet->deserializeFromBin(ins);
       if (sz == 0) {
         return 0;
       }
@@ -482,7 +518,7 @@ namespace gbe {
     if (magic != magic_end)
       return 0;
 
-    size_t total_bytes;
+    uint32_t total_bytes;
     IN_UPDATE_SZ(total_bytes);
     if (total_bytes + sizeof(total_size) != total_size)
       return 0;
@@ -570,11 +606,10 @@ namespace gbe {
     program->CleanLlvmResource();
   }
 
+  BVAR(OCL_DEBUGINFO, false);
 #ifdef GBE_COMPILER_AVAILABLE
-  BVAR(OCL_OUTPUT_BUILD_LOG, false);
-
   static bool buildModuleFromSource(const char *source, llvm::Module** out_module, llvm::LLVMContext* llvm_ctx,
-                                    std::string dumpLLVMFileName, std::vector<std::string>& options, size_t stringSize, char *err,
+                                    std::string dumpLLVMFileName, std::string dumpSPIRBinaryName, std::vector<std::string>& options, size_t stringSize, char *err,
                                     size_t *errSize) {
     // Arguments to pass to the clang frontend
     vector<const char *> args;
@@ -605,7 +640,8 @@ namespace gbe {
     args.push_back("spir");
 #endif /* LLVM_VERSION_MINOR <= 2 */
     args.push_back("stringInput.cl");
-    args.push_back("-ffp-contract=off");
+    args.push_back("-ffp-contract=on");
+    if(OCL_DEBUGINFO) args.push_back("-g");
 
     // The compiler invocation needs a DiagnosticsEngine so it can report problems
     std::string ErrorString;
@@ -695,6 +731,20 @@ namespace gbe {
         (*out_module)->print(ostream, 0);
       } //Otherwise, you'll have to make do without the dump.
     }
+
+    if (!dumpSPIRBinaryName.empty()) {
+      std::string err;
+      llvm::raw_fd_ostream ostream (dumpSPIRBinaryName.c_str(),
+                                    err,
+      #if LLVM_VERSION_MINOR == 3
+                                    0
+      #else
+                                    llvm::sys::fs::F_None
+      #endif
+                                    );
+      if (err.empty())
+        llvm::WriteBitcodeToFile(*out_module, ostream);
+    }
 #else
     if (!dumpLLVMFileName.empty()) {
       std::error_code err;
@@ -703,6 +753,14 @@ namespace gbe {
       if (!err) {
         (*out_module)->print(ostream, 0);
       } //Otherwise, you'll have to make do without the dump.
+    }
+
+    if (!dumpSPIRBinaryName.empty()) {
+      std::error_code err;
+      llvm::raw_fd_ostream ostream (dumpSPIRBinaryName.c_str(),
+                                    err, llvm::sys::fs::F_None);
+      if (!err)
+        llvm::WriteBitcodeToFile(*out_module, ostream);
     }
 #endif
     return true;
@@ -719,6 +777,7 @@ namespace gbe {
                                      std::vector<std::string>& clOpt,
                                      std::string& dumpLLVMFileName,
                                      std::string& dumpASMFileName,
+                                     std::string& dumpSPIRBinaryName,
                                      int& optLevel,
                                      size_t stringSize,
                                      char *err,
@@ -728,10 +787,18 @@ namespace gbe {
     std::istringstream idirs(dirs);
     std::string pchFileName;
     bool findPCH = false;
+#if defined(__ANDROID__)
+    bool invalidPCH = true;
+#else
     bool invalidPCH = false;
+#endif
     size_t start = 0, end = 0;
 
     std::string hdirs = OCL_HEADER_FILE_DIR;
+    if(hdirs == "")
+      hdirs = OCL_HEADER_DIR;
+    if(dirs == "")
+      dirs = OCL_PCH_OBJECT;
     std::istringstream hidirs(hdirs);
     std::string headerFilePath;
     bool findOcl = false;
@@ -750,7 +817,7 @@ namespace gbe {
         std::cout << options << std::endl;
       }
       std::cout << "CL kernel source:" << std::endl;
-      std::cout << source;
+      std::cout << source << std::endl;
     }
     std::string includePath  = "-I" + headerFilePath;
     clOpt.push_back(includePath);
@@ -763,7 +830,7 @@ namespace gbe {
       const std::string unsupportedOptions("-cl-denorms-are-zero, -cl-strict-aliasing, -cl-opt-disable,"
                        "-cl-no-signed-zeros, -cl-fp32-correctly-rounded-divide-sqrt");
 
-      const std::string uncompatiblePCHOptions = ("-cl-single-precision-constant, -cl-fast-relaxed-math, -cl-std=CL1.1, -cl-finite-math-only");
+      const std::string uncompatiblePCHOptions = ("-cl-single-precision-constant, -cl-fast-relaxed-math, -cl-std=CL1.1, -cl-finite-math-only, -cl-unsafe-math-optimizations");
       const std::string fastMathOption = ("-cl-fast-relaxed-math");
       while (end != std::string::npos) {
         end = optionStr.find(' ', start);
@@ -868,6 +935,11 @@ EXTEND_QUOTE:
           continue; // Don't push this str back; ignore it.
         }
 
+        if(str.find("-dump-spir-binary=") != std::string::npos) {
+          dumpSPIRBinaryName = str.substr(str.find("=") + 1);
+          continue; // Don't push this str back; ignore it.
+        }
+
         clOpt.push_back(str);
       }
       free(c_str);
@@ -912,8 +984,9 @@ EXTEND_QUOTE:
     int optLevel = 1;
     std::vector<std::string> clOpt;
     std::string dumpLLVMFileName, dumpASMFileName;
+    std::string dumpSPIRBinaryName;
     if (!processSourceAndOption(source, options, NULL, clOpt,
-                                dumpLLVMFileName, dumpASMFileName,
+                                dumpLLVMFileName, dumpASMFileName, dumpSPIRBinaryName,
                                 optLevel,
                                 stringSize, err, errSize))
       return NULL;
@@ -926,14 +999,14 @@ EXTEND_QUOTE:
     if (!llvm::llvm_is_multithreaded())
       llvm_mutex.lock();
 
-    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, clOpt,
+    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, dumpSPIRBinaryName, clOpt,
                               stringSize, err, errSize)) {
     // Now build the program from llvm
       size_t clangErrSize = 0;
-      if (err != NULL) {
+      if (err != NULL && *errSize != 0) {
         GBE_ASSERT(errSize != NULL);
-        stringSize -= *errSize;
-        err += *errSize;
+        stringSize = stringSize - *errSize;
+        err = err + *errSize;
         clangErrSize = *errSize;
       }
 
@@ -942,9 +1015,10 @@ EXTEND_QUOTE:
         if (asmDumpStream)
           fclose(asmDumpStream);
       }
+
       p = gbe_program_new_from_llvm(deviceID, NULL, out_module, llvm_ctx,
                                     dumpASMFileName.empty() ? NULL : dumpASMFileName.c_str(),
-                                    stringSize, err, errSize, optLevel);
+                                    stringSize, err, errSize, optLevel, options);
       if (err != NULL)
         *errSize += clangErrSize;
       if (OCL_OUTPUT_BUILD_LOG && options)
@@ -972,8 +1046,9 @@ EXTEND_QUOTE:
     int optLevel = 1;
     std::vector<std::string> clOpt;
     std::string dumpLLVMFileName, dumpASMFileName;
+    std::string dumpSPIRBinaryName;
     if (!processSourceAndOption(source, options, temp_header_path, clOpt,
-                                dumpLLVMFileName, dumpASMFileName,
+                                dumpLLVMFileName, dumpASMFileName, dumpSPIRBinaryName,
                                 optLevel, stringSize, err, errSize))
       return NULL;
 
@@ -984,7 +1059,7 @@ EXTEND_QUOTE:
     llvm::Module * out_module;
     llvm::LLVMContext* llvm_ctx = &llvm::getGlobalContext();
 
-    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, clOpt,
+    if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, dumpSPIRBinaryName, clOpt,
                               stringSize, err, errSize)) {
     // Now build the program from llvm
       if (err != NULL) {
@@ -993,7 +1068,7 @@ EXTEND_QUOTE:
         err += *errSize;
       }
 
-      p = gbe_program_new_gen_program(deviceID, out_module, NULL);
+      p = gbe_program_new_gen_program(deviceID, out_module, NULL, NULL);
 
       if (OCL_OUTPUT_BUILD_LOG && options)
         llvm::errs() << options;
@@ -1038,6 +1113,10 @@ EXTEND_QUOTE:
       pos = s.find("-enable-link-options");
       if(pos != std::string::npos) {
         s.erase(pos, strlen("-enable-link-options"));
+      }
+      pos = s.find("-dump-opt-asm");
+      if(pos != std::string::npos) {
+        s.erase(pos, strlen("-dump-opt-asm"));
       }
       args.push_back(s.c_str());
 
@@ -1223,6 +1302,21 @@ EXTEND_QUOTE:
     kernel->getSamplerData(samplers);
   }
 
+  static void* kernelDupProfiling(gbe_kernel gbeKernel) {
+    if (gbeKernel == NULL) return NULL;
+    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
+    return kernel->dupProfilingInfo();
+  }
+  static uint32_t kernelGetProfilingBTI(gbe_kernel gbeKernel) {
+    if (gbeKernel == NULL) return 0;
+    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
+    return kernel->getProfilingBTI();
+  }
+  static void kernelOutputProfiling(void *profiling_info, void* buf) {
+    if (profiling_info == NULL) return;
+    ir::ProfilingInfo *pi = (ir::ProfilingInfo *)profiling_info;
+    return pi->outputProfilingInfo(buf);
+  }
   static uint32_t kernelGetPrintfNum(void * printf_info) {
     if (printf_info == NULL) return 0;
     const ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
@@ -1241,33 +1335,17 @@ EXTEND_QUOTE:
     return ps->getBufBTI();
   }
 
-  static uint8_t kernelGetPrintfIndexBufBTI(void * printf_info) {
-    if (printf_info == NULL) return 0;
-    const ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
-    return ps->getIndexBufBTI();
-  }
-
   static void kernelReleasePrintfSet(void * printf_info) {
     if (printf_info == NULL) return;
     ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
     delete ps;
   }
 
-  static uint32_t kernelGetPrintfSizeOfSize(void * printf_info) {
-    if (printf_info == NULL) return 0;
-    const ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
-    return ps->getPrintfSizeOfSize();
-  }
-
-  static void kernelOutputPrintf(void * printf_info, void* index_addr,
-                                 void* buf_addr, size_t global_wk_sz0,
-                                 size_t global_wk_sz1, size_t global_wk_sz2,
-                                 size_t output_sz)
+  static void kernelOutputPrintf(void * printf_info, void* buf_addr)
   {
     if (printf_info == NULL) return;
     ir::PrintfSet *ps = (ir::PrintfSet *)printf_info;
-    ps->outputPrintf(index_addr, buf_addr, global_wk_sz0,
-                         global_wk_sz1, global_wk_sz2, output_sz);
+    ps->outputPrintf(buf_addr);
   }
 
   static void kernelGetCompileWorkGroupSize(gbe_kernel gbeKernel, size_t wg_size[3]) {
@@ -1345,12 +1423,13 @@ GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_data_cb *gbe_kernel_get_sampler_data = 
 GBE_EXPORT_SYMBOL gbe_kernel_get_compile_wg_size_cb *gbe_kernel_get_compile_wg_size = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_image_size_cb *gbe_kernel_get_image_size = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_image_data_cb *gbe_kernel_get_image_data = NULL;
+GBE_EXPORT_SYMBOL gbe_output_profiling_cb *gbe_output_profiling = NULL;
+GBE_EXPORT_SYMBOL gbe_dup_profiling_cb *gbe_dup_profiling = NULL;
+GBE_EXPORT_SYMBOL gbe_get_profiling_bti_cb *gbe_get_profiling_bti = NULL;
 GBE_EXPORT_SYMBOL gbe_get_printf_num_cb *gbe_get_printf_num = NULL;
 GBE_EXPORT_SYMBOL gbe_dup_printfset_cb *gbe_dup_printfset = NULL;
 GBE_EXPORT_SYMBOL gbe_get_printf_buf_bti_cb *gbe_get_printf_buf_bti = NULL;
-GBE_EXPORT_SYMBOL gbe_get_printf_indexbuf_bti_cb *gbe_get_printf_indexbuf_bti = NULL;
 GBE_EXPORT_SYMBOL gbe_release_printf_info_cb *gbe_release_printf_info = NULL;
-GBE_EXPORT_SYMBOL gbe_get_printf_sizeof_size_cb *gbe_get_printf_sizeof_size = NULL;
 GBE_EXPORT_SYMBOL gbe_output_printf_cb *gbe_output_printf = NULL;
 
 #ifdef GBE_COMPILER_AVAILABLE
@@ -1394,11 +1473,12 @@ namespace gbe
       gbe_kernel_get_compile_wg_size = gbe::kernelGetCompileWorkGroupSize;
       gbe_kernel_get_image_size = gbe::kernelGetImageSize;
       gbe_kernel_get_image_data = gbe::kernelGetImageData;
+      gbe_get_profiling_bti = gbe::kernelGetProfilingBTI;
       gbe_get_printf_num = gbe::kernelGetPrintfNum;
+      gbe_dup_profiling = gbe::kernelDupProfiling;
+      gbe_output_profiling = gbe::kernelOutputProfiling;
       gbe_get_printf_buf_bti = gbe::kernelGetPrintfBufBTI;
-      gbe_get_printf_indexbuf_bti = gbe::kernelGetPrintfIndexBufBTI;
       gbe_dup_printfset = gbe::kernelDupPrintfSet;
-      gbe_get_printf_sizeof_size = gbe::kernelGetPrintfSizeOfSize;
       gbe_release_printf_info = gbe::kernelReleasePrintfSet;
       gbe_output_printf = gbe::kernelOutputPrintf;
       genSetupCallBacks();

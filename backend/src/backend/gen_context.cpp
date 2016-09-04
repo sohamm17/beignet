@@ -28,10 +28,12 @@
 #include "backend/gen_encoder.hpp"
 #include "backend/gen_insn_selection.hpp"
 #include "backend/gen_insn_scheduling.hpp"
+#include "backend/gen_insn_selection_output.hpp"
 #include "backend/gen_reg_allocation.hpp"
 #include "backend/gen/gen_mesa_disasm.h"
 #include "ir/function.hpp"
 #include "ir/value.hpp"
+#include "ir/profiling.hpp"
 #include "sys/cvar.hpp"
 #include <cstring>
 #include <iostream>
@@ -52,6 +54,7 @@ namespace gbe
     this->asmFileName = NULL;
     this->ifEndifFix = false;
     this->regSpillTick = 0;
+    this->inProfilingMode = false;
   }
 
   GenContext::~GenContext(void) {
@@ -91,6 +94,10 @@ namespace gbe
     return i;
   }
 
+  extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
+#define SET_GENINSN_DBGINFO(I) \
+  if(OCL_DEBUGINFO) p->DBGInfo = I.DBGInfo;
+      
   void GenContext::emitInstructionStream(void) {
     // Emit Gen ISA
     for (auto &block : *sel->blockList)
@@ -100,6 +107,7 @@ namespace gbe
       // no more virtual register here in that part of the code generation
       GBE_ASSERT(insn.state.physicalFlag);
       p->curr = insn.state;
+      SET_GENINSN_DBGINFO(insn);
       switch (opcode) {
 #define DECL_SELECTION_IR(OPCODE, FAMILY) \
   case SEL_OP_##OPCODE: this->emit##FAMILY(insn); break;
@@ -113,6 +121,7 @@ namespace gbe
     for(int i = 0; i < 8; i++)
 	p->NOP();
   }
+#undef SET_GENINSN_DBGINFO
 
   bool GenContext::patchBranches(void) {
     using namespace ir;
@@ -139,40 +148,65 @@ namespace gbe
   }
 
   /* Get proper block ip register according to current label width. */
-  static GenRegister getBlockIP(GenContext &ctx) {
+  GenRegister GenContext::getBlockIP(void) {
     GenRegister blockip;
-    if (!ctx.isDWLabel())
-      blockip = ctx.ra->genReg(GenRegister::uw8grf(ir::ocl::blockip));
+    if (!isDWLabel())
+      blockip = ra->genReg(GenRegister::uw8grf(ir::ocl::blockip));
     else
-      blockip = ctx.ra->genReg(GenRegister::ud8grf(ir::ocl::dwblockip));
+      blockip = ra->genReg(GenRegister::ud8grf(ir::ocl::dwblockip));
     return blockip;
   }
 
   /* Set current block ip register to a specified constant label value. */
-  static void setBlockIP(GenContext &ctx, GenRegister blockip, uint32_t label) {
-    if (!ctx.isDWLabel())
-      ctx.p->MOV(blockip, GenRegister::immuw(label));
+  void GenContext::setBlockIP(GenRegister blockip, uint32_t label) {
+    if (!isDWLabel())
+      p->MOV(blockip, GenRegister::immuw(label));
     else
-      ctx.p->MOV(blockip, GenRegister::immud(label));
+      p->MOV(blockip, GenRegister::immud(label));
   }
 
   void GenContext::clearFlagRegister(void) {
     // when group size not aligned to simdWidth, flag register need clear to
     // make prediction(any8/16h) work correctly
-    const GenRegister blockip = getBlockIP(*this);
-    const GenRegister zero = ra->genReg(GenRegister::uw1grf(ir::ocl::zero));
-    const GenRegister one = ra->genReg(GenRegister::uw1grf(ir::ocl::one));
+    const GenRegister blockip = getBlockIP();
     p->push();
       p->curr.noMask = 1;
       p->curr.predicate = GEN_PREDICATE_NONE;
-      setBlockIP(*this, blockip, getMaxLabel());
+      setBlockIP(blockip, getMaxLabel());
       p->curr.noMask = 0;
-      setBlockIP(*this, blockip, 0);
+      setBlockIP(blockip, 0);
       p->curr.execWidth = 1;
-      // FIXME, need to get the final use set of zero/one, if there is no user,
-      // no need to generate the following two instructions.
-      p->MOV(zero, GenRegister::immuw(0));
-      p->MOV(one, GenRegister::immw(-1));
+      if (ra->isAllocated(ir::ocl::zero))
+        p->MOV(ra->genReg(GenRegister::uw1grf(ir::ocl::zero)), GenRegister::immuw(0));
+      if (ra->isAllocated(ir::ocl::one))
+        p->MOV(ra->genReg(GenRegister::uw1grf(ir::ocl::one)), GenRegister::immw(-1));
+    p->pop();
+  }
+
+  void GenContext::loadLaneID(GenRegister dst) {
+    const GenRegister laneID = GenRegister::immv(0x76543210);
+    GenRegister dst_;
+    if (dst.type == GEN_TYPE_UW)
+      dst_ = dst;
+    else if (dst.type == GEN_TYPE_UD)
+      dst_ = GenRegister::retype(dst, GEN_TYPE_UW);
+    p->push();
+      uint32_t execWidth = p->curr.execWidth;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      if (execWidth == 8)
+        p->MOV(dst_, laneID);
+      else {
+        p->curr.execWidth = 8;
+        p->MOV(dst_, laneID);
+        //Packed Unsigned Half-Byte Integer Vector does not work
+        //have to mock by adding 8 to the singed vector
+        const GenRegister eight = GenRegister::immuw(8);
+        p->ADD(GenRegister::offset(dst_, 0, 16), dst_, eight);
+        p->curr.execWidth = 16;
+      }
+      if (dst.type != GEN_TYPE_UW)
+        p->MOV(dst, dst_);
     p->pop();
   }
 
@@ -180,36 +214,40 @@ namespace gbe
     using namespace ir;
 
     // Only emit stack pointer computation if we use a stack
-    if (kernel->getCurbeOffset(GBE_CURBE_STACK_POINTER, 0) <= 0)
+    if (kernel->getStackSize() == 0)
       return;
 
     // Check that everything is consistent in the kernel code
     const uint32_t perLaneSize = kernel->getStackSize();
-    const uint32_t perThreadSize = perLaneSize * this->simdWidth;
     GBE_ASSERT(perLaneSize > 0);
 
     const GenRegister selStatckPtr = this->simdWidth == 8 ?
       GenRegister::ud8grf(ir::ocl::stackptr) :
       GenRegister::ud16grf(ir::ocl::stackptr);
     const GenRegister stackptr = ra->genReg(selStatckPtr);
+    // borrow block ip as temporary register as we will
+    // initialize block ip latter.
+    const GenRegister tmpReg = GenRegister::retype(GenRegister::vec1(getBlockIP()), GEN_TYPE_UW);
+    const GenRegister tmpReg_ud = GenRegister::retype(tmpReg, GEN_TYPE_UD);
+
+    loadLaneID(stackptr);
 
     // We compute the per-lane stack pointer here
-    // threadId * perThreadSize + laneId*perLaneSize
+    // threadId * perThreadSize + laneId*perLaneSize or
+    // (threadId * simdWidth + laneId)*perLaneSize
     // let private address start from zero
+    //p->MOV(stackptr, GenRegister::immud(0));
     p->push();
       p->curr.execWidth = 1;
       p->curr.predicate = GEN_PREDICATE_NONE;
-      p->AND(GenRegister::ud1grf(126,0), GenRegister::ud1grf(0,5), GenRegister::immud(0x1ff));
+      p->AND(tmpReg, GenRegister::ud1grf(0,5), GenRegister::immuw(0x1ff)); //threadId
+      p->MUL(tmpReg, tmpReg, GenRegister::immuw(this->simdWidth));  //threadId * simdWidth
       p->curr.execWidth = this->simdWidth;
-      p->MUL(stackptr, stackptr, GenRegister::immuw(perLaneSize));  //perLaneSize < 64K
+      p->ADD(stackptr, GenRegister::unpacked_uw(stackptr), tmpReg);  //threadId * simdWidth + laneId, must < 64K
       p->curr.execWidth = 1;
-      if(perThreadSize > 0xffff) {
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(perLaneSize));
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(this->simdWidth));  //Only support W * D, perLaneSize < 64K
-      } else
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(perThreadSize));
+      p->MOV(tmpReg_ud, GenRegister::immud(perLaneSize));
       p->curr.execWidth = this->simdWidth;
-      p->ADD(stackptr, stackptr, GenRegister::ud1grf(126,0));
+      p->MUL(stackptr, tmpReg_ud, stackptr); // (threadId * simdWidth + laneId)*perLaneSize
     p->pop();
   }
 
@@ -297,12 +335,6 @@ namespace gbe
     GenRegister src = ra->genReg(insn.src(0));
     GenRegister tmp = ra->genReg(insn.dst(1));
     switch (insn.opcode) {
-      case SEL_OP_LOAD_DF_IMM:
-        p->LOAD_DF_IMM(dst, tmp, src.value.df);
-        break;
-      case SEL_OP_MOV_DF:
-        p->MOV_DF(dst, src, tmp);
-        break;
       case SEL_OP_CONVI_TO_I64: {
         GenRegister middle = src;
         if(src.type == GEN_TYPE_B || src.type == GEN_TYPE_W) {
@@ -389,12 +421,14 @@ namespace gbe
             GenRegister ind_src = GenRegister::to_indirect1xN(GenRegister::retype(src, GEN_TYPE_UB), new_a0[0], 0);
             p->MOV(GenRegister::retype(tmp, GEN_TYPE_UB), ind_src);
             for (int i = 1; i < 4; i++) {
-              ind_src.addr_imm += 8;
+              if (!uniform_src)
+                ind_src.addr_imm += 8;
               p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 0, 8*i), ind_src);
             }
             if (simd == 16) {
               for (int i = 0; i < 4; i++) {
-                ind_src.addr_imm += 8;
+                if (!uniform_src)
+                  ind_src.addr_imm += 8;
                 p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 1, 8*i), ind_src);
               }
             }
@@ -433,12 +467,123 @@ namespace gbe
             GenRegister ind_src = GenRegister::to_indirect1xN(GenRegister::retype(src, GEN_TYPE_UB), new_a0[0], 0);
             p->MOV(GenRegister::retype(tmp, GEN_TYPE_UB), ind_src);
             for (int i = 1; i < (simd == 8 ? 2 : 4); i++) {
-              ind_src.addr_imm += 8;
+              if (!uniform_src)
+                ind_src.addr_imm += 8;
               p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 0, 8*i), ind_src);
             }
             p->pop();
 
             p->MOV(dst, tmp);
+          }else if (src.type == GEN_TYPE_UL || src.type == GEN_TYPE_L) {
+            bool uniform_src = (src.hstride == GEN_HORIZONTAL_STRIDE_0);
+            GBE_ASSERT(uniform_src || src.subnr == 0);
+            GBE_ASSERT(dst.subnr == 0);
+            GBE_ASSERT(tmp.subnr == 0);
+            GBE_ASSERT(start_addr >= 0);
+            if (!uniform_src) {
+              new_a0[0] = start_addr + 3;
+              new_a0[1] = start_addr + 2;
+              new_a0[2] = start_addr + 1;
+              new_a0[3] = start_addr;
+              new_a0[4] = start_addr + 7;
+              new_a0[5] = start_addr + 6;
+              new_a0[6] = start_addr + 5;
+              new_a0[7] = start_addr + 4;
+            } else {
+              new_a0[0] = start_addr + 7;
+              new_a0[1] = start_addr + 6;
+              new_a0[2] = start_addr + 5;
+              new_a0[3] = start_addr + 4;
+              new_a0[4] = start_addr + 3;
+              new_a0[5] = start_addr + 2;
+              new_a0[6] = start_addr + 1;
+              new_a0[7] = start_addr;
+            }
+            this->setA0Content(new_a0, 56);
+
+            if (!uniform_src) {
+              p->push();
+              p->curr.execWidth = 8;
+              p->curr.predicate = GEN_PREDICATE_NONE;
+              p->curr.noMask = 1;
+              GenRegister ind_src = GenRegister::to_indirect1xN(GenRegister::retype(src, GEN_TYPE_UB), new_a0[0], 0);
+              p->MOV(GenRegister::retype(tmp, GEN_TYPE_UB), ind_src);
+              for (int i = 1; i < 4; i++) {
+                if (!uniform_src)
+                  ind_src.addr_imm += 8;
+                p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 0, 8*i), ind_src);
+              }
+              for (int i = 0; i < 4; i++) {
+                if (!uniform_src)
+                  ind_src.addr_imm += 8;
+                p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 1, 8*i), ind_src);
+              }
+              if (simd == 16) {
+                for (int i = 0; i < 4; i++) {
+                  if (!uniform_src)
+                    ind_src.addr_imm += 8;
+                  p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 2, 8*i), ind_src);
+                }
+                for (int i = 0; i < 4; i++) {
+                  if (!uniform_src)
+                    ind_src.addr_imm += 8;
+                  p->MOV(GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_UB), 3, 8*i), ind_src);
+                }
+              }
+              p->pop();
+
+              p->push();
+              p->curr.execWidth = 8;
+              p->curr.predicate = GEN_PREDICATE_NONE;
+              p->curr.noMask = 1;
+              if (simd == 8) {
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 1, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 0, 0));
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 0, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 1, 0));
+              }else if(simd == 16) {
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 2, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 0, 0));
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 3, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 1, 0));
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 0, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 2, 0));
+                p->MOV(GenRegister::offset(GenRegister::retype(dst, GEN_TYPE_D), 1, 0),
+                    GenRegister::offset(GenRegister::retype(tmp, GEN_TYPE_D), 3, 0));
+              }
+              p->pop();
+            } else {
+                p->push();
+                p->curr.execWidth = 8;
+                p->curr.predicate = GEN_PREDICATE_NONE;
+                p->curr.noMask = 1;
+                GenRegister ind_src = GenRegister::to_indirect1xN(GenRegister::retype(src, GEN_TYPE_UB), new_a0[0], 0);
+                p->MOV(GenRegister::retype(tmp, GEN_TYPE_UB), ind_src);
+                p->pop();
+
+                p->push();
+                p->curr.execWidth = 8;
+                p->curr.predicate = GEN_PREDICATE_NONE;
+                p->curr.noMask = 1;
+                GenRegister x = GenRegister::ud1grf(tmp.nr, 0);
+                GenRegister y = GenRegister::ud1grf(tmp.nr, 1);
+                GenRegister dst_ = dst;
+                dst_.type = GEN_TYPE_UD;
+                dst_.hstride = GEN_HORIZONTAL_STRIDE_1;
+                dst_.width = GEN_WIDTH_8;
+                dst_.vstride = GEN_VERTICAL_STRIDE_8;
+
+                if (simd == 8) {
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 0, 0), x);
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 1, 0), y);
+                }else if(simd == 16) {
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 0, 0), x);
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 1, 0), x);
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 2, 0), y);
+                  p->MOV(GenRegister::offset(GenRegister::retype(dst_, GEN_TYPE_D), 3, 0), y);
+                }
+                p->pop();
+            }
           } else {
             GBE_ASSERT(0);
           }
@@ -555,35 +700,29 @@ namespace gbe
     const GenRegister src0 = ra->genReg(insn.src(0));
     const GenRegister src1 = ra->genReg(insn.src(1));
     assert(insn.opcode == SEL_OP_SIMD_SHUFFLE);
+    assert (src1.file != GEN_IMMEDIATE_VALUE);
 
+    uint32_t base = src0.nr * 32 + src0.subnr * 4;
+    GenRegister baseReg = GenRegister::immuw(base);
+    const GenRegister a0 = GenRegister::addr8(0);
     uint32_t simd = p->curr.execWidth;
-    if (src1.file == GEN_IMMEDIATE_VALUE) {
-      uint32_t offset = src1.value.ud % simd;
-      GenRegister reg = GenRegister::suboffset(src0, offset);
-      p->MOV(dst, GenRegister::retype(GenRegister::ud1grf(reg.nr, reg.subnr / typeSize(reg.type)), reg.type));
-    } else {
-      uint32_t base = src0.nr * 32 + src0.subnr * 4;
-      GenRegister baseReg = GenRegister::immuw(base);
-      const GenRegister a0 = GenRegister::addr8(0);
+    p->push();
+      if (simd == 8) {
+        p->ADD(a0, GenRegister::unpacked_uw(src1.nr, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
+        GenRegister indirect = GenRegister::to_indirect1xN(src0, 0, 0);
+        p->MOV(dst, indirect);
+      } else if (simd == 16) {
+        p->curr.execWidth = 8;
+        p->ADD(a0, GenRegister::unpacked_uw(src1.nr, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
+        GenRegister indirect = GenRegister::to_indirect1xN(src0, 0, 0);
+        p->MOV(dst, indirect);
 
-      p->push();
-        if (simd == 8) {
-          p->ADD(a0, GenRegister::unpacked_uw(src1.nr, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
-          GenRegister indirect = GenRegister::to_indirect1xN(src0, 0, 0);
-          p->MOV(dst, indirect);
-        } else if (simd == 16) {
-          p->curr.execWidth = 8;
-          p->ADD(a0, GenRegister::unpacked_uw(src1.nr, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
-          GenRegister indirect = GenRegister::to_indirect1xN(src0, 0, 0);
-          p->MOV(dst, indirect);
-
-          p->curr.quarterControl = 1;
-          p->ADD(a0, GenRegister::unpacked_uw(src1.nr+1, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
-          p->MOV(GenRegister::offset(dst, 1, 0), indirect);
-        } else
-          NOT_IMPLEMENTED;
-      p->pop();
-    }
+        p->curr.quarterControl = 1;
+        p->ADD(a0, GenRegister::unpacked_uw(src1.nr+1, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
+        p->MOV(GenRegister::offset(dst, 1, 0), indirect);
+      } else
+        NOT_IMPLEMENTED;
+    p->pop();
   }
 
   void GenContext::emitBinaryInstruction(const SelectionInstruction &insn) {
@@ -1649,6 +1788,10 @@ namespace gbe
     }
   }
 
+  void GenContext::emitF64DIVInstruction(const SelectionInstruction &insn) {
+    GBE_ASSERT(0); // No support for double on Gen7
+  }
+
   void GenContext::emitTernaryInstruction(const SelectionInstruction &insn) {
     const GenRegister dst = ra->genReg(insn.dst(0));
     const GenRegister src0 = ra->genReg(insn.src(0));
@@ -1656,6 +1799,7 @@ namespace gbe
     const GenRegister src2 = ra->genReg(insn.src(2));
     switch (insn.opcode) {
       case SEL_OP_MAD:  p->MAD(dst, src0, src1, src2); break;
+      case SEL_OP_LRP:  p->LRP(dst, src0, src1, src2); break;
       default: NOT_IMPLEMENTED;
     }
   }
@@ -1665,7 +1809,7 @@ namespace gbe
   }
 
   void GenContext::emitWaitInstruction(const SelectionInstruction &insn) {
-    p->WAIT();
+    p->WAIT(insn.extra.waitType);
   }
 
   void GenContext::emitBarrierInstruction(const SelectionInstruction &insn) {
@@ -1690,6 +1834,7 @@ namespace gbe
       p->BARRIER(src);
       p->curr.execWidth = 1;
       // Now we wait for the other threads
+      p->curr.predicate = GEN_PREDICATE_NONE;
       p->WAIT();
     p->pop();
   }
@@ -1736,16 +1881,17 @@ namespace gbe
       p->ATOMIC(dst, function, src, bti, srcNum);
     } else {
       GenRegister flagTemp = ra->genReg(insn.dst(1));
+      GenRegister btiTmp = ra->genReg(insn.dst(2));
 
       unsigned desc = p->generateAtomicMessageDesc(function, 0, srcNum);
 
-      unsigned jip0 = beforeMessage(insn, bti, flagTemp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, flagTemp, btiTmp, desc);
       p->push();
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->ATOMIC(dst, function, src, GenRegister::addr1(0), srcNum);
       p->pop();
-      afterMessage(insn, bti, flagTemp, jip0);
+      afterMessage(insn, bti, flagTemp, btiTmp, jip0);
     }
   }
 
@@ -1763,7 +1909,7 @@ namespace gbe
     if(sel->isScalarReg(offset.reg()))
       offset = GenRegister::retype(offset, GEN_TYPE_UW);
     else
-      offset = GenRegister::unpacked_uw(offset.nr, offset.subnr / typeSize(GEN_TYPE_UW));
+      offset = GenRegister::unpacked_uw(offset);
     uint32_t baseRegOffset = GenRegister::grfOffset(baseReg);
     //There is a restrict that: lower 5 bits indirect reg SubRegNum and
     //the lower 5 bits of indirect imm SubRegNum cannot exceed 5 bits.
@@ -1887,9 +2033,10 @@ namespace gbe
       p->UNTYPED_READ(dst, src, bti, elemNum);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(elemNum));
+      const GenRegister btiTmp = ra->genReg(insn.dst(elemNum + 1));
       unsigned desc = p->generateUntypedReadMessageDesc(0, elemNum);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -1897,17 +2044,17 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->UNTYPED_READ(dst, src, GenRegister::retype(GenRegister::addr1(0), GEN_TYPE_UD), elemNum);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
-  unsigned GenContext::beforeMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister tmp, unsigned desc) {
+  unsigned GenContext::beforeMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister tmp, GenRegister btiTmp, unsigned desc) {
       const GenRegister flagReg = GenRegister::flag(insn.state.flag, insn.state.subFlag);
       setFlag(flagReg, GenRegister::immuw(0));
       p->CMP(GEN_CONDITIONAL_NZ, flagReg, GenRegister::immuw(1));
 
-      GenRegister btiUD = ra->genReg(GenRegister::ud1grf(ir::ocl::btiUtil));
-      GenRegister btiUW = ra->genReg(GenRegister::uw1grf(ir::ocl::btiUtil));
-      GenRegister btiUB = ra->genReg(GenRegister::ub1grf(ir::ocl::btiUtil));
+      GenRegister btiUD = GenRegister::retype(btiTmp, GEN_TYPE_UD);
+      GenRegister btiUW = GenRegister::retype(btiTmp, GEN_TYPE_UW);
+      GenRegister btiUB = GenRegister::retype(btiTmp, GEN_TYPE_UB);
       unsigned jip0 = p->n_instruction();
       p->push();
         p->curr.execWidth = 1;
@@ -1930,8 +2077,8 @@ namespace gbe
       p->pop();
       return jip0;
   }
-  void GenContext::afterMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister tmp, unsigned jip0) {
-    const GenRegister btiUD = ra->genReg(GenRegister::ud1grf(ir::ocl::btiUtil));
+  void GenContext::afterMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister tmp, GenRegister btiTmp, unsigned jip0) {
+    const GenRegister btiUD = GenRegister::retype(btiTmp, GEN_TYPE_UD);
       //restore flag
       setFlag(GenRegister::flag(insn.state.flag, insn.state.subFlag), tmp);
       // get active channel
@@ -1955,9 +2102,10 @@ namespace gbe
       p->UNTYPED_READ(dst, src, bti, elemNum);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(elemNum));
+      const GenRegister btiTmp = ra->genReg(insn.dst(elemNum + 1));
       unsigned desc = p->generateUntypedReadMessageDesc(0, elemNum);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -1965,7 +2113,7 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->UNTYPED_READ(dst, src, GenRegister::retype(GenRegister::addr1(0), GEN_TYPE_UD), elemNum);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
 
@@ -1978,9 +2126,10 @@ namespace gbe
       p->UNTYPED_WRITE(src, bti, elemNum*2);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
+      const GenRegister btiTmp = ra->genReg(insn.dst(1));
       unsigned desc = p->generateUntypedWriteMessageDesc(0, elemNum*2);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -1988,7 +2137,7 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->UNTYPED_WRITE(src, GenRegister::addr1(0), elemNum*2);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
 
@@ -2000,9 +2149,10 @@ namespace gbe
       p->UNTYPED_WRITE(src, bti, elemNum);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
+      const GenRegister btiTmp = ra->genReg(insn.dst(1));
       unsigned desc = p->generateUntypedWriteMessageDesc(0, elemNum);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -2010,7 +2160,7 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->UNTYPED_WRITE(src, GenRegister::addr1(0), elemNum);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
 
@@ -2024,9 +2174,10 @@ namespace gbe
       p->BYTE_GATHER(dst, src, bti, elemSize);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(1));
+      const GenRegister btiTmp = ra->genReg(insn.dst(2));
       unsigned desc = p->generateByteGatherMessageDesc(0, elemSize);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -2034,7 +2185,7 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->BYTE_GATHER(dst, src, GenRegister::addr1(0), elemSize);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
 
@@ -2047,9 +2198,10 @@ namespace gbe
       p->BYTE_SCATTER(src, bti, elemSize);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
+      const GenRegister btiTmp = ra->genReg(insn.dst(1));
       unsigned desc = p->generateByteScatterMessageDesc(0, elemSize);
 
-      unsigned jip0 = beforeMessage(insn, bti, tmp, desc);
+      unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
       //predicated load
       p->push();
@@ -2057,7 +2209,7 @@ namespace gbe
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
         p->BYTE_SCATTER(src, GenRegister::addr1(0), elemSize);
       p->pop();
-      afterMessage(insn, bti, tmp, jip0);
+      afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
 
   }
@@ -2116,6 +2268,104 @@ namespace gbe
     p->SAMPLE(dst, msgPayload, msgLen, false, bti, sampler, simdWidth, -1, 0, insn.extra.isLD, insn.extra.isUniform);
   }
 
+  void GenContext::emitVmeInstruction(const SelectionInstruction &insn) {
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const unsigned int msg_type = insn.extra.msg_type;
+
+    GBE_ASSERT(msg_type == 1);
+    int rsp_len;
+    if(msg_type == 1)
+      rsp_len = 6;
+    uint32_t execWidth_org = p->curr.execWidth;
+    p->push();
+    p->curr.predicate = GEN_PREDICATE_NONE;
+    p->curr.noMask = 1;
+    p->curr.execWidth = 1;
+    /* Use MOV to Setup bits of payload: mov payload value stored in insn.src(x) to
+     * 5 consecutive payload grf.
+     * In simd8 mode, one virtual grf register map to one physical grf register. But
+     * in simd16 mode, one virtual grf register map to two physical grf registers.
+     * So we should treat them differently.
+     * */
+    if(execWidth_org == 8){
+      for(int i=0; i < 5; i++){
+        GenRegister payload_grf = ra->genReg(insn.dst(rsp_len+i));
+        payload_grf.vstride = GEN_VERTICAL_STRIDE_0;
+        payload_grf.width = GEN_WIDTH_1;
+        payload_grf.hstride = GEN_HORIZONTAL_STRIDE_0;
+        payload_grf.subphysical = 1;
+        for(int j=0; j < 8; j++){
+          payload_grf.subnr = (7 - j) * typeSize(GEN_TYPE_UD);
+          GenRegister payload_val = ra->genReg(insn.src(i*8+j));
+          payload_val.vstride = GEN_VERTICAL_STRIDE_0;
+          payload_val.width = GEN_WIDTH_1;
+          payload_val.hstride = GEN_HORIZONTAL_STRIDE_0;
+
+          p->MOV(payload_grf, payload_val);
+        }
+      }
+    }
+    else if(execWidth_org == 16){
+      for(int i=0; i < 2; i++){
+        for(int k = 0; k < 2; k++){
+          GenRegister payload_grf = ra->genReg(insn.dst(rsp_len+i));
+          payload_grf.nr += k;
+          payload_grf.vstride = GEN_VERTICAL_STRIDE_0;
+          payload_grf.width = GEN_WIDTH_1;
+          payload_grf.hstride = GEN_HORIZONTAL_STRIDE_0;
+          payload_grf.subphysical = 1;
+          for(int j=0; j < 8; j++){
+            payload_grf.subnr = (7 - j) * typeSize(GEN_TYPE_UD);
+            GenRegister payload_val = ra->genReg(insn.src(i*16+k*8+j));
+            payload_val.vstride = GEN_VERTICAL_STRIDE_0;
+            payload_val.width = GEN_WIDTH_1;
+            payload_val.hstride = GEN_HORIZONTAL_STRIDE_0;
+
+            p->MOV(payload_grf, payload_val);
+          }
+        }
+      }
+      {
+        int i = 2;
+        GenRegister payload_grf = ra->genReg(insn.dst(rsp_len+i));
+        payload_grf.vstride = GEN_VERTICAL_STRIDE_0;
+        payload_grf.width = GEN_WIDTH_1;
+        payload_grf.hstride = GEN_HORIZONTAL_STRIDE_0;
+        payload_grf.subphysical = 1;
+        for(int j=0; j < 8; j++){
+          payload_grf.subnr = (7 - j) * typeSize(GEN_TYPE_UD);
+          GenRegister payload_val = ra->genReg(insn.src(i*16+j));
+          payload_val.vstride = GEN_VERTICAL_STRIDE_0;
+          payload_val.width = GEN_WIDTH_1;
+          payload_val.hstride = GEN_HORIZONTAL_STRIDE_0;
+
+          p->MOV(payload_grf, payload_val);
+        }
+      }
+    }
+    p->pop();
+
+    p->push();
+    p->curr.predicate = GEN_PREDICATE_NONE;
+    p->curr.noMask = 1;
+    p->curr.execWidth = 1;
+    GenRegister payload_did = GenRegister::retype(ra->genReg(insn.dst(rsp_len)), GEN_TYPE_UB);
+    payload_did.vstride = GEN_VERTICAL_STRIDE_0;
+    payload_did.width = GEN_WIDTH_1;
+    payload_did.hstride = GEN_HORIZONTAL_STRIDE_0;
+    payload_did.subphysical = 1;
+    payload_did.subnr = 20 * typeSize(GEN_TYPE_UB);
+    GenRegister grf0 = GenRegister::ub1grf(0, 20);
+    p->MOV(payload_did, grf0);
+    p->pop();
+
+    const GenRegister msgPayload = ra->genReg(insn.dst(rsp_len));
+    const unsigned char bti = insn.getbti();
+    const unsigned int vme_search_path_lut = insn.extra.vme_search_path_lut;
+    const unsigned int lut_sub = insn.extra.lut_sub;
+    p->VME(bti, dst, msgPayload, msg_type, vme_search_path_lut, lut_sub);
+  }
+
   void GenContext::scratchWrite(const GenRegister header, uint32_t offset, uint32_t reg_num, uint32_t reg_type, uint32_t channel_mode) {
     p->push();
     uint32_t simdWidth = p->curr.execWidth;
@@ -2153,6 +2403,1073 @@ namespace gbe
     p->TYPED_WRITE(header, true, bti);
   }
 
+  static void calcGID(GenRegister& reg, GenRegister& tmp, int flag, int subFlag, int dim, GenContext *gc)
+  {
+    GenRegister flagReg = GenRegister::flag(flag, subFlag);
+    GenRegister gstart = GenRegister::offset(reg, 0, 8 + dim*8);
+    GenRegister gend = GenRegister::offset(gstart, 0, 4);
+    GenRegister lid, localsz, gid, goffset;
+    if (dim == 0) {
+      lid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud16grf(ir::ocl::lid0)), GEN_TYPE_UD);
+      localsz = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::lsize0)), GEN_TYPE_UD);
+      gid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::groupid0)), GEN_TYPE_UD);
+      goffset = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::goffset0)), GEN_TYPE_UD);
+    } else if (dim == 1) {
+      lid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud16grf(ir::ocl::lid1)), GEN_TYPE_UD);
+      localsz = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::lsize1)), GEN_TYPE_UD);
+      gid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::groupid1)), GEN_TYPE_UD);
+      goffset = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::goffset1)), GEN_TYPE_UD);
+    } else {
+      lid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud16grf(ir::ocl::lid2)), GEN_TYPE_UD);
+      localsz = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::lsize2)), GEN_TYPE_UD);
+      gid = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::groupid2)), GEN_TYPE_UD);
+      goffset = GenRegister::toUniform(gc->ra->genReg(GenRegister::ud1grf(ir::ocl::goffset2)), GEN_TYPE_UD);
+    }
+
+    gc->p->MUL(gstart, localsz, gid);
+    gc->p->ADD(gstart, gstart, lid);
+    gc->p->ADD(gstart, gstart, goffset);
+
+    GenRegister ip;
+    gc->p->MOV(flagReg, GenRegister::immuw(0x0));
+    gc->p->curr.useFlag(flag, subFlag);
+    gc->p->curr.predicate = GEN_PREDICATE_NONE;
+    if (gc->getSimdWidth() == 16)
+      gc->p->curr.execWidth = 16;
+    else
+      gc->p->curr.execWidth = 8;
+
+    if (!gc->isDWLabel()) {
+      ip = gc->ra->genReg(GenRegister::uw16grf(ir::ocl::blockip));
+      gc->p->CMP(GEN_CONDITIONAL_EQ, ip, GenRegister::immuw(0xffff));
+    } else {
+      ip = gc->ra->genReg(GenRegister::ud16grf(ir::ocl::dwblockip));
+      gc->p->CMP(GEN_CONDITIONAL_EQ, ip, GenRegister::immud(0xffffffff));
+    }
+    gc->p->curr.execWidth = 1;
+    gc->p->MOV(GenRegister::retype(tmp, GEN_TYPE_UW), flagReg);
+
+    if (gc->getSimdWidth() == 16)
+      gc->p->OR(tmp, tmp, GenRegister::immud(0xffff0000));
+    else
+      gc->p->OR(tmp, tmp, GenRegister::immud(0xffffff00));
+
+    gc->p->FBL(tmp, tmp);
+    gc->p->ADD(tmp, tmp, GenRegister::negate(GenRegister::immud(0x1)));
+    gc->p->MUL(tmp, tmp, GenRegister::immud(4));
+    gc->p->ADD(tmp, tmp, GenRegister::immud(lid.nr*32));
+    gc->p->MOV(GenRegister::addr1(0), GenRegister::retype(tmp, GEN_TYPE_UW));
+    GenRegister dimEnd = GenRegister::to_indirect1xN(lid, 0, 0);
+    gc->p->MOV(tmp, dimEnd);
+    gc->p->MUL(gend, localsz, gid);
+    gc->p->ADD(gend, gend, tmp);
+    gc->p->ADD(gend, gend, goffset);
+  }
+
+  void GenContext::calcGlobalXYZRange(GenRegister& reg, GenRegister& tmp, int flag, int subFlag)
+  {
+    p->push(); {
+      p->curr.execWidth = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      calcGID(reg, tmp, flag, subFlag, 0, this);
+      calcGID(reg, tmp, flag, subFlag, 1, this);
+      calcGID(reg, tmp, flag, subFlag, 2, this);
+    } p->pop();
+  }
+
+  void GenContext::profilingProlog(void) {
+    // record the prolog, globalXYZ and lasttimestamp at the very beginning.
+    GenRegister profilingReg2, profilingReg3, profilingReg4;
+    GenRegister tmArf = GenRegister::tm0();
+    if (this->simdWidth == 16) {
+      profilingReg2 = ra->genReg(GenRegister::ud16grf(ir::ocl::profilingts1));
+      profilingReg3 = GenRegister::offset(profilingReg2, 1);
+      profilingReg4 = ra->genReg(GenRegister::ud16grf(ir::ocl::profilingts2));
+    } else {
+      GBE_ASSERT(this->simdWidth == 8);
+      profilingReg2 = ra->genReg(GenRegister::ud8grf(ir::ocl::profilingts2));
+      profilingReg3 = ra->genReg(GenRegister::ud8grf(ir::ocl::profilingts3));
+      profilingReg4 = ra->genReg(GenRegister::ud8grf(ir::ocl::profilingts4));
+    }
+
+    /* MOV(4)   prolog<1>:UW   arf_tm<4,4,1>:UW  */
+    /* MOV(4)   lastTsReg<1>:UW  prolog<4,4,1>:UW  */
+    GenRegister prolog = profilingReg2;
+    prolog.type = GEN_TYPE_UW;
+    prolog.hstride = GEN_HORIZONTAL_STRIDE_1;
+    prolog.vstride = GEN_VERTICAL_STRIDE_4;
+    prolog.width = GEN_WIDTH_4;
+    prolog = GenRegister::offset(prolog, 0, 4*sizeof(uint32_t));
+
+    GenRegister lastTsReg = GenRegister::toUniform(profilingReg3, GEN_TYPE_UL);
+    lastTsReg = GenRegister::offset(lastTsReg, 0, 2*sizeof(uint64_t));
+    lastTsReg.type = GEN_TYPE_UW;
+    lastTsReg.hstride = GEN_HORIZONTAL_STRIDE_1;
+    lastTsReg.vstride = GEN_VERTICAL_STRIDE_4;
+    lastTsReg.width = GEN_WIDTH_4;
+
+    GenRegister gids = GenRegister::toUniform(profilingReg4, GEN_TYPE_UD);
+    GenRegister tmp = GenRegister::toUniform(profilingReg4, GEN_TYPE_UD);
+
+    // X Y and Z
+    this->calcGlobalXYZRange(gids, tmp, 0, 1);
+
+    p->push(); {
+      p->curr.execWidth = 4;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->MOV(prolog, tmArf);
+      p->MOV(lastTsReg, tmArf);
+    } p->pop();
+
+    p->NOP();
+    p->NOP();
+    return;
+  }
+
+  void GenContext::subTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp)
+  {
+    p->push(); {
+      p->curr.execWidth = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->SUBB(GenRegister::retype(t0, GEN_TYPE_UD),
+          GenRegister::retype(t0, GEN_TYPE_UD), GenRegister::retype(t1, GEN_TYPE_UD));
+      /* FIXME We can not get the acc register's value correctly by set simd = 1. */
+      p->curr.execWidth = 8;
+      p->MOV(tmp, GenRegister::retype(GenRegister::acc(), GEN_TYPE_UD));
+      p->curr.execWidth = 1;
+      p->ADD(GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::negate(GenRegister::toUniform(tmp, GEN_TYPE_UD)));
+      p->ADD(GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::negate(GenRegister::retype(GenRegister::offset(t1, 0, sizeof(uint32_t)), GEN_TYPE_UD)));
+    } p->pop();
+  }
+
+  void GenContext::addTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp)
+  {
+    p->push(); {
+      p->curr.execWidth = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->ADDC(GenRegister::retype(t0, GEN_TYPE_UD),
+          GenRegister::retype(t0, GEN_TYPE_UD), GenRegister::retype(t1, GEN_TYPE_UD));
+      p->curr.execWidth = 8;
+      p->MOV(tmp, GenRegister::retype(GenRegister::acc(), GEN_TYPE_UD));
+      p->curr.execWidth = 1;
+      p->ADD(GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::offset(GenRegister::toUniform(tmp, GEN_TYPE_UD), 0, 6*sizeof(uint32_t)));
+      p->ADD(GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::retype(GenRegister::offset(t0, 0, sizeof(uint32_t)), GEN_TYPE_UD),
+          GenRegister::retype(GenRegister::offset(t1, 0, sizeof(uint32_t)), GEN_TYPE_UD));
+    } p->pop();
+  }
+
+  /* We will record at most 20 timestamps, each one is 16bits. We also will record the
+     prolog and epilog timestamps in 64 bits. So the format of the curbe timestamp reg is:
+     ---------------------------------------------------------
+     | ts0  | ts1  | ts2  | ts3  | ts4  | ts5  | ts6  | ts7	|  profilingReg0
+     | ts8  | ts9  | ts10 | ts11 | ts12 | ts13 | ts14 | ts15 |  profilingReg1
+     | ts16 | ts17 | ts18 | ts19 |	 prolog   |    epilog	|  profilingReg2
+     ---------------------------------------------------------
+     |    tmp0     |    tmp1     |lasttimestamp|  real clock |  profilingReg3
+     ---------------------------------------------------------
+     |	      | gX s | gX e | gY s | gY e | gZ s | gZ e |  profilingReg4
+     ---------------------------------------------------------
+     */
+  void GenContext::emitCalcTimestampInstruction(const SelectionInstruction &insn)
+  {
+    uint32_t pointNum = insn.extra.pointNum;
+    uint32_t tsType = insn.extra.timestampType;
+    GenRegister flagReg = GenRegister::flag(insn.state.flag, insn.state.subFlag);
+
+    GBE_ASSERT(tsType == 1);
+    GenRegister tmArf = GenRegister::tm0();
+    GenRegister profilingReg[5];
+    GenRegister tmp;
+    if (p->curr.execWidth == 16) {
+      profilingReg[0] = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+      profilingReg[1] = GenRegister::offset(profilingReg[0], 1);
+      profilingReg[2] = GenRegister::retype(ra->genReg(insn.src(1)), GEN_TYPE_UD);
+      profilingReg[3] = GenRegister::offset(profilingReg[2], 1);
+      profilingReg[4] = GenRegister::retype(ra->genReg(insn.src(2)), GEN_TYPE_UD);
+      if (insn.dstNum == 4) {
+        tmp = GenRegister::retype(ra->genReg(insn.dst(3)), GEN_TYPE_UD);
+      } else {
+        GBE_ASSERT(insn.dstNum == 3);
+        tmp = GenRegister::toUniform(profilingReg[4], GEN_TYPE_UL);
+      }
+    } else {
+      GBE_ASSERT(p->curr.execWidth == 8);
+      profilingReg[0] = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+      profilingReg[1] = GenRegister::retype(ra->genReg(insn.src(1)), GEN_TYPE_UD);
+      profilingReg[2] = GenRegister::retype(ra->genReg(insn.src(2)), GEN_TYPE_UD);
+      profilingReg[3] = GenRegister::retype(ra->genReg(insn.src(3)), GEN_TYPE_UD);
+      profilingReg[4] = GenRegister::retype(ra->genReg(insn.src(4)), GEN_TYPE_UD);
+      if (insn.dstNum == 6) {
+        tmp = GenRegister::retype(ra->genReg(insn.dst(5)), GEN_TYPE_UD);
+      } else {
+        GBE_ASSERT(insn.dstNum == 5);
+        tmp = GenRegister::toUniform(profilingReg[4], GEN_TYPE_UL);
+      }
+    }
+    GenRegister tmp0 = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UL);
+    GenRegister lastTsReg = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UL);
+    lastTsReg = GenRegister::offset(lastTsReg, 0, 2*sizeof(uint64_t));
+    GenRegister realClock = GenRegister::offset(lastTsReg, 0, sizeof(uint64_t));
+
+    /* MOV(4)   tmp0<1>:UW	   arf_tm<4,4,1>:UW  */
+    p->push(); {
+      p->curr.execWidth = 4;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      GenRegister _tmp0 = tmp0;
+      _tmp0.type = GEN_TYPE_UW;
+      _tmp0.hstride = GEN_HORIZONTAL_STRIDE_1;
+      _tmp0.vstride = GEN_VERTICAL_STRIDE_4;
+      _tmp0.width = GEN_WIDTH_4;
+      p->MOV(_tmp0, tmArf);
+    } p->pop();
+
+    /* Calc the time elapsed. */
+    // SUB(1)  tmp0<1>:UL  tmp0<1>:UL   lastTS<0,1,0>
+    subTimestamps(tmp0, lastTsReg, tmp);
+
+    /* Update the real clock
+       ADD(1)   realclock<1>:UL  realclock<1>:UL  tmp0<1>:UL */
+    addTimestamps(realClock, tmp0, tmp);
+
+    /* We just record timestamp of the first time this point is reached. If the this point is
+       in loop, it can be reached many times. We will not record the later timestamps. The 32bits
+       timestamp can represent about 3.2s, one each kernel's execution time should never exceed
+       3s. So we just record the low 32 bits.
+       CMP.EQ(1)flag0.1	  NULL		tsReg_n<1>:UD  0x0
+       (+flag0.1) MOV(1)   tsReg_n<1>:UD  realclock<1>:UD  Just record the low 32bits
+       */
+    GenRegister tsReg = GenRegister::toUniform(profilingReg[pointNum/8], GEN_TYPE_UD);
+    tsReg = GenRegister::offset(tsReg, 0, (pointNum%8)*sizeof(uint32_t));
+
+    p->push(); {
+      p->curr.execWidth = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->curr.useFlag(flagReg.flag_nr(), flagReg.flag_subnr());
+      p->CMP(GEN_CONDITIONAL_EQ, tsReg, GenRegister::immud(0));
+      p->curr.predicate = GEN_PREDICATE_NORMAL;
+      p->curr.inversePredicate = 0;
+      p->MOV(tsReg, GenRegister::retype(GenRegister::retype(realClock, GEN_TYPE_UD), GEN_TYPE_UD));
+    } p->pop();
+
+    /* Store the timestamp for next point use.
+       MOV(4)   lastTS<1>:UW     arf_tm<4,4,1>:UW  */
+    p->push(); {
+      p->curr.execWidth = 4;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      GenRegister _lastTsReg = lastTsReg;
+      _lastTsReg.type = GEN_TYPE_UW;
+      _lastTsReg.hstride = GEN_HORIZONTAL_STRIDE_1;
+      _lastTsReg.vstride = GEN_VERTICAL_STRIDE_4;
+      _lastTsReg.width = GEN_WIDTH_4;
+      p->MOV(_lastTsReg, tmArf);
+    } p->pop();
+  }
+
+  void GenContext::emitStoreProfilingInstruction(const SelectionInstruction &insn) {
+    uint32_t simdType;
+    if (this->simdWidth == 16) {
+      simdType = ir::ProfilingInfo::ProfilingSimdType16;
+    } else if (this->simdWidth == 8) {
+      simdType = ir::ProfilingInfo::ProfilingSimdType8;
+    } else {
+      simdType = ir::ProfilingInfo::ProfilingSimdType1;
+      GBE_ASSERT(0);
+    }
+
+    p->NOP();
+    p->NOP();
+
+    GenRegister tmArf = GenRegister::tm0();
+    GenRegister profilingReg[5];
+    if (p->curr.execWidth == 16) {
+      profilingReg[0] = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+      profilingReg[1] = GenRegister::offset(profilingReg[0], 1);
+      profilingReg[2] = GenRegister::retype(ra->genReg(insn.src(1)), GEN_TYPE_UD);
+      profilingReg[3] = GenRegister::offset(profilingReg[2], 1);
+      profilingReg[4] = GenRegister::retype(ra->genReg(insn.src(2)), GEN_TYPE_UD);
+    } else {
+      GBE_ASSERT(p->curr.execWidth == 8);
+      profilingReg[0] = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+      profilingReg[1] = GenRegister::retype(ra->genReg(insn.src(1)), GEN_TYPE_UD);
+      profilingReg[2] = GenRegister::retype(ra->genReg(insn.src(2)), GEN_TYPE_UD);
+      profilingReg[3] = GenRegister::retype(ra->genReg(insn.src(3)), GEN_TYPE_UD);
+      profilingReg[4] = GenRegister::retype(ra->genReg(insn.src(4)), GEN_TYPE_UD);
+    }
+    GenRegister tmp = ra->genReg(insn.dst(0));
+    uint32_t profilingType = insn.extra.profilingType;
+    uint32_t bti = insn.extra.profilingBTI;
+    GBE_ASSERT(profilingType == 1);
+    GenRegister flagReg = GenRegister::flag(insn.state.flag, insn.state.subFlag);
+    GenRegister lastTsReg = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UL);
+    lastTsReg = GenRegister::offset(lastTsReg, 0, 2*sizeof(uint64_t));
+    GenRegister realClock = GenRegister::offset(lastTsReg, 0, sizeof(uint64_t));
+    GenRegister tmp0 = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UL);
+
+    /* MOV(4)   tmp0<1>:UW	 arf_tm<4,4,1>:UW  */
+    p->push(); {
+      p->curr.execWidth = 4;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      GenRegister _tmp0 = tmp0;
+      _tmp0.type = GEN_TYPE_UW;
+      _tmp0.hstride = GEN_HORIZONTAL_STRIDE_1;
+      _tmp0.vstride = GEN_VERTICAL_STRIDE_4;
+      _tmp0.width = GEN_WIDTH_4;
+      p->MOV(_tmp0, tmArf);
+    } p->pop();
+
+    /* Calc the time elapsed. */
+    subTimestamps(tmp0, lastTsReg, tmp);
+    /* Update the real clock */
+    addTimestamps(realClock, tmp0, tmp);
+
+    //the epilog, record the last timestamp and return.
+    /* MOV(1)   epilog<1>:UL   realclock<0,1,0>:UL  */
+    /* ADD(1)   epilog<1>:UL   prolog<0,1,0>:UL  */
+    GenRegister prolog = GenRegister::toUniform(profilingReg[2], GEN_TYPE_UD);
+    prolog = GenRegister::offset(prolog, 0, 4*sizeof(uint32_t));
+    GenRegister epilog = GenRegister::offset(prolog, 0, 2*sizeof(uint32_t));
+    p->push(); {
+      p->curr.execWidth = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->MOV(epilog, GenRegister::retype(realClock, GEN_TYPE_UD));
+      p->MOV(GenRegister::offset(epilog, 0, sizeof(uint32_t)),
+          GenRegister::offset(GenRegister::retype(realClock, GEN_TYPE_UD), 0, sizeof(uint32_t)));
+      addTimestamps(epilog, prolog, tmp);
+    } p->pop();
+
+    /* Now, begin to write the results out. */
+    // Inc the log items number.
+    p->push(); {
+      //ptr[0] is the total count of the log items.
+      GenRegister sndMsg = GenRegister::retype(tmp, GEN_TYPE_UD);
+      sndMsg.width = GEN_WIDTH_8;
+      sndMsg.hstride = GEN_HORIZONTAL_STRIDE_1;
+      sndMsg.vstride = GEN_VERTICAL_STRIDE_8;
+      p->curr.execWidth = 8;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->MOV(sndMsg, GenRegister::immud(0x0));
+
+      GenRegister incRes = GenRegister::offset(sndMsg, 1);
+      p->push();
+      {
+        p->curr.execWidth = 1;
+        p->MOV(flagReg, GenRegister::immuw(0x01));
+      }
+      p->pop();
+      p->curr.useFlag(insn.state.flag, insn.state.subFlag);
+      p->curr.predicate = GEN_PREDICATE_NORMAL;
+      p->ATOMIC(incRes, GEN_ATOMIC_OP_INC, sndMsg, GenRegister::immud(bti), 1);
+    } p->pop();
+
+    // Calculate the final addr
+    GenRegister addr = GenRegister::retype(tmp, GEN_TYPE_UD);
+    addr.width = GEN_WIDTH_8;
+    addr.hstride = GEN_HORIZONTAL_STRIDE_1;
+    addr.vstride = GEN_VERTICAL_STRIDE_8;
+    p->push(); {
+      GenRegister offset = GenRegister::offset(addr, 1);
+
+      p->curr.execWidth = 8;
+      p->curr.noMask = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->MUL(addr, GenRegister::toUniform(offset, GEN_TYPE_UD),
+          GenRegister::immud(sizeof(ir::ProfilingInfo::ProfilingReportItem)));
+      p->ADD(addr, addr, GenRegister::immud(4)); // for the counter
+      p->curr.execWidth = 1;
+      for (int i = 1; i < 8; i++) {
+        p->ADD(GenRegister::toUniform(GenRegister::offset(addr, 0, i*sizeof(uint32_t)), GEN_TYPE_UD),
+            GenRegister::toUniform(GenRegister::offset(addr, 0, i*sizeof(uint32_t)), GEN_TYPE_UD),
+            GenRegister::immud(i*sizeof(uint32_t)));
+      }
+    } p->pop();
+
+    GenRegister data = GenRegister::offset(addr, 1);
+    p->push(); {
+      p->curr.execWidth = 8;
+      p->curr.noMask = 1;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->MOV(data, profilingReg[4]);
+    } p->pop();
+
+    // Write the result out
+    p->push(); {
+      GenRegister ffid = GenRegister::toUniform(data, GEN_TYPE_UD);
+      GenRegister tmp = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UD);
+      GenRegister stateReg =  GenRegister::sr(0, 0);
+      p->curr.noMask = 1;
+      p->curr.execWidth = 1;
+      p->MOV(ffid, stateReg);
+      p->SHR(ffid, ffid, GenRegister::immud(24));
+      p->AND(ffid, ffid, GenRegister::immud(0x0ff));
+      p->OR(ffid, ffid, GenRegister::immud(simdType << 4));
+
+      GenRegister genInfo = GenRegister::offset(ffid, 0, 4);
+      p->MOV(genInfo, stateReg);
+      p->AND(genInfo, genInfo, GenRegister::immud(0x0ff07));
+      //The dispatch mask
+      stateReg = GenRegister::sr(0, 2);
+      p->MOV(tmp, stateReg);
+      p->AND(tmp, tmp, GenRegister::immud(0x0000ffff));
+      p->SHL(tmp, tmp, GenRegister::immud(16));
+      p->OR(genInfo, genInfo, tmp);
+
+      // Write it out.
+      p->curr.execWidth = 8;
+      p->curr.noMask = 1;
+      p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+      p->ADD(addr, addr, GenRegister::immud(32));
+
+      // time stamps
+      for (int i = 0; i < 3; i++) {
+        p->curr.execWidth = 8;
+        p->MOV(data, GenRegister::retype(profilingReg[i], GEN_TYPE_UD));
+        p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+        p->ADD(addr, addr, GenRegister::immud(32));
+      }
+    } p->pop();
+  }
+
+  /* Init value according to WORKGROUP OP
+   * Emit assert is invalid combination operation - datatype */
+  static void wgOpInitValue(GenEncoder *p, GenRegister dataReg, uint32_t wg_op)
+  {
+
+    if (wg_op == ir::WORKGROUP_OP_ALL)
+    {
+      if (dataReg.type == GEN_TYPE_D
+          || dataReg.type == GEN_TYPE_UD)
+        p->MOV(dataReg, GenRegister::immd(0xFFFFFFFF));
+      else if(dataReg.type == GEN_TYPE_L ||
+          dataReg.type == GEN_TYPE_UL)
+        p->MOV(dataReg, GenRegister::immint64(0xFFFFFFFFFFFFFFFFL));
+      else
+        GBE_ASSERT(0); /* unsupported data-type */
+    }
+
+    else if(wg_op == ir::WORKGROUP_OP_ANY
+      || wg_op == ir::WORKGROUP_OP_REDUCE_ADD
+      || wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD
+      || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD)
+    {
+      if (dataReg.type == GEN_TYPE_D)
+        p->MOV(dataReg, GenRegister::immd(0x0));
+      else if (dataReg.type == GEN_TYPE_UD)
+        p->MOV(dataReg, GenRegister::immud(0x0));
+      else if (dataReg.type == GEN_TYPE_F)
+        p->MOV(dataReg, GenRegister::immf(0x0));
+      else if (dataReg.type == GEN_TYPE_L)
+        p->MOV(dataReg, GenRegister::immint64(0x0));
+      else if (dataReg.type == GEN_TYPE_UL)
+        p->MOV(dataReg, GenRegister::immuint64(0x0));
+      else
+        GBE_ASSERT(0); /* unsupported data-type */
+    }
+
+    else if(wg_op == ir::WORKGROUP_OP_REDUCE_MIN
+      || wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN
+      || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN)
+    {
+      if (dataReg.type == GEN_TYPE_D)
+        p->MOV(dataReg, GenRegister::immd(0x7FFFFFFF));
+      else if (dataReg.type == GEN_TYPE_UD)
+        p->MOV(dataReg, GenRegister::immud(0xFFFFFFFF));
+      else if (dataReg.type == GEN_TYPE_F)
+        p->MOV(GenRegister::retype(dataReg, GEN_TYPE_UD), GenRegister::immud(0x7F800000));
+      else if (dataReg.type == GEN_TYPE_L)
+        p->MOV(dataReg, GenRegister::immint64(0x7FFFFFFFFFFFFFFFL));
+      else if (dataReg.type == GEN_TYPE_UL)
+        p->MOV(dataReg, GenRegister::immuint64(0xFFFFFFFFFFFFFFFFL));
+      else
+        GBE_ASSERT(0); /* unsupported data-type */
+    }
+
+    else if(wg_op == ir::WORKGROUP_OP_REDUCE_MAX
+      || wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX
+      || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+    {
+      if (dataReg.type == GEN_TYPE_D)
+        p->MOV(dataReg, GenRegister::immd(0x80000000));
+      else if (dataReg.type == GEN_TYPE_UD)
+        p->MOV(dataReg, GenRegister::immud(0x0));
+      else if (dataReg.type == GEN_TYPE_F)
+        p->MOV(GenRegister::retype(dataReg, GEN_TYPE_UD), GenRegister::immud(0xFF800000));
+      else if (dataReg.type == GEN_TYPE_L)
+        p->MOV(dataReg, GenRegister::immint64(0x8000000000000000L));
+      else if (dataReg.type == GEN_TYPE_UL)
+        p->MOV(dataReg, GenRegister::immuint64(0x0));
+      else
+        GBE_ASSERT(0); /* unsupported data-type */
+    }
+
+    /* unsupported operation */
+    else
+      GBE_ASSERT(0);
+  }
+
+  /* Perform WORKGROUP OP on 2 input elements (registers) */
+  static void wgOpPerform(GenRegister dst,
+                         GenRegister src1,
+                         GenRegister src2,
+                         uint32_t wg_op,
+                         GenEncoder *p)
+  {
+    /* perform OP REDUCE on 2 elements */
+    if (wg_op == ir::WORKGROUP_OP_ANY)
+      p->OR(dst, src1, src2);
+    else if (wg_op == ir::WORKGROUP_OP_ALL)
+      p->AND(dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_REDUCE_ADD)
+      p->ADD(dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_REDUCE_MIN)
+      p->SEL_CMP(GEN_CONDITIONAL_LE, dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
+      p->SEL_CMP(GEN_CONDITIONAL_GE, dst, src1, src2);
+
+    /* perform OP SCAN INCLUSIVE on 2 elements */
+    else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD)
+      p->ADD(dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN)
+      p->SEL_CMP(GEN_CONDITIONAL_LE, dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX)
+      p->SEL_CMP(GEN_CONDITIONAL_GE, dst, src1, src2);
+
+    /* perform OP SCAN EXCLUSIVE on 2 elements */
+    else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD)
+      p->ADD(dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN)
+      p->SEL_CMP(GEN_CONDITIONAL_LE, dst, src1, src2);
+    else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+      p->SEL_CMP(GEN_CONDITIONAL_GE, dst, src1, src2);
+
+    else
+      GBE_ASSERT(0);
+  }
+
+  static void wgOpPerformThread(GenRegister threadDst,
+                                  GenRegister inputVal,
+                                  GenRegister threadExchangeData,
+                                   GenRegister resultVal,
+                                   uint32_t simd,
+                                   uint32_t wg_op,
+                                   GenEncoder *p)
+  {
+   p->push();
+   p->curr.predicate = GEN_PREDICATE_NONE;
+   p->curr.noMask = 1;
+   p->curr.execWidth = 1;
+
+   /* setting the type */
+   resultVal = GenRegister::retype(resultVal, inputVal.type);
+   threadDst = GenRegister::retype(threadDst, inputVal.type);
+   threadExchangeData = GenRegister::retype(threadExchangeData, inputVal.type);
+
+   vector<GenRegister> input;
+   vector<GenRegister> result;
+
+   /* for workgroup all and any we can use simd_all/any for each thread */
+   if (wg_op == ir::WORKGROUP_OP_ALL || wg_op == ir::WORKGROUP_OP_ANY) {
+     GenRegister constZero = GenRegister::immuw(0);
+     GenRegister flag01 = GenRegister::flag(0, 1);
+
+     p->push();
+     {
+       p->curr.predicate = GEN_PREDICATE_NONE;
+       p->curr.noMask = 1;
+       p->curr.execWidth = simd;
+       p->MOV(resultVal, GenRegister::immud(1));
+       p->curr.execWidth = 1;
+       if (wg_op == ir::WORKGROUP_OP_ALL)
+         p->MOV(flag01, GenRegister::immw(-1));
+       else
+         p->MOV(flag01, constZero);
+
+       p->curr.execWidth = simd;
+       p->curr.noMask = 0;
+
+       p->curr.flag = 0;
+       p->curr.subFlag = 1;
+       p->CMP(GEN_CONDITIONAL_NEQ, inputVal, constZero);
+
+       if (p->curr.execWidth == 16)
+         if (wg_op == ir::WORKGROUP_OP_ALL)
+           p->curr.predicate = GEN_PREDICATE_ALIGN1_ALL16H;
+         else
+           p->curr.predicate = GEN_PREDICATE_ALIGN1_ANY16H;
+       else if (p->curr.execWidth == 8)
+         if (wg_op == ir::WORKGROUP_OP_ALL)
+           p->curr.predicate = GEN_PREDICATE_ALIGN1_ALL8H;
+         else
+          p->curr.predicate = GEN_PREDICATE_ALIGN1_ANY8H;
+       else
+         NOT_IMPLEMENTED;
+       p->SEL(threadDst, resultVal, constZero);
+       p->SEL(threadExchangeData, resultVal, constZero);
+     }
+     p->pop();
+   } else {
+     if (inputVal.hstride == GEN_HORIZONTAL_STRIDE_0) {
+       p->MOV(threadExchangeData, inputVal);
+       p->pop();
+       return;
+     }
+
+     /* init thread data to min/max/null values */
+     p->push(); {
+       p->curr.execWidth = simd;
+       wgOpInitValue(p, threadExchangeData, wg_op);
+       p->MOV(resultVal, inputVal);
+     } p->pop();
+
+     GenRegister resultValSingle = resultVal;
+     resultValSingle.hstride = GEN_HORIZONTAL_STRIDE_0;
+     resultValSingle.vstride = GEN_VERTICAL_STRIDE_0;
+     resultValSingle.width = GEN_WIDTH_1;
+
+     GenRegister inputValSingle = inputVal;
+     inputValSingle.hstride = GEN_HORIZONTAL_STRIDE_0;
+     inputValSingle.vstride = GEN_VERTICAL_STRIDE_0;
+     inputValSingle.width = GEN_WIDTH_1;
+
+
+     /* make an array of registers for easy accesing */
+     for(uint32_t i = 0; i < simd; i++){
+       /* add all resultVal offset reg positions from list */
+       result.push_back(resultValSingle);
+       input.push_back(inputValSingle);
+
+       /* move to next position */
+       resultValSingle.subnr += typeSize(resultValSingle.type);
+       if (resultValSingle.subnr == 32) {
+           resultValSingle.subnr = 0;
+           resultValSingle.nr++;
+       }
+       /* move to next position */
+       inputValSingle.subnr += typeSize(inputValSingle.type);
+       if (inputValSingle.subnr == 32) {
+           inputValSingle.subnr = 0;
+           inputValSingle.nr++;
+       }
+     }
+
+     uint32_t start_i = 0;
+     if( wg_op == ir::WORKGROUP_OP_REDUCE_ADD ||
+         wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
+         wg_op == ir::WORKGROUP_OP_REDUCE_MAX ||
+         wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD ||
+         wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
+         wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX) {
+       p->MOV(result[0], input[0]);
+       start_i = 1;
+     }
+
+     else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD ||
+         wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN ||
+         wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX) {
+       p->MOV(result[1], input[0]);
+       start_i = 2;
+     }
+
+     /* algorithm workgroup */
+     for (uint32_t i = start_i; i < simd; i++)
+     {
+       if( wg_op == ir::WORKGROUP_OP_REDUCE_ADD ||
+           wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
+           wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
+         wgOpPerform(result[0], result[0], input[i], wg_op, p);
+
+       else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD ||
+           wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
+           wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX)
+         wgOpPerform(result[i], result[i - 1], input[i], wg_op, p);
+
+       else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD ||
+           wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN ||
+           wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+         wgOpPerform(result[i], result[i - 1], input[i - 1], wg_op, p);
+
+       else
+         GBE_ASSERT(0);
+     }
+   }
+
+   if( wg_op == ir::WORKGROUP_OP_REDUCE_ADD ||
+       wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
+       wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
+   {
+     p->curr.execWidth = 16;
+     /* value exchanged with other threads */
+     p->MOV(threadExchangeData, result[0]);
+     /* partial result thread */
+     p->MOV(threadDst, result[0]);
+   }
+   else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD ||
+       wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
+       wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX)
+   {
+     p->curr.execWidth = 16;
+     /* value exchanged with other threads */
+     p->MOV(threadExchangeData, result[simd - 1]);
+     /* partial result thread */
+     p->MOV(threadDst, resultVal);
+   }
+   else if(wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD ||
+       wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN ||
+       wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+   {
+     p->curr.execWidth = 1;
+     /* set result[0] to min/max/null */
+     wgOpInitValue(p, result[0], wg_op);
+
+     p->curr.execWidth = 16;
+     /* value exchanged with other threads */
+     wgOpPerform(threadExchangeData, result[simd - 1], input[simd - 1], wg_op, p);
+     /* partial result thread */
+     p->MOV(threadDst, resultVal);
+   }
+
+   p->pop();
+ }
+
+/**
+ * WORKGROUP OP: ALL, ANY, REDUCE, SCAN INCLUSIVE, SCAN EXCLUSIVE
+ *
+ * Implementation:
+ * 1. All the threads first perform the workgroup op value for the
+ * allocated work-items. SIMD16=> 16 work-items allocated for each thread
+ * 2. Each thread writes the partial result in shared local memory using threadId
+ * 3. After a barrier, each thread will read in chunks of 1-4 elements,
+ * the shared local memory region, using a loop based on the thread num value (threadN)
+ * 4. Each thread computes the final value individually
+ *
+ * Optimizations:
+ * Performance is given by chunk read. If threads read in chunks of 4 elements
+ * the performance is increase 2-3x times compared to chunks of 1 element.
+ */
+  void GenContext::emitWorkGroupOpInstruction(const SelectionInstruction &insn){
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(1)), dst.type);
+    const GenRegister theVal = GenRegister::retype(ra->genReg(insn.src(2)), dst.type);
+    GenRegister threadData = ra->genReg(insn.src(3));
+    GenRegister partialData = GenRegister::toUniform(threadData, dst.type);
+    GenRegister threadId = ra->genReg(insn.src(0));
+    GenRegister threadLoop = ra->genReg(insn.src(1));
+    GenRegister barrierId = ra->genReg(GenRegister::ud1grf(ir::ocl::barrierid));
+    GenRegister localBarrier = ra->genReg(insn.src(5));
+
+    uint32_t wg_op = insn.extra.workgroupOp;
+    uint32_t simd = p->curr.execWidth;
+    int32_t jip0, jip1;
+
+    /* masked elements should be properly set to init value */
+    p->push(); {
+      p->curr.noMask = 1;
+      wgOpInitValue(p, tmp, wg_op);
+      p->curr.noMask = 0;
+      p->MOV(tmp, theVal);
+      p->curr.noMask = 1;
+      p->MOV(theVal, tmp);
+    } p->pop();
+
+    threadId = GenRegister::toUniform(threadId, GEN_TYPE_UD);
+
+    /* use of continuous GRF allocation from insn selection */
+    GenRegister msg = GenRegister::retype(ra->genReg(insn.dst(2)), dst.type);
+    GenRegister msgSlmOff = GenRegister::retype(ra->genReg(insn.src(4)), GEN_TYPE_UD);
+    GenRegister msgAddr = GenRegister::retype(GenRegister::offset(msg, 0), GEN_TYPE_UD);
+    GenRegister msgData = GenRegister::retype(GenRegister::offset(msg, 1), dst.type);
+
+    /* do some calculation within each thread */
+    wgOpPerformThread(dst, theVal, threadData, tmp, simd, wg_op, p);
+
+    p->curr.execWidth = 16;
+    p->MOV(theVal, dst);
+    threadData = GenRegister::toUniform(threadData, dst.type);
+
+    /* store thread count for future use on read/write to SLM */
+    if (wg_op == ir::WORKGROUP_OP_ANY ||
+      wg_op == ir::WORKGROUP_OP_ALL ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_ADD ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
+    {
+      threadLoop = GenRegister::retype(tmp, GEN_TYPE_D);
+      p->MOV(threadLoop, ra->genReg(GenRegister::ud1grf(ir::ocl::threadn)));
+    }
+    else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD ||
+      wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
+      wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+    {
+      threadLoop = GenRegister::retype(tmp, GEN_TYPE_D);
+      p->MOV(threadLoop, ra->genReg(GenRegister::ud1grf(ir::ocl::threadid)));
+    }
+
+    /* all threads write the partial results to SLM memory */
+    if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L)
+    {
+      GenRegister threadDataL = GenRegister::retype(threadData, GEN_TYPE_D);
+      GenRegister threadDataH = threadDataL.offset(threadDataL, 0, 4);
+      p->MOV(msgData.offset(msgData, 0), threadDataL);
+      p->MOV(msgData.offset(msgData, 1), threadDataH);
+
+      p->curr.execWidth = 8;
+      p->MUL(msgAddr, threadId, GenRegister::immd(0x8));
+      p->ADD(msgAddr, msgAddr, msgSlmOff);
+      p->UNTYPED_WRITE(msg, GenRegister::immw(0xFE), 2);
+    }
+    else
+    {
+      p->curr.execWidth = 8;
+      p->MOV(msgData, threadData);
+      p->MUL(msgAddr, threadId, GenRegister::immd(0x4));
+      p->ADD(msgAddr, msgAddr, msgSlmOff);
+      p->UNTYPED_WRITE(msg, GenRegister::immw(0xFE), 1);
+    }
+
+    /* init partialData register, it will hold the final result */
+    wgOpInitValue(p, partialData, wg_op);
+
+    /* add call to barrier */
+    p->push();
+      p->curr.execWidth = 8;
+      p->curr.physicalFlag = 0;
+      p->curr.noMask = 1;
+      p->AND(localBarrier, barrierId, GenRegister::immud(0x0f000000));
+      p->BARRIER(localBarrier);
+      p->curr.execWidth = 1;
+      p->WAIT();
+    p->pop();
+
+    /* perform a loop, based on thread count (which is now multiple of 4) */
+    p->push();{
+      jip0 = p->n_instruction();
+
+      /* read in chunks of 4 to optimize SLM reads and reduce SEND messages */
+      if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L)
+      {
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->ADD(threadLoop, threadLoop, GenRegister::immd(-1));
+        p->MUL(msgAddr, threadLoop, GenRegister::immd(0x8));
+        p->ADD(msgAddr, msgAddr, msgSlmOff);
+        p->UNTYPED_READ(msgData, msgAddr, GenRegister::immw(0xFE), 2);
+
+        GenRegister msgDataL = msgData.retype(msgData.offset(msgData, 0, 4), GEN_TYPE_D);
+        GenRegister msgDataH = msgData.retype(msgData.offset(msgData, 1, 4), GEN_TYPE_D);
+        msgDataL.hstride = 2;
+        msgDataH.hstride = 2;
+        p->MOV(msgDataL, msgDataH);
+
+        /* perform operation, partialData will hold result */
+        wgOpPerform(partialData, partialData, msgData.offset(msgData, 0), wg_op, p);
+      }
+      else
+      {
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->ADD(threadLoop, threadLoop, GenRegister::immd(-1));
+        p->MUL(msgAddr, threadLoop, GenRegister::immd(0x4));
+        p->ADD(msgAddr, msgAddr, msgSlmOff);
+        p->UNTYPED_READ(msgData, msgAddr, GenRegister::immw(0xFE), 1);
+
+        /* perform operation, partialData will hold result */
+        wgOpPerform(partialData, partialData, msgData.offset(msgData, 0), wg_op, p);
+      }
+
+      /* while threadN is not 0, cycle read SLM / update value */
+      p->curr.noMask = 1;
+      p->curr.flag = 0;
+      p->curr.subFlag = 1;
+      p->CMP(GEN_CONDITIONAL_G, threadLoop, GenRegister::immd(0x0));
+      p->curr.predicate = GEN_PREDICATE_NORMAL;
+      jip1 = p->n_instruction();
+      p->JMPI(GenRegister::immud(0));
+      p->patchJMPI(jip1, jip0 - jip1, 0);
+    } p->pop();
+
+    if(wg_op == ir::WORKGROUP_OP_ANY ||
+      wg_op == ir::WORKGROUP_OP_ALL ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_ADD ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
+      wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
+    {
+      /* save result to final register location dst */
+      p->curr.execWidth = 16;
+      p->MOV(dst, partialData);
+    }
+    else
+    {
+      /* save result to final register location dst */
+      p->curr.execWidth = 16;
+
+      if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD
+          || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD)
+        p->ADD(dst, dst, partialData);
+      else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN
+        || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN)
+      {
+        p->SEL_CMP(GEN_CONDITIONAL_LE, dst, dst, partialData);
+        /* workaround QW datatype on CMP */
+        if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L){
+            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 1, 0),
+                       dst.offset(dst, 1, 0), partialData);
+            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 2, 0),
+                       dst.offset(dst, 2, 0), partialData);
+            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 3, 0),
+                       dst.offset(dst, 3, 0), partialData);
+        }
+      }
+      else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX
+        || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+      {
+        p->SEL_CMP(GEN_CONDITIONAL_GE, dst, dst, partialData);
+        /* workaround QW datatype on CMP */
+        if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L){
+            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 1, 0),
+                       dst.offset(dst, 1, 0), partialData);
+            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 2, 0),
+                       dst.offset(dst, 2, 0), partialData);
+            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 3, 0),
+                       dst.offset(dst, 3, 0), partialData);
+        }
+      }
+    }
+
+    /* corner cases for threads 0 */
+    if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD ||
+      wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
+      wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN ||
+      wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
+    {
+      p->push();{
+        p->curr.flag = 0;
+        p->curr.subFlag = 1;
+        p->CMP(GEN_CONDITIONAL_EQ, threadId, GenRegister::immd(0x0));
+        p->curr.predicate = GEN_PREDICATE_NORMAL;
+
+        p->curr.execWidth = 16;
+        p->MOV(dst, theVal);
+      } p->pop();
+    }
+  }
+
+  void GenContext::emitSubGroupOpInstruction(const SelectionInstruction &insn){
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(1)), dst.type);
+    const GenRegister theVal = GenRegister::retype(ra->genReg(insn.src(0)), dst.type);
+    GenRegister threadData = ra->genReg(insn.src(1));
+
+    uint32_t wg_op = insn.extra.workgroupOp;
+    uint32_t simd = p->curr.execWidth;
+
+    /* masked elements should be properly set to init value */
+    p->push(); {
+      p->curr.noMask = 1;
+      wgOpInitValue(p, tmp, wg_op);
+      p->curr.noMask = 0;
+      p->MOV(tmp, theVal);
+      p->curr.noMask = 1;
+      p->MOV(theVal, tmp);
+    } p->pop();
+
+    /* do some calculation within each thread */
+    wgOpPerformThread(dst, theVal, threadData, tmp, simd, wg_op, p);
+  }
+
+  void GenContext::emitPrintfLongInstruction(GenRegister& addr, GenRegister& data,
+                                             GenRegister& src, uint32_t bti) {
+    p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src.bottom_half());
+    p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+    p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+
+    p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src.top_half(this->simdWidth));
+    p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+    p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+  }
+
+  void GenContext::emitPrintfInstruction(const SelectionInstruction &insn) {
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister tmp0 = ra->genReg(insn.dst(1));
+    GenRegister src;
+    uint32_t srcNum = insn.srcNum;
+    if (insn.extra.continueFlag)
+      srcNum--;
+
+    GenRegister addr = GenRegister::retype(tmp0, GEN_TYPE_UD);
+    GenRegister data = GenRegister::offset(addr, 2);
+
+    if (!insn.extra.continueFlag) {
+      p->push(); {
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->curr.noMask = 1;
+        //ptr[0] is the total count of the log size.
+        p->MOV(addr, GenRegister::immud(0));
+        p->MOV(data, GenRegister::immud(insn.extra.printfSize + 12));
+      } p->pop();
+
+      p->ATOMIC(addr, GEN_ATOMIC_OP_ADD, addr, GenRegister::immud(insn.extra.printfBTI), 2);
+      /* Write out the header. */
+      p->MOV(data, GenRegister::immud(0xAABBCCDD));
+      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+
+      p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+      p->MOV(data, GenRegister::immud(insn.extra.printfSize + 12));
+      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+
+      p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+      p->MOV(data, GenRegister::immud(insn.extra.printfNum));
+      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+
+      p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+    }
+
+    // Now, store out every parameter.
+    for(uint32_t i = 0; i < srcNum; i++) {
+      src = ra->genReg(insn.src(i));
+      if (src.type == GEN_TYPE_UD || src.type == GEN_TYPE_D || src.type == GEN_TYPE_F) {
+        p->MOV(GenRegister::retype(data, src.type), src);
+        p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+        p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+      } else if (src.type == GEN_TYPE_B || src.type == GEN_TYPE_UB ) {
+        p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src);
+        p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+        p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
+      } else if (src.type == GEN_TYPE_L || src.type == GEN_TYPE_UL ) {
+        emitPrintfLongInstruction(addr, data, src, insn.extra.printfBTI);
+      }
+    }
+
+    if (dst.hstride == GEN_HORIZONTAL_STRIDE_0) {
+      p->push();
+      p->curr.execWidth = 1;
+    }
+    p->MOV(dst, GenRegister::immd(0));
+    if (dst.hstride == GEN_HORIZONTAL_STRIDE_0) {
+      p->pop();
+    }
+  }
+
   void GenContext::setA0Content(uint16_t new_a0[16], uint16_t max_offset, int sz) {
     if (sz == 0)
       sz = 8;
@@ -2170,125 +3487,378 @@ namespace gbe
     p->pop();
   }
 
+  void GenContext::emitOBReadInstruction(const SelectionInstruction &insn) {
+    const GenRegister dst= GenRegister::retype(ra->genReg(insn.dst(1)), GEN_TYPE_UD);
+    const GenRegister addr = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
+    const GenRegister headeraddr = GenRegister::offset(header, 0, 2*4);
+    const uint32_t vec_size = insn.extra.elem;
+    const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(1 + vec_size)), GEN_TYPE_UD);
+    const uint32_t simdWidth = p->curr.execWidth;
+
+    // Make header
+    p->push();
+    {
+      // Copy r0 into the header first
+      p->curr.execWidth = 8;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->MOV(header, GenRegister::ud8grf(0, 0));
+
+      // Update the header with the current address
+      p->curr.execWidth = 1;
+      p->SHR(headeraddr, addr, GenRegister::immud(4));
+
+      // Put zero in the general state base address
+      p->MOV(GenRegister::offset(header, 0, 5 * 4), GenRegister::immud(0));
+    }
+    p->pop();
+    // Now read the data, oword block read can only work with simd16 and no mask
+    if (vec_size == 1) {
+      p->push();
+      {
+        p->curr.execWidth = 16;
+        p->curr.noMask = 1;
+        p->OBREAD(dst, header, insn.getbti(), simdWidth / 4);
+      }
+      p->pop();
+    } else if (vec_size == 2) {
+      p->push();
+      {
+        p->curr.execWidth = 16;
+        p->curr.noMask = 1;
+        p->OBREAD(tmp, header, insn.getbti(), simdWidth / 2);
+      }
+      p->pop();
+      p->MOV(ra->genReg(insn.dst(1)), GenRegister::offset(tmp, 0));
+      p->MOV(ra->genReg(insn.dst(2)), GenRegister::offset(tmp, simdWidth / 8));
+    } else if (vec_size == 4 || vec_size == 8) {
+      if (simdWidth == 8) {
+        for (uint32_t i = 0; i < vec_size / 4; i++) {
+          if (i > 0) {
+            p->push();
+            {
+              // Update the address in header
+              p->curr.execWidth = 1;
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+            }
+            p->pop();
+          }
+          p->push();
+          {
+            p->curr.execWidth = 16;
+            p->curr.noMask = 1;
+            p->OBREAD(tmp, header, insn.getbti(), 8);
+          }
+          p->pop();
+          for (uint32_t j = 0; j < 4; j++)
+            p->MOV(ra->genReg(insn.dst(1 + j + i * 4)), GenRegister::offset(tmp, j));
+        }
+      } else {
+        for (uint32_t i = 0; i < vec_size / 2; i++) {
+          if (i > 0) {
+            p->push();
+            {
+              // Update the address in header
+              p->curr.execWidth = 1;
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+            }
+            p->pop();
+          }
+          p->OBREAD(tmp, header, insn.getbti(), 8);
+          for (uint32_t j = 0; j < 2; j++)
+            p->MOV(ra->genReg(insn.dst(1 + j + i * 2)), GenRegister::offset(tmp, j*2));
+        }
+      }
+    } else NOT_SUPPORTED;
+  }
+
+  void GenContext::emitOBWriteInstruction(const SelectionInstruction &insn) {
+    const GenRegister addr = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
+    const GenRegister headeraddr = GenRegister::offset(header, 0, 2*4);
+    const uint32_t vec_size = insn.extra.elem;
+    const GenRegister tmp = GenRegister::offset(header, 1);
+    const uint32_t simdWidth = p->curr.execWidth;
+    uint32_t tmp_size = simdWidth * vec_size / 8;
+    tmp_size = tmp_size > 4 ? 4 : tmp_size;
+
+    p->push();
+      // Copy r0 into the header first
+      p->curr.execWidth = 8;
+      p->curr.predicate = GEN_PREDICATE_NONE;
+      p->curr.noMask = 1;
+      p->MOV(header, GenRegister::ud8grf(0,0));
+
+      // Update the header with the current address
+      p->curr.execWidth = 1;
+      p->SHR(headeraddr, addr, GenRegister::immud(4));
+
+      // Put zero in the general state base address
+      p->MOV(GenRegister::offset(header, 0, 5*4), GenRegister::immud(0));
+
+    p->pop();
+    // Now write the data, oword block write can only work with simd16 and no mask
+    if (vec_size == 1) {
+      p->MOV(tmp, ra->genReg(insn.src(1)));
+      p->push();
+      {
+        p->curr.execWidth = 16;
+        p->curr.noMask = 1;
+        p->OBWRITE(header, insn.getbti(), simdWidth / 4);
+      }
+      p->pop();
+    } else if (vec_size == 2) {
+      p->MOV(GenRegister::offset(tmp, 0), ra->genReg(insn.src(1))) ;
+      p->MOV(GenRegister::offset(tmp, simdWidth / 8), ra->genReg(insn.src(2))) ;
+      p->push();
+      {
+        p->curr.execWidth = 16;
+        p->curr.noMask = 1;
+        p->OBWRITE(header, insn.getbti(), simdWidth / 2);
+      }
+      p->pop();
+    } else if (vec_size == 4 || vec_size == 8) {
+      if (simdWidth == 8) {
+        for (uint32_t i = 0; i < vec_size / 4; i++) {
+          for (uint32_t j = 0; j < 4; j++)
+            p->MOV(GenRegister::offset(tmp, j), ra->genReg(insn.src(1 + j + i*4))) ;
+          if (i > 0) {
+            p->push();
+            {
+              // Update the address in header
+              p->curr.execWidth = 1;
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+            }
+            p->pop();
+          }
+          p->push();
+          {
+            p->curr.execWidth = 16;
+            p->curr.noMask = 1;
+            p->OBWRITE(header, insn.getbti(), 8);
+          }
+          p->pop();
+        }
+      } else {
+        for (uint32_t i = 0; i < vec_size / 2; i++) {
+          for (uint32_t j = 0; j < 2; j++)
+            p->MOV(GenRegister::offset(tmp, j * 2), ra->genReg(insn.src(1 + j + i*2))) ;
+          if (i > 0) {
+            p->push();
+            {
+              // Update the address in header
+              p->curr.execWidth = 1;
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+            }
+            p->pop();
+          }
+          p->OBWRITE(header, insn.getbti(), 8);
+        }
+      }
+    } else NOT_SUPPORTED;
+
+  }
+
+  void GenContext::emitMBReadInstruction(const SelectionInstruction &insn) {
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister coordx = GenRegister::toUniform(ra->genReg(insn.src(0)),GEN_TYPE_D);
+    const GenRegister coordy = GenRegister::toUniform(ra->genReg(insn.src(1)),GEN_TYPE_D);
+    GenRegister header, offsetx, offsety, blocksizereg;
+    if (simdWidth == 8)
+      header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
+    else
+      header = GenRegister::retype(GenRegister::Qn(ra->genReg(insn.src(2)),1), GEN_TYPE_UD);
+
+    offsetx = GenRegister::offset(header, 0, 0*4);
+    offsety = GenRegister::offset(header, 0, 1*4);
+    blocksizereg = GenRegister::offset(header, 0, 2*4);
+    size_t vec_size = insn.extra.elem;
+    uint32_t blocksize = 0x1F | (vec_size-1) << 16;
+
+    if (simdWidth == 8)
+    {
+      p->push();
+        // Copy r0 into the header first
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->curr.noMask = 1;
+        p->MOV(header, GenRegister::ud8grf(0,0));
+
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->MOV(offsetx, coordx);
+        p->MOV(offsety, coordy);
+        // Update block width and height
+        p->MOV(blocksizereg, GenRegister::immud(blocksize));
+        // Now read the data
+        p->curr.execWidth = 8;
+        p->MBREAD(dst, header, insn.getbti(), vec_size);
+      p->pop();
+
+    }
+    else if (simdWidth == 16)
+    {
+      const GenRegister tmp = ra->genReg(insn.dst(vec_size));
+      p->push();
+        // Copy r0 into the header first
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->curr.noMask = 1;
+        p->MOV(header, GenRegister::ud8grf(0,0));
+
+        // First half
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->MOV(offsetx, coordx);
+        p->MOV(offsety, coordy);
+        // Update block width and height
+        p->MOV(blocksizereg, GenRegister::immud(blocksize));
+        // Now read the data
+        p->curr.execWidth = 8;
+        p->MBREAD(tmp, header, insn.getbti(), vec_size);
+
+        // Second half
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->ADD(offsetx, offsetx, GenRegister::immud(32));
+
+        const GenRegister tmp2 = GenRegister::offset(tmp, vec_size);
+        // Now read the data
+        p->curr.execWidth = 8;
+        p->MBREAD(tmp2, header, insn.getbti(), vec_size);
+
+        // Move the reg to fit vector rule.
+        for (uint32_t i = 0; i < vec_size; i++) {
+          p->MOV(GenRegister::offset(dst, i * 2), GenRegister::offset(tmp, i));
+          p->MOV(GenRegister::offset(dst, i * 2 + 1),
+                 GenRegister::offset(tmp2, i));
+        }
+      p->pop();
+    } else NOT_IMPLEMENTED;
+  }
+
+  void GenContext::emitMBWriteInstruction(const SelectionInstruction &insn) {
+    const GenRegister coordx = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_D);
+    const GenRegister coordy = GenRegister::toUniform(ra->genReg(insn.src(1)), GEN_TYPE_D);
+    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
+    GenRegister offsetx, offsety, blocksizereg;
+    size_t vec_size = insn.extra.elem;
+    uint32_t blocksize = 0x1F | (vec_size-1) << 16;
+
+    offsetx = GenRegister::offset(header, 0, 0*4);
+    offsety = GenRegister::offset(header, 0, 1*4);
+    blocksizereg = GenRegister::offset(header, 0, 2*4);
+
+    if (simdWidth == 8)
+    {
+      p->push();
+        // Copy r0 into the header first
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->curr.noMask = 1;
+        p->MOV(header, GenRegister::ud8grf(0,0));
+
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->MOV(offsetx, coordx);
+        p->MOV(offsety, coordy);
+        // Update block width and height
+        p->MOV(blocksizereg, GenRegister::immud(blocksize));
+        p->curr.execWidth = 8;
+        // Mov what we need into msgs
+        for(uint32_t i = 0; i < vec_size; i++)
+          p->MOV(GenRegister::offset(header, 1 + i), ra->genReg(insn.src(2 + i)));
+        // Now read the data
+        p->MBWRITE(header, insn.getbti(), vec_size);
+      p->pop();
+
+    }
+    else
+    {
+      p->push();
+        // Copy r0 into the header first
+        p->curr.execWidth = 8;
+        p->curr.predicate = GEN_PREDICATE_NONE;
+        p->curr.noMask = 1;
+        p->MOV(header, GenRegister::ud8grf(0,0));
+
+        // First half
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->MOV(offsetx, coordx);
+        p->MOV(offsety, coordy);
+        // Update block width and height
+        p->MOV(blocksizereg, GenRegister::immud(blocksize));
+        // Now read the data
+        p->curr.execWidth = 8;
+        // Mov what we need into msgs
+        for(uint32_t i = 0; i < vec_size; i++)
+          p->MOV(GenRegister::offset(header, 1 + i), ra->genReg(insn.src(2 + i)));
+        p->MBWRITE(header, insn.getbti(), vec_size);
+
+        // Second half
+        // Update the header with the coord
+        p->curr.execWidth = 1;
+        p->ADD(offsetx, offsetx, GenRegister::immud(32));
+
+        p->curr.execWidth = 8;
+        // Mov what we need into msgs
+        for(uint32_t i = 0; i < vec_size; i++)
+          p->MOV(GenRegister::offset(header, 1 + i), GenRegister::Qn(ra->genReg(insn.src(2 + i)), 1));
+        // Now write the data
+        p->MBWRITE(header, insn.getbti(), vec_size);
+
+      p->pop();
+    }
+  }
+
   BVAR(OCL_OUTPUT_REG_ALLOC, false);
   BVAR(OCL_OUTPUT_ASM, false);
 
-  void GenContext::allocCurbeReg(ir::Register reg, gbe_curbe_type value, uint32_t subValue) {
+  void GenContext::allocCurbeReg(ir::Register reg) {
     uint32_t regSize;
+    gbe_curbe_type curbeType;
+    int subType;
+    this->getRegPayloadType(reg, curbeType, subType);
     regSize = this->ra->getRegSize(reg);
-    insertCurbeReg(reg, newCurbeEntry(value, subValue, regSize));
+    insertCurbeReg(reg, newCurbeEntry(curbeType, subType, regSize));
+    /* Need to patch the image information registers. */
+    if (curbeType == GBE_CURBE_IMAGE_INFO) {
+      std::sort(kernel->patches.begin(), kernel->patches.end());
+      uint32_t offset = kernel->getCurbeOffset(GBE_CURBE_IMAGE_INFO, subType);
+      fn.getImageSet()->appendInfo(static_cast<ir::ImageInfoKey>(subType), offset);
+    }
   }
 
-  void GenContext::buildPatchList(void) {
-    const uint32_t ptrSize = this->getPointerSize();
-    kernel->curbeSize = 0u;
-    auto &stackUse = dag->getUse(ir::ocl::stackptr);
-
-    // We insert the block IP mask first
-    using namespace ir::ocl;
-    if (!isDWLabel())
-      allocCurbeReg(blockip, GBE_CURBE_BLOCK_IP);
-    else
-      allocCurbeReg(dwblockip, GBE_CURBE_DW_BLOCK_IP);
-    allocCurbeReg(lid0, GBE_CURBE_LOCAL_ID_X);
-    allocCurbeReg(lid1, GBE_CURBE_LOCAL_ID_Y);
-    allocCurbeReg(lid2, GBE_CURBE_LOCAL_ID_Z);
-    allocCurbeReg(zero, GBE_CURBE_ZERO);
-    allocCurbeReg(one, GBE_CURBE_ONE);
-    allocCurbeReg(btiUtil, GBE_CURBE_BTI_UTIL);
-    if (stackUse.size() != 0)
-      allocCurbeReg(stackbuffer, GBE_CURBE_EXTRA_ARGUMENT, GBE_STACK_BUFFER);
-    // Go over the arguments and find the related patch locations
-    const uint32_t argNum = fn.argNum();
-    for (uint32_t argID = 0u; argID < argNum; ++argID) {
-      const ir::FunctionArgument &arg = fn.getArg(argID);
-      // For pointers and values, we have nothing to do. We just push the values
-      if (arg.type == ir::FunctionArgument::GLOBAL_POINTER ||
-          arg.type == ir::FunctionArgument::LOCAL_POINTER ||
-          arg.type == ir::FunctionArgument::CONSTANT_POINTER)
-        this->insertCurbeReg(arg.reg, this->newCurbeEntry(GBE_CURBE_KERNEL_ARGUMENT, argID, ptrSize, ptrSize));
-      if (arg.type == ir::FunctionArgument::VALUE ||
-          arg.type == ir::FunctionArgument::STRUCTURE ||
-          arg.type == ir::FunctionArgument::IMAGE ||
-          arg.type == ir::FunctionArgument::SAMPLER)
-        this->insertCurbeReg(arg.reg, this->newCurbeEntry(GBE_CURBE_KERNEL_ARGUMENT, argID, arg.size, arg.size));
-    }
-
-    // Go over all the instructions and find the special register we need
-    // to push
-    #define INSERT_REG(SPECIAL_REG, PATCH) \
-    if (reg == ir::ocl::SPECIAL_REG) { \
-      if (curbeRegs.find(reg) != curbeRegs.end()) continue; \
-      allocCurbeReg(reg, GBE_CURBE_##PATCH); \
-    } else
-
-    bool needLaneID = false;
-    fn.foreachInstruction([&](ir::Instruction &insn) {
-      const uint32_t srcNum = insn.getSrcNum();
-      if (insn.getOpcode() == ir::OP_SIMD_ID) {
-        GBE_ASSERT(srcNum == 0);
-        needLaneID = true;
-      }
-      for (uint32_t srcID = 0; srcID < srcNum; ++srcID) {
-        const ir::Register reg = insn.getSrc(srcID);
-        if (insn.getOpcode() == ir::OP_GET_IMAGE_INFO) {
-          if (srcID != 0) continue;
-          const unsigned char bti = ir::cast<ir::GetImageInfoInstruction>(insn).getImageIndex();
-          const unsigned char type =  ir::cast<ir::GetImageInfoInstruction>(insn).getInfoType();;
-          ir::ImageInfoKey key(bti, type);
-          const ir::Register imageInfo = insn.getSrc(0);
-          if (curbeRegs.find(imageInfo) == curbeRegs.end()) {
-            uint32_t offset = this->getImageInfoCurbeOffset(key, 4);
-            insertCurbeReg(imageInfo, offset);
-          }
-          continue;
-        }
-        if (fn.isSpecialReg(reg) == false) continue;
-        if (curbeRegs.find(reg) != curbeRegs.end()) continue;
-        if (reg == ir::ocl::stackptr) GBE_ASSERT(stackUse.size() > 0);
-        INSERT_REG(lsize0, LOCAL_SIZE_X)
-        INSERT_REG(lsize1, LOCAL_SIZE_Y)
-        INSERT_REG(lsize2, LOCAL_SIZE_Z)
-        INSERT_REG(gsize0, GLOBAL_SIZE_X)
-        INSERT_REG(gsize1, GLOBAL_SIZE_Y)
-        INSERT_REG(gsize2, GLOBAL_SIZE_Z)
-        INSERT_REG(goffset0, GLOBAL_OFFSET_X)
-        INSERT_REG(goffset1, GLOBAL_OFFSET_Y)
-        INSERT_REG(goffset2, GLOBAL_OFFSET_Z)
-        INSERT_REG(workdim, WORK_DIM)
-        INSERT_REG(numgroup0, GROUP_NUM_X)
-        INSERT_REG(numgroup1, GROUP_NUM_Y)
-        INSERT_REG(numgroup2, GROUP_NUM_Z)
-        INSERT_REG(stackptr, STACK_POINTER)
-        INSERT_REG(printfbptr, PRINTF_BUF_POINTER)
-        INSERT_REG(printfiptr, PRINTF_INDEX_POINTER)
-        do {} while(0);
-      }
-    });
-#undef INSERT_REG
-
-    if (needLaneID)
-      allocCurbeReg(laneid, GBE_CURBE_LANE_ID);
+  void GenContext::buildPatchList() {
 
     // After this point the vector is immutable. Sorting it will make
     // research faster
     std::sort(kernel->patches.begin(), kernel->patches.end());
-
     kernel->curbeSize = ALIGN(kernel->curbeSize, GEN_REG_SIZE);
   }
 
+  BVAR(OCL_OUTPUT_SEL_IR, false);
+  BVAR(OCL_OPTIMIZE_SEL_IR, true);
   bool GenContext::emitCode(void) {
     GenKernel *genKernel = static_cast<GenKernel*>(this->kernel);
-    buildPatchList();
     sel->select();
+    if (OCL_OPTIMIZE_SEL_IR)
+      sel->optimize();
+    if (OCL_OUTPUT_SEL_IR)
+      outputSelectionIR(*this, this->sel);
     schedulePreRegAllocation(*this, *this->sel);
     if (UNLIKELY(ra->allocate(*this->sel) == false))
       return false;
     schedulePostRegAllocation(*this, *this->sel);
     if (OCL_OUTPUT_REG_ALLOC)
       ra->outputAllocation();
-    this->clearFlagRegister();
+    if (inProfilingMode) { // add the profiling prolog before do anything.
+      this->profilingProlog();
+    }
     this->emitStackPointer();
+    this->clearFlagRegister();
     this->emitSLMOffset();
     this->emitInstructionStream();
     if (this->patchBranches() == false)
@@ -2297,6 +3867,9 @@ namespace gbe
     genKernel->insns = GBE_NEW_ARRAY_NO_ARG(GenInstruction, genKernel->insnNum);
     std::memcpy(genKernel->insns, &p->store[0], genKernel->insnNum * sizeof(GenInstruction));
     if (OCL_OUTPUT_ASM)
+      outputAssembly(stdout, genKernel);
+
+    if (OCL_DEBUGINFO)
       outputAssembly(stdout, genKernel);
 
     if (this->asmFileName) {
@@ -2315,6 +3888,12 @@ namespace gbe
   }
 
   void GenContext::outputAssembly(FILE *file, GenKernel* genKernel) {
+    /* get gen version for the instruction compact */
+    uint32_t insn_version = 0;
+    if (IS_GEN7(deviceID) || IS_GEN75(deviceID))
+      insn_version = 7;
+    else if (IS_GEN8(deviceID) || IS_GEN9(deviceID))
+      insn_version = 8;
     fprintf(file, "%s's disassemble begin:\n", genKernel->getName());
     ir::LabelIndex curLabel = (ir::LabelIndex)0;
     GenCompactInstruction * pCom = NULL;
@@ -2330,10 +3909,14 @@ namespace gbe
           curLabel = (ir::LabelIndex)(curLabel + 1);
         }
       }
+
+      if (OCL_DEBUGINFO)
+        fprintf(file, "[%3i,%3i]", p->storedbg[insnID].line, p->storedbg[insnID].col);
+
       fprintf(file, "    (%8i)  ", insnID);
       pCom = (GenCompactInstruction*)&p->store[insnID];
       if(pCom->bits1.cmpt_control == 1) {
-        decompactInstruction(pCom, &insn);
+        decompactInstruction(pCom, &insn, insn_version);
         gen_disasm(file, &insn, deviceID, 1);
         insnID++;
       } else {

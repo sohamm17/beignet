@@ -46,7 +46,7 @@ namespace gbe
     /*! Set the instruction stream (to be implemented) */
     virtual void setCode(const char *, size_t size);
     /*! Implements get the code size */
-    virtual size_t getCodeSize(void) const;
+    virtual uint32_t getCodeSize(void) const;
     /*! Implements printStatus*/
     virtual void printStatus(int indent, std::ostream& outs);
     uint32_t deviceID;      //!< Current device ID
@@ -60,8 +60,8 @@ namespace gbe
   {
   public:
     /*! Create an empty program */
-    GenProgram(uint32_t deviceID, const void* mod = NULL, const void* ctx = NULL, const char* asm_fname = NULL) :
-      deviceID(deviceID),module((void*)mod), llvm_ctx((void*)ctx), asm_file_name(asm_fname) {}
+    GenProgram(uint32_t deviceID, const void* mod = NULL, const void* ctx = NULL, const char* asm_fname = NULL, uint32_t fast_relaxed_math = 0) :
+      Program(fast_relaxed_math), deviceID(deviceID),module((void*)mod), llvm_ctx((void*)ctx), asm_file_name(asm_fname) {}
     /*! Current device ID*/
     uint32_t deviceID;
     /*! Destroy the program */
@@ -69,7 +69,7 @@ namespace gbe
     /*! Clean LLVM resource */
     virtual void CleanLlvmResource(void);
     /*! Implements base class */
-    virtual Kernel *compileKernel(const ir::Unit &unit, const std::string &name, bool relaxMath);
+    virtual Kernel *compileKernel(const ir::Unit &unit, const std::string &name, bool relaxMath, int profiling);
     /*! Allocate an empty kernel. */
     virtual Kernel *allocateKernel(const std::string &name) {
       return GBE_NEW(GenKernel, name, deviceID);
@@ -81,7 +81,7 @@ namespace gbe
     GBE_CLASS(GenProgram);
   };
   /*! decompact GEN ASM if it is in compacted format */
-  extern void decompactInstruction(union GenCompactInstruction *p, void *insn);
+  extern void decompactInstruction(union GenCompactInstruction *p, void *insn, uint32_t insn_version);
 } /* namespace gbe */
 
 #endif /* __GBE_GEN_PROGRAM_HPP__ */

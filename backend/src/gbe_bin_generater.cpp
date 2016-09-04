@@ -196,8 +196,8 @@ void program_build_instance::serialize_program(void) throw(int)
 
       if(gen_pci_id){
         //add header to differeciate from llvm bitcode binary.
-        // (5 bytes: 1 byte for binary type, 4 byte for bc code, 'GENC' is for gen binary.)
-        char gen_header[6] = "\0GENC";
+        // (5 bytes: 1 byte for binary version, 4 byte for bc code, 'GENC' is for gen binary.)
+        char gen_header[6] = "\1GENC";
         OUTS_UPDATE_SZ(gen_header[0]);
         OUTS_UPDATE_SZ(gen_header[1]);
         OUTS_UPDATE_SZ(gen_header[2]);
@@ -226,6 +226,7 @@ void program_build_instance::serialize_program(void) throw(int)
         size_t bin_length = gbe_program_serialize_to_binary((gbe_program)gbe_prog, &llvm_binary, 1);
         oss.write(llvm_binary, bin_length);
         sz += bin_length;
+        free(llvm_binary);
       }
 
       for (size_t i = 0; i < sz; i++) {
@@ -242,8 +243,8 @@ void program_build_instance::serialize_program(void) throw(int)
     } else {
       if(gen_pci_id){
         //add header to differeciate from llvm bitcode binary.
-        // (5 bytes: 1 byte for binary type, 4 byte for bc code, 'GENC' is for gen binary.)
-        char gen_header[6] = "\0GENC";
+        // (5 bytes: 1 byte for binary version, 4 byte for bc code, 'GENC' is for gen binary.)
+        char gen_header[6] = "\1GENC";
         OUTF_UPDATE_SZ(gen_header[0]);
         OUTF_UPDATE_SZ(gen_header[1]);
         OUTF_UPDATE_SZ(gen_header[2]);
@@ -258,6 +259,7 @@ void program_build_instance::serialize_program(void) throw(int)
         size_t bin_length = gbe_program_serialize_to_binary((gbe_program)gbe_prog, &llvm_binary, 1);
         ofs.write(llvm_binary, bin_length);
         sz+=bin_length;
+        free(llvm_binary);
       }
     }
 

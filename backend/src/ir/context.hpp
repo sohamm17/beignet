@@ -63,7 +63,8 @@ namespace ir {
     /*! Append a new pushed constant */
     void appendPushedConstant(Register reg, const PushLocation &pushed);
     /*! Create a new register with the given family for the current function */
-    Register reg(RegisterFamily family, bool uniform = false);
+    Register reg(RegisterFamily family, bool uniform = false,
+                 gbe_curbe_type curbeType = GBE_GEN_REG, int subType = 0);
     /*! Create a new immediate value */
     template <typename T> INLINE ImmediateIndex newImmediate(T value) {
       const Immediate imm(value);
@@ -148,6 +149,11 @@ namespace ir {
       GBE_ASSERTM(fn != NULL, "No function currently defined");
       return fn->file.appendArrayTuple(reg, regNum);
     }
+    /*! Make a tuple from an array of types */
+    INLINE Tuple arrayTypeTuple(const ir::Type *type, uint32_t num) {
+      GBE_ASSERTM(fn != NULL, "No function currently defined");
+      return fn->file.appendArrayTypeTuple((uint8_t*)type, num);
+    }
     /*! We just use variadic templates to forward instruction functions */
 #define DECL_INSN(NAME, FAMILY) \
     template <typename... Args> INLINE void NAME(Args...args);
@@ -174,6 +180,7 @@ namespace ir {
     DECL_THREE_SRC_INSN(SEL);
     DECL_THREE_SRC_INSN(I64MADSAT);
     DECL_THREE_SRC_INSN(MAD);
+    DECL_THREE_SRC_INSN(LRP);
 #undef DECL_THREE_SRC_INSN
 
     /*! For all nullary functions */
@@ -188,26 +195,8 @@ namespace ir {
       this->append(insn);
     }
 
-    /*! LOAD with the destinations directly specified */
-    template <typename... Args>
-    void LOAD(Type type, Register offset, AddressSpace space, bool dwAligned, bool fixedBTI, Register bti, Args...values)
-    {
-      const Tuple index = this->tuple(values...);
-      const uint16_t valueNum = std::tuple_size<std::tuple<Args...>>::value;
-      GBE_ASSERT(valueNum > 0);
-      this->LOAD(type, index, offset, space, valueNum, dwAligned, fixedBTI, bti);
-    }
-
-    /*! STORE with the sources directly specified */
-    template <typename... Args>
-    void STORE(Type type, Register offset, AddressSpace space, bool dwAligned, bool fixedBTI, Register bti, Args...values)
-    {
-      const Tuple index = this->tuple(values...);
-      const uint16_t valueNum = std::tuple_size<std::tuple<Args...>>::value;
-      GBE_ASSERT(valueNum > 0);
-      this->STORE(type, index, offset, space, valueNum, dwAligned, fixedBTI, bti);
-    }
     void appendSurface(uint8_t bti, Register reg) { fn->appendSurface(bti, reg); }
+    void setDBGInfo(DebugInfo in) { DBGInfo = in; }
 
   protected:
     /*! A block must be started with a label */
@@ -232,6 +221,7 @@ namespace ir {
       vector<uint8_t> *usedLabels; //!< Store all labels that are defined
     };
     vector<StackElem> fnStack;     //!< Stack of functions still to finish
+    DebugInfo DBGInfo;
     GBE_CLASS(Context);
   };
 

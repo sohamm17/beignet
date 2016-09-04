@@ -78,9 +78,11 @@ struct Info_Result<char **> {
     int *elt_size;
     int size;
     typedef char** type_value;
+    int array_size;
 
     Info_Result(char **other, int *sz, int elt_num) {
-        size = elt_num;
+        array_size = elt_num;
+        size = elt_num * sizeof(char**);
 
         ret = (char **)malloc(elt_num * sizeof(char *));
         memset(ret, 0, (elt_num * sizeof(char *)));
@@ -106,7 +108,7 @@ struct Info_Result<char **> {
 
     ~Info_Result(void) {
         int i = 0;
-        for (; i < size; i++) {
+        for (; i < array_size; i++) {
             if (refer[i])
                 free(refer[i]);
             free(ret[i]);
@@ -122,7 +124,7 @@ struct Info_Result<char **> {
 
     bool check_result (void) {
         int i = 0;
-        for (; i < size; i++) {
+        for (; i < array_size; i++) {
             if (refer[i] && ::memcmp(ret[i], refer[i], elt_size[i]))
                 return false;
         }
@@ -181,8 +183,14 @@ void get_program_info(void)
     int sz;
     char *ker_path = (char *)malloc(4096 * sizeof(char));
     const char *kiss_path = getenv("OCL_KERNEL_PATH");
+    if(!kiss_path)
+      return;
+
     string line;
     string source_code;
+
+    if(strlen(kiss_path) > 4000)
+      return;
 
     sprintf(ker_path, "%s/%s", kiss_path, "compiler_if_else.cl");
 
@@ -216,7 +224,7 @@ void get_program_info(void)
     expect_value = NO_STANDARD_REF;
     maps.insert(make_pair(CL_PROGRAM_BINARY_SIZES,
                           (void *)(new Info_Result<size_t>((size_t)expect_value))));
-    sz = 4096; //big enough?
+    sz = 8192; //big enough?
     expect_source = NULL;
     maps.insert(make_pair(CL_PROGRAM_BINARIES,
                           (void *)(new Info_Result<char **>(&expect_source, &sz, 1))));
@@ -405,19 +413,124 @@ void get_build_llvm_info(void)
         }
     }
 
-    //Test is successful if the backend created the file
-    if( (fp = fopen(llvm_file, "r")) == NULL) {
-        std::cout << "LLVM file creation.. FAILED";
-        OCL_ASSERT(0);
-    } else {
-        fclose(fp);
-        std::cout << "LLVM file created.. SUCCESS";
+    if (cl_check_beignet()) {
+       //Test is successful if the backend created the file
+       if( (fp = fopen(llvm_file, "r")) == NULL) {
+           std::cout << "LLVM file creation.. FAILED";
+           OCL_ASSERT(0);
+       } else {
+           fclose(fp);
+           std::cout << "LLVM file created.. SUCCESS";
+       }
     }
 }
 
 MAKE_UTEST_FROM_FUNCTION(get_build_llvm_info);
 
 
+// This method uses clGetProgramBuildInfo to check the dump-spir-binary options
+// and verifies that the spir dump file is actually generated in the backend.
+void compile_spir_binary(void)
+{
+    map<cl_program_info, void *> maps;
+    cl_build_status expect_status;
+    char spir_file[] = "test_spir_dump.txt";
+    char compile_opt[] = "-dump-spir-binary=test_spir_dump.txt";
+    FILE *fp = NULL;
+    int sz;
+
+    //Remove any pre-existing file
+    if( (fp = fopen(spir_file, "r")) != NULL) {
+        fclose(fp);
+        std::remove(spir_file);
+    }
+
+    OCL_CALL (cl_kernel_compile, "compiler_ceil.cl", "compiler_ceil", compile_opt);
+
+    /* Do our test.*/
+    expect_status = CL_BUILD_SUCCESS;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_STATUS,
+                          (void *)(new Info_Result<cl_build_status>(expect_status))));
+    sz = strlen(compile_opt) + 1;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_OPTIONS,
+                          (void *)(new Info_Result<char *>(compile_opt, sz))));
+
+    for (map<cl_program_info, void *>::iterator x = maps.begin(); x != maps.end(); ++x) {
+        switch (x->first) {
+        case CL_PROGRAM_BUILD_STATUS:
+            CALL_PROG_BUILD_INFO_AND_RET(cl_build_status);
+            break;
+        case CL_PROGRAM_BUILD_OPTIONS:
+            CALL_PROG_BUILD_INFO_AND_RET(char *);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (cl_check_beignet()) {
+      //Test is successful if the backend created the file
+      if( (fp = fopen(spir_file, "r")) == NULL) {
+        std::cout << "SPIR file creation.. FAILED";
+        OCL_ASSERT(0);
+      } else {
+        fclose(fp);
+        std::cout << "SPIR file created.. SUCCESS";
+      }
+    }
+}
+MAKE_UTEST_FROM_FUNCTION(compile_spir_binary);
+
+void build_spir_binary(void)
+{
+    map<cl_program_info, void *> maps;
+    cl_build_status expect_status;
+    char spir_file[] = "test_spir_dump.txt";
+    char build_opt[] = "-dump-spir-binary=test_spir_dump.txt";
+    FILE *fp = NULL;
+    int sz;
+
+    //Remove any pre-existing file
+    if( (fp = fopen(spir_file, "r")) != NULL) {
+        fclose(fp);
+        std::remove(spir_file);
+    }
+
+    OCL_CALL (cl_kernel_init, "compiler_ceil.cl", "compiler_ceil", SOURCE, build_opt);
+
+    /* Do our test.*/
+    expect_status = CL_BUILD_SUCCESS;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_STATUS,
+                          (void *)(new Info_Result<cl_build_status>(expect_status))));
+    sz = strlen(build_opt) + 1;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_OPTIONS,
+                          (void *)(new Info_Result<char *>(build_opt, sz))));
+
+    for (map<cl_program_info, void *>::iterator x = maps.begin(); x != maps.end(); ++x) {
+        switch (x->first) {
+        case CL_PROGRAM_BUILD_STATUS:
+            CALL_PROG_BUILD_INFO_AND_RET(cl_build_status);
+            break;
+        case CL_PROGRAM_BUILD_OPTIONS:
+            CALL_PROG_BUILD_INFO_AND_RET(char *);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (cl_check_beignet()) {
+      //Test is successful if the backend created the file
+      if( (fp = fopen(spir_file, "r")) == NULL) {
+          std::cout << "SPIR file creation.. FAILED";
+          OCL_ASSERT(0);
+      } else {
+          fclose(fp);
+          std::cout << "SPIR file created.. SUCCESS";
+      }
+    }
+}
+MAKE_UTEST_FROM_FUNCTION(build_spir_binary);
 // This method uses clGetProgramBuildInfo to check the asm dump build options sent
 // And verifies that the asm dump file is actually generated in the backend.
 void get_build_asm_info(void)
@@ -458,17 +571,117 @@ void get_build_asm_info(void)
         }
     }
 
-    //Test is successful if the backend created the file
-    if( (fp = fopen(asm_file, "r")) == NULL) {
-        std::cout << "ASM file creation.. FAILED";
-        OCL_ASSERT(0);
-    } else {
-        fclose(fp);
-        std::cout << "ASM file created.. SUCCESS";
+    if (cl_check_beignet()) {
+      //Test is successful if the backend created the file
+      if( (fp = fopen(asm_file, "r")) == NULL) {
+          std::cout << "ASM file creation.. FAILED";
+          OCL_ASSERT(0);
+      } else {
+          fclose(fp);
+          std::cout << "ASM file created.. SUCCESS";
+      }
     }
 }
 
 MAKE_UTEST_FROM_FUNCTION(get_build_asm_info);
+
+void get_compile_llvm_info(void)
+{
+    map<cl_program_info, void *> maps;
+    cl_build_status expect_status;
+    char llvm_file[] = "test_llvm_dump.txt";
+    char compile_opt[] = "-dump-opt-llvm=test_llvm_dump.txt";
+    FILE *fp = NULL;
+
+    //Remove any pre-existing file
+    if( (fp = fopen(llvm_file, "r")) != NULL) {
+        fclose(fp);
+        std::remove(llvm_file);
+    }
+
+    OCL_CALL (cl_kernel_compile, "compiler_if_else.cl", "compiler_if_else", compile_opt);
+
+    /* Do our test.*/
+    expect_status = CL_BUILD_SUCCESS;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_STATUS,
+                          (void *)(new Info_Result<cl_build_status>(expect_status))));
+
+
+    for (map<cl_program_info, void *>::iterator x = maps.begin(); x != maps.end(); ++x) {
+        switch (x->first) {
+        case CL_PROGRAM_BUILD_STATUS:
+            CALL_PROG_BUILD_INFO_AND_RET(cl_build_status);
+            break;
+        case CL_PROGRAM_BUILD_OPTIONS:
+            CALL_PROG_BUILD_INFO_AND_RET(char *);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (cl_check_beignet()) {
+      //Test is successful if the backend created the file
+      if( (fp = fopen(llvm_file, "r")) == NULL) {
+          std::cout << "LLVM file creation.. FAILED";
+          OCL_ASSERT(0);
+      } else {
+          fclose(fp);
+          std::cout << "LLVM file created.. SUCCESS";
+      }
+    }
+}
+
+MAKE_UTEST_FROM_FUNCTION(get_compile_llvm_info);
+
+void get_link_asm_info(void)
+{
+    map<cl_program_info, void *> maps;
+    cl_build_status expect_status;
+    char asm_file[] = "test_asm_dump.txt";
+    char link_opt[] = "-dump-opt-asm=test_asm_dump.txt";
+    FILE *fp = NULL;
+
+    //Remove any pre-existing file
+    if( (fp = fopen(asm_file, "r")) != NULL) {
+        fclose(fp);
+        std::remove(asm_file);
+    } 
+
+    OCL_CALL (cl_kernel_link, "compiler_if_else.cl", "compiler_if_else", link_opt);
+
+    /* Do our test.*/
+    expect_status = CL_BUILD_SUCCESS;
+    maps.insert(make_pair(CL_PROGRAM_BUILD_STATUS,
+                          (void *)(new Info_Result<cl_build_status>(expect_status))));
+
+
+    for (map<cl_program_info, void *>::iterator x = maps.begin(); x != maps.end(); ++x) {
+        switch (x->first) {
+        case CL_PROGRAM_BUILD_STATUS:
+            CALL_PROG_BUILD_INFO_AND_RET(cl_build_status);
+            break;
+        case CL_PROGRAM_BUILD_OPTIONS:
+            CALL_PROG_BUILD_INFO_AND_RET(char *);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (cl_check_beignet()) {
+      //Test is successful if the backend created the file
+      if( (fp = fopen(asm_file, "r")) == NULL) {
+          std::cout << "ASM file creation.. FAILED";
+          OCL_ASSERT(0);
+      } else {
+          fclose(fp);
+          std::cout << "ASM file created.. SUCCESS";
+      }
+    }
+}
+
+MAKE_UTEST_FROM_FUNCTION(get_link_asm_info);
 
 
 /* ***************************************************** *

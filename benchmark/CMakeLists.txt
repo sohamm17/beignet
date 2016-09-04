@@ -16,7 +16,11 @@ set (benchmark_sources
   benchmark_read_buffer.cpp
   benchmark_read_image.cpp
   benchmark_copy_buffer_to_image.cpp
-  benchmark_copy_image_to_buffer.cpp)
+  benchmark_copy_image_to_buffer.cpp
+  benchmark_copy_buffer.cpp
+  benchmark_copy_image.cpp
+  benchmark_workgroup.cpp
+  benchmark_math.cpp)
 
 
 SET(CMAKE_CXX_FLAGS "-DBUILD_BENCHMARK ${CMAKE_CXX_FLAGS}")
@@ -29,3 +33,4 @@ TARGET_LINK_LIBRARIES(benchmarks cl m)
 
 ADD_EXECUTABLE(benchmark_run benchmark_run.cpp)
 TARGET_LINK_LIBRARIES(benchmark_run benchmarks)
+ADD_CUSTOM_TARGET(benchmark DEPENDS benchmarks benchmark_run)

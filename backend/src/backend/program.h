@@ -36,6 +36,11 @@
 extern "C" {
 #endif /* __cplusplus */
 
+typedef struct _DebugInfo {
+    uint32_t line;
+    uint32_t col;
+} DebugInfo;
+
 /*! Opaque structure that interfaces a GBE program */
 typedef struct _gbe_program *gbe_program;
 
@@ -92,25 +97,24 @@ enum gbe_curbe_type {
   GBE_CURBE_GROUP_NUM_Z,
   GBE_CURBE_WORK_DIM,
   GBE_CURBE_IMAGE_INFO,
-  GBE_CURBE_STACK_POINTER,
-  GBE_CURBE_PRINTF_BUF_POINTER,
-  GBE_CURBE_PRINTF_INDEX_POINTER,
   GBE_CURBE_KERNEL_ARGUMENT,
   GBE_CURBE_EXTRA_ARGUMENT,
   GBE_CURBE_BLOCK_IP,
   GBE_CURBE_DW_BLOCK_IP,
   GBE_CURBE_THREAD_NUM,
-  GBE_CURBE_ZERO,
-  GBE_CURBE_ONE,
-  GBE_CURBE_LANE_ID,
-  GBE_CURBE_SLM_OFFSET,
-  GBE_CURBE_BTI_UTIL,
+  GBE_CURBE_PROFILING_BUF_POINTER,
+  GBE_CURBE_PROFILING_TIMESTAMP0,
+  GBE_CURBE_PROFILING_TIMESTAMP1,
+  GBE_CURBE_PROFILING_TIMESTAMP2,
+  GBE_CURBE_PROFILING_TIMESTAMP3,
+  GBE_CURBE_PROFILING_TIMESTAMP4,
+  GBE_CURBE_THREAD_ID,
+  GBE_GEN_REG,
 };
 
 /*! Extra arguments use the negative range of sub-values */
 enum gbe_extra_argument {
   GBE_STACK_BUFFER = 0,   /* Give stack location in curbe */
-  GBE_CONSTANT_BUFFER = 1 /* constant buffer argument location in curbe */
 };
 
 typedef struct ImageInfo {
@@ -138,6 +142,17 @@ extern gbe_kernel_get_image_size_cb *gbe_kernel_get_image_size;
 typedef void (gbe_kernel_get_image_data_cb)(gbe_kernel gbeKernel, ImageInfo *images);
 extern gbe_kernel_get_image_data_cb *gbe_kernel_get_image_data;
 
+/*! Get whether we are in the code profiling mode */
+typedef void (gbe_output_profiling_cb)(void* profiling_info, void* buf);
+extern gbe_output_profiling_cb *gbe_output_profiling;
+
+/*! Get the profiling bti */
+typedef uint32_t (gbe_get_profiling_bti_cb)(gbe_kernel gbeKernel);
+extern gbe_get_profiling_bti_cb *gbe_get_profiling_bti;
+
+typedef void* (gbe_dup_profiling_cb)(gbe_kernel gbeKernel);
+extern gbe_dup_profiling_cb *gbe_dup_profiling;
+
 /*! Get the printf number */
 typedef uint32_t (gbe_get_printf_num_cb)(void* printf_info);
 extern gbe_get_printf_num_cb *gbe_get_printf_num;
@@ -145,9 +160,6 @@ extern gbe_get_printf_num_cb *gbe_get_printf_num;
 /*! Get the printf buffer bti */
 typedef uint8_t (gbe_get_printf_buf_bti_cb)(void* printf_info);
 extern gbe_get_printf_buf_bti_cb *gbe_get_printf_buf_bti;
-
-typedef uint8_t (gbe_get_printf_indexbuf_bti_cb)(void* printf_info);
-extern gbe_get_printf_indexbuf_bti_cb *gbe_get_printf_indexbuf_bti;
 
 /*! Release the printfset */
 typedef void (gbe_release_printf_info_cb)(void* printf_info);
@@ -157,12 +169,7 @@ extern gbe_release_printf_info_cb *gbe_release_printf_info;
 typedef void* (gbe_dup_printfset_cb)(gbe_kernel gbeKernel);
 extern gbe_dup_printfset_cb *gbe_dup_printfset;
 
-/*! Get the printf buffer const offset */
-typedef uint32_t (gbe_get_printf_sizeof_size_cb)(void* printf_info);
-extern gbe_get_printf_sizeof_size_cb *gbe_get_printf_sizeof_size;
-
-typedef void (gbe_output_printf_cb) (void* printf_info, void* index_addr, void* buf_addr,
-              size_t global_wk_sz0, size_t global_wk_sz1, size_t global_wk_sz2, size_t outbuf_sz);
+typedef void (gbe_output_printf_cb) (void* printf_info, void* buf_addr);
 extern gbe_output_printf_cb* gbe_output_printf;
 
 /*! Create a new program from the given source code (zero terminated string) */
@@ -198,7 +205,8 @@ extern gbe_program_check_opt_cb *gbe_program_check_opt;
 /*! create s new genprogram for link. */
 typedef gbe_program (gbe_program_new_gen_program_cb)(uint32_t deviceID,
                                                      const void *module,
-                                                     const void *act);
+                                                     const void *act,
+                                                     const char *asm_file_name);
 extern gbe_program_new_gen_program_cb *gbe_program_new_gen_program;
 
 /*! Create a new program from the given blob */
@@ -222,7 +230,8 @@ typedef gbe_program (gbe_program_new_from_llvm_cb)(uint32_t deviceID,
                                                    size_t string_size,
                                                    char *err,
                                                    size_t *err_size,
-                                                   int optLevel);
+                                                   int optLevel,
+                                                   const char* options);
 extern gbe_program_new_from_llvm_cb *gbe_program_new_from_llvm;
 
 /*! link the programs from llvm level. */

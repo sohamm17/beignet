@@ -90,8 +90,10 @@ namespace gbe
     const GenRegister &dst(uint32_t dstID) const { return regs[dstID]; }
     /*! Damn C++ */
     const GenRegister &src(uint32_t srcID) const { return regs[dstNum+srcID]; }
-    /*! No more than 9 sources (used by typed writes on simd8 mode.) */
-    enum { MAX_SRC_NUM = 9 };
+    /*! Set debug infomation to selection */
+    void setDBGInfo(DebugInfo in) { DBGInfo = in; }
+    /*! No more than 40 sources (40 sources are used by vme for payload passing and setting) */
+    enum { MAX_SRC_NUM = 40 };
     /*! No more than 16 destinations (15 used by I64DIV/I64REM) */
     enum { MAX_DST_NUM = 16 };
     /*! State of the instruction (extra fields neeed for the encoding) */
@@ -129,29 +131,57 @@ namespace gbe
         bool     isLD;  // is this a ld message?
         bool     isUniform;
       };
+      struct {
+        uint16_t vme_bti:8;
+        uint16_t msg_type:2;
+        uint16_t vme_search_path_lut:3;
+        uint16_t lut_sub:2;
+      };
       uint32_t barrierType;
+      uint32_t waitType;
       bool longjmp;
       uint32_t indirect_offset;
+      struct {
+        uint32_t pointNum:16;
+        uint32_t timestampType:16;
+      };
+      struct {
+        uint32_t profilingType:16;
+        uint32_t profilingBTI:16;
+      };
+      struct {
+        uint32_t printfNum:16;
+        uint32_t printfBTI:8;
+        uint32_t continueFlag:8;
+        uint16_t printfSize;
+      };
+      uint32_t workgroupOp;
     } extra;
     /*! Gen opcode */
     uint8_t opcode;
     /*! Number of destinations */
     uint8_t dstNum:5;
     /*! Number of sources */
-    uint8_t srcNum:4;
+    uint8_t srcNum:6;
     /*! To store various indices */
     uint32_t index;
     /*! For BRC/IF to store the UIP */
     uint32_t index1;
     /*! instruction ID used for vector allocation. */
     uint32_t ID;
+    DebugInfo DBGInfo;
     /*! Variable sized. Destinations and sources go here */
     GenRegister regs[0];
     INLINE uint32_t getbti() const {
       GBE_ASSERT(isRead() || isWrite());
       switch (opcode) {
+        case SEL_OP_OBREAD:
+        case SEL_OP_OBWRITE:
+        case SEL_OP_MBREAD:
+        case SEL_OP_MBWRITE:
         case SEL_OP_DWORD_GATHER: return extra.function;
         case SEL_OP_SAMPLE: return extra.rdbti;
+        case SEL_OP_VME: return extra.vme_bti;
         case SEL_OP_TYPED_WRITE: return extra.bti;
         default:
           GBE_ASSERT(0);
@@ -162,8 +192,13 @@ namespace gbe
     INLINE void setbti(uint32_t bti) {
       GBE_ASSERT(isRead() || isWrite());
       switch (opcode) {
+        case SEL_OP_OBREAD:
+        case SEL_OP_OBWRITE:
+        case SEL_OP_MBREAD:
+        case SEL_OP_MBWRITE:
         case SEL_OP_DWORD_GATHER: extra.function = bti; return;
         case SEL_OP_SAMPLE: extra.rdbti = bti; return;
+        case SEL_OP_VME: extra.vme_bti = bti; return;
         case SEL_OP_TYPED_WRITE: extra.bti = bti; return;
         default:
           GBE_ASSERT(0);
@@ -226,6 +261,14 @@ namespace gbe
     bool removeSimpleIfEndif;
   };
 
+  enum SEL_IR_OPT_FEATURE {
+    //for OP_AND/not/or/xor , on BDW+, SrcMod value indicates a logical source modifier
+    //                        on PRE-BDW, SrcMod value indicates a numeric source modifier
+    SIOF_LOGICAL_SRCMOD = 1 << 0,
+    //for OP_MOV, on BSW, for long data type, src and dst hstride must be aligned to the same qword
+    SIOF_OP_MOV_LONG_REG_RESTRICT = 1 << 1,
+  };
+
   /*! Owns the selection engine */
   class GenContext;
   /*! Selection engine produces the pre-ISA instruction blocks */
@@ -266,6 +309,13 @@ namespace gbe
     class Opaque;
     /*! Created and destroyed in cpp */
     Opaque *opaque;
+
+    /* optimize at selection IR level */
+    void optimize(void);
+    uint32_t opt_features;
+
+    const GenContext &getCtx();
+
     /*! Use custom allocators */
     GBE_CLASS(Selection);
   };
@@ -303,6 +353,13 @@ namespace gbe
     public:
       /*! Initialize internal structures used for the selection */
       SelectionBxt(GenContext &ctx);
+  };
+
+  class SelectionKbl : public Selection
+  {
+    public:
+      /*! Initialize internal structures used for the selection */
+      SelectionKbl(GenContext &ctx);
   };
 
 } /* namespace gbe */

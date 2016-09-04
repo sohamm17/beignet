@@ -371,13 +371,26 @@ intel_driver_unlock_hardware(intel_driver_t *driver)
 }
 
 LOCAL dri_bo*
-intel_driver_share_buffer(intel_driver_t *driver, const char *sname, uint32_t name)
+intel_driver_share_buffer_from_name(intel_driver_t *driver, const char *sname, uint32_t name)
 {
   dri_bo *bo = intel_bo_gem_create_from_name(driver->bufmgr,
                                              sname,
                                              name);
   if (bo == NULL) {
     fprintf(stderr, "intel_bo_gem_create_from_name create \"%s\" bo from name %d failed: %s\n", sname, name, strerror(errno));
+    return NULL;
+  }
+  return bo;
+}
+
+LOCAL dri_bo*
+intel_driver_share_buffer_from_fd(intel_driver_t *driver, int fd, int size)
+{
+  dri_bo *bo = drm_intel_bo_gem_create_from_prime(driver->bufmgr,
+                                                  fd,
+                                                  size);
+  if (bo == NULL) {
+    fprintf(stderr, "drm_intel_bo_gem_create_from_prime create bo(size %d) from fd %d failed: %s\n", size, fd, strerror(errno));
     return NULL;
   }
   return bo;
@@ -697,7 +710,7 @@ cl_buffer intel_share_buffer_from_libva(cl_context ctx,
 {
   drm_intel_bo *intel_bo;
 
-  intel_bo = intel_driver_share_buffer((intel_driver_t *)ctx->drv, "shared from libva", bo_name);
+  intel_bo = intel_driver_share_buffer_from_name((intel_driver_t *)ctx->drv, "shared from libva", bo_name);
 
   if (intel_bo == NULL)
     return NULL;
@@ -715,7 +728,43 @@ cl_buffer intel_share_image_from_libva(cl_context ctx,
   drm_intel_bo *intel_bo;
   uint32_t intel_tiling, intel_swizzle_mode;
 
-  intel_bo = intel_driver_share_buffer((intel_driver_t *)ctx->drv, "shared from libva", bo_name);
+  intel_bo = intel_driver_share_buffer_from_name((intel_driver_t *)ctx->drv, "shared from libva", bo_name);
+
+  if (intel_bo == NULL)
+    return NULL;
+
+  drm_intel_bo_get_tiling(intel_bo, &intel_tiling, &intel_swizzle_mode);
+  image->tiling = get_cl_tiling(intel_tiling);
+
+  return (cl_buffer)intel_bo;
+}
+
+cl_buffer intel_share_buffer_from_fd(cl_context ctx,
+                                     int fd,
+                                     int buffer_size)
+{
+  drm_intel_bo *intel_bo;
+
+  intel_bo = intel_driver_share_buffer_from_fd((intel_driver_t *)ctx->drv, fd, buffer_size);
+
+  if (intel_bo == NULL)
+    return NULL;
+
+  return (cl_buffer)intel_bo;
+}
+
+cl_buffer intel_share_image_from_fd(cl_context ctx,
+                                    int fd,
+                                    int image_size,
+                                    struct _cl_mem_image *image)
+{
+  drm_intel_bo *intel_bo;
+  uint32_t intel_tiling, intel_swizzle_mode;
+
+  intel_bo = intel_driver_share_buffer_from_fd((intel_driver_t *)ctx->drv, fd, image_size);
+
+  if (intel_bo == NULL)
+    return NULL;
 
   drm_intel_bo_get_tiling(intel_bo, &intel_tiling, &intel_swizzle_mode);
   image->tiling = get_cl_tiling(intel_tiling);
@@ -813,8 +862,13 @@ intel_update_device_info(cl_device_id device)
   else if (IS_CHERRYVIEW(device->device_id))
     printf(CHV_CONFIG_WARNING);
 #else
-  if (IS_CHERRYVIEW(device->device_id))
+  if (IS_CHERRYVIEW(device->device_id)) {
+#if defined(__ANDROID__)
+    device->max_compute_unit = 12;
+#else
     printf(CHV_CONFIG_WARNING);
+#endif
+  }
 #endif
 
 #ifdef HAS_SUBSLICE_TOTAL
@@ -826,9 +880,34 @@ intel_update_device_info(cl_device_id device)
   else if (IS_CHERRYVIEW(device->device_id))
     printf(CHV_CONFIG_WARNING);
 #else
-  if (IS_CHERRYVIEW(device->device_id))
+  if (IS_CHERRYVIEW(device->device_id)) {
+#if defined(__ANDROID__)
+    device->sub_slice_count = 2;
+#else
     printf(CHV_CONFIG_WARNING);
 #endif
+  }
+#endif
+
+#ifdef HAS_POOLED_EU
+  /* BXT pooled eu, 3*6 to 2*9, like sub slice count is 2 */
+  unsigned int has_pooled_eu = 0;
+  if(!drm_intel_get_pooled_eu(driver->fd, &has_pooled_eu) && has_pooled_eu)
+    device->sub_slice_count = 2;
+
+#ifdef HAS_MIN_EU_IN_POOL
+  unsigned int min_eu;
+  /* for fused down 2x6 devices, beignet don't support. */
+  if (has_pooled_eu && !drm_intel_get_min_eu_in_pool(driver->fd, &min_eu)) {
+    assert(min_eu == 9); //don't support fuse down device.
+  }
+#endif //HAS_MIN_EU_IN_POOL
+#endif //HAS_POOLED_EU
+  //We should get the device memory dynamically, but the
+  //mapablce mem size usage is unknown. Just ignore it.
+  size_t total_mem,map_mem;
+  if(drm_intel_get_aperture_sizes(driver->fd,&map_mem,&total_mem) == 0)
+    device->global_mem_size = (cl_ulong)total_mem;
 
   intel_driver_context_destroy(driver);
   intel_driver_close(driver);
@@ -872,5 +951,7 @@ intel_setup_callbacks(void)
   cl_buffer_wait_rendering = (cl_buffer_wait_rendering_cb *) drm_intel_bo_wait_rendering;
   cl_buffer_get_fd = (cl_buffer_get_fd_cb *) drm_intel_bo_gem_export_to_prime;
   cl_buffer_get_tiling_align = (cl_buffer_get_tiling_align_cb *)intel_buffer_get_tiling_align;
+  cl_buffer_get_buffer_from_fd = (cl_buffer_get_buffer_from_fd_cb *) intel_share_buffer_from_fd;
+  cl_buffer_get_image_from_fd = (cl_buffer_get_image_from_fd_cb *) intel_share_image_from_fd;
   intel_set_gpgpu_callbacks(intel_get_device_id());
 }

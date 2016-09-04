@@ -40,7 +40,6 @@
 .native_vector_width_double = 2,
 .native_vector_width_half = 8,
 .address_bits = 32,
-.max_mem_alloc_size = 512 * 1024 * 1024,
 .image_support = CL_TRUE,
 .max_read_image_args = BTI_MAX_READ_IMAGE_ARGS,
 .max_write_image_args = BTI_MAX_WRITE_IMAGE_ARGS,
@@ -56,7 +55,6 @@
 .min_data_type_align_size = sizeof(cl_long) * 16,
 .double_fp_config = 0,
 .global_mem_cache_type = CL_READ_WRITE_CACHE,
-.global_mem_size = 1024 * 1024 * 1024,
 .max_constant_buffer_size = 128 * 1024 * 1024,
 .max_constant_args = 8,
 .error_correction_support = CL_FALSE,
@@ -115,7 +113,11 @@ DECL_INFO_STRING(built_in_kernels, "__cl_copy_region_align4;"
                                    "__cl_fill_image_1d_array;"
                                    "__cl_fill_image_2d;"
                                    "__cl_fill_image_2d_array;"
-                                   "__cl_fill_image_3d;")
+                                   "__cl_fill_image_3d;"
+#ifdef GEN7_DEVICE
+                                   "block_motion_estimate_intel;"
+#endif
+                                   )
 
 DECL_INFO_STRING(driver_version, LIBCL_DRIVER_VERSION_STRING)
 DECL_INFO_STRING(spir_versions, "1.2")
@@ -126,4 +128,6 @@ DECL_INFO_STRING(spir_versions, "1.2")
 .affinity_domain = 0,
 .partition_type = {0},
 .device_reference_count = 1,
-
+.image_pitch_alignment = 1,
+.image_base_address_alignment = 4096,
+.cmrt_device = NULL

@@ -175,6 +175,16 @@ namespace gbe
   {
      GenNativeInstruction *insn = this->next(opcode);
      Gen7NativeInstruction *gen7_insn = &insn->gen7_insn;
+     int execution_size = 0;
+     if (this->curr.execWidth == 1) {
+       execution_size = GEN_WIDTH_1;
+     } else if (this->curr.execWidth == 8) {
+       execution_size = GEN_WIDTH_8;
+     } else if (this->curr.execWidth == 16) {
+       // Gen7 does not support SIMD16 alu3, still need to use SIMD8
+       execution_size = GEN_WIDTH_8;
+     } else
+       NOT_IMPLEMENTED;
 
      assert(dest.file == GEN_GENERAL_REGISTER_FILE);
      assert(dest.nr < 128);
@@ -182,11 +192,11 @@ namespace gbe
      assert(dest.type = GEN_TYPE_F);
      gen7_insn->bits1.da3src.dest_reg_file = 0;
      gen7_insn->bits1.da3src.dest_reg_nr = dest.nr;
-     gen7_insn->bits1.da3src.dest_subreg_nr = dest.subnr / 16;
+     gen7_insn->bits1.da3src.dest_subreg_nr = dest.subnr / 4;
      gen7_insn->bits1.da3src.dest_writemask = 0xf;
      this->setHeader(insn);
      gen7_insn->header.access_mode = GEN_ALIGN_16;
-     gen7_insn->header.execution_size = GEN_WIDTH_8;
+     gen7_insn->header.execution_size = execution_size;
 
      assert(src0.file == GEN_GENERAL_REGISTER_FILE);
      assert(src0.address_mode == GEN_ADDRESS_DIRECT);
@@ -238,6 +248,54 @@ namespace gbe
         gen7_insn->bits3.da3src.src2_reg_nr++;
      }
   }
+
+  static void setMBlockRWGEN7(GenEncoder *p,
+                          GenNativeInstruction *insn,
+                          uint32_t bti,
+                          uint32_t msg_type,
+                          uint32_t msg_length,
+                          uint32_t response_length)
+  {
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT_RENDER;
+    p->setMessageDescriptor(insn, sfid, msg_length, response_length);
+    insn->bits3.gen7_mblock_rw.msg_type = msg_type;
+    insn->bits3.gen7_mblock_rw.bti = bti;
+    insn->bits3.gen7_mblock_rw.header_present = 1;
+  }
+
+
+  void Gen7Encoder::MBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1;
+    const uint32_t response_length = size; // Size of registers
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::ud8grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setMBlockRWGEN7(this,
+                insn,
+                bti,
+                GEN75_P1_MEDIA_BREAD,
+                msg_length,
+                response_length);
+  }
+
+  void Gen7Encoder::MBWRITE(GenRegister header, uint32_t bti, uint32_t size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1 + size;
+    const uint32_t response_length = 0; // Size of registers
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setMBlockRWGEN7(this,
+                insn,
+                bti,
+                GEN75_P1_MEDIA_TYPED_BWRITE,
+                msg_length,
+                response_length);
+  }
+
 
 #undef NO_SWIZZLE
 }

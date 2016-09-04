@@ -20,6 +20,9 @@
 #ifndef __CL_DEVICE_ID_H__
 #define __CL_DEVICE_ID_H__
 
+#define EXTENSTION_LENGTH 512
+
+#include "cl_khr_icd.h"
 /* Store complete information about the device */
 struct _cl_device_id {
   DEFINE_ICD(dispatch)
@@ -95,7 +98,7 @@ struct _cl_device_id {
   const char *version;
   const char *profile;
   const char *opencl_c_version;
-  const char extensions[256];
+  const char extensions[EXTENSTION_LENGTH];
   const char *driver_version;
   const char *spir_versions;
   const char *built_in_kernels;
@@ -116,6 +119,11 @@ struct _cl_device_id {
   cl_device_partition_property partition_type[3];
   cl_uint      device_reference_count;
   uint32_t atomic_test_result;
+  uint32_t image_pitch_alignment;
+  uint32_t image_base_address_alignment;
+
+  //inited as NULL, created only when cmrt kernel is used
+  void* cmrt_device;  //realtype: CmDevice*
 };
 
 /* Get a device from the given platform */
@@ -141,6 +149,15 @@ extern cl_int cl_get_kernel_workgroup_info(cl_kernel kernel,
                                            size_t           param_value_size,
                                            void *           param_value,
                                            size_t *         param_value_size_ret);
+
+extern cl_int cl_get_kernel_subgroup_info(cl_kernel kernel,
+                                          cl_device_id     device,
+                                          cl_kernel_work_group_info   param_name,
+                                          size_t           input_value_size,
+                                          const void *     input_value,
+                                          size_t           param_value_size,
+                                          void *           param_value,
+                                          size_t *         param_value_size_ret);
 /* Returns the Gen device ID */
 extern cl_int cl_device_get_version(cl_device_id device, cl_int *ver);
 extern size_t cl_get_kernel_max_wg_sz(cl_kernel);

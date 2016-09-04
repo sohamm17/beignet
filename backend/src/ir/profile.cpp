@@ -41,58 +41,60 @@ namespace ir {
         "block_ip",
         "barrier_id", "thread_number", "work_dimension",
         "zero", "one",
-        "retVal", "slm_offset",
-        "printf_buffer_pointer", "printf_index_buffer_pointer",
+        "retVal",
         "dwblockip",
-        "lane_id",
-        "invalid",
-        "bti_utility"
+        "profiling_buffer_pointer",
+        "profiling_timestamps0", "profiling_timestamps1",
+        "profiling_timestamps2", "profiling_timestamps3",
+        "profiling_timestamps4",
+        "threadid"
     };
 
 #if GBE_DEBUG
-#define DECL_NEW_REG(FAMILY, REG, UNIFORM) \
-   r = fn.newRegister(FAMILY, UNIFORM); \
+#define DECL_NEW_REG(FAMILY, REG, ...) \
+   r = fn.newRegister(FAMILY, __VA_ARGS__); \
    GBE_ASSERT(r == REG);
 #else
-#define DECL_NEW_REG(FAMILY, REG, UNIFORM) \
-   fn.newRegister(FAMILY, UNIFORM);
+#define DECL_NEW_REG(FAMILY, REG, ...) \
+   fn.newRegister(FAMILY, __VA_ARGS__);
 #endif /* GBE_DEBUG */
     static void init(Function &fn) {
       IF_DEBUG(Register r);
-      DECL_NEW_REG(FAMILY_DWORD, lid0, 0);
-      DECL_NEW_REG(FAMILY_DWORD, lid1, 0);
-      DECL_NEW_REG(FAMILY_DWORD, lid2, 0);
+      DECL_NEW_REG(FAMILY_DWORD, lid0, 0, GBE_CURBE_LOCAL_ID_X);
+      DECL_NEW_REG(FAMILY_DWORD, lid1, 0, GBE_CURBE_LOCAL_ID_Y);
+      DECL_NEW_REG(FAMILY_DWORD, lid2, 0, GBE_CURBE_LOCAL_ID_Z);
       DECL_NEW_REG(FAMILY_DWORD, groupid0, 1);
       DECL_NEW_REG(FAMILY_DWORD, groupid1, 1);
       DECL_NEW_REG(FAMILY_DWORD, groupid2, 1);
-      DECL_NEW_REG(FAMILY_DWORD, numgroup0, 1);
-      DECL_NEW_REG(FAMILY_DWORD, numgroup1, 1);
-      DECL_NEW_REG(FAMILY_DWORD, numgroup2, 1);
-      DECL_NEW_REG(FAMILY_DWORD, lsize0, 1);
-      DECL_NEW_REG(FAMILY_DWORD, lsize1, 1);
-      DECL_NEW_REG(FAMILY_DWORD, lsize2, 1);
-      DECL_NEW_REG(FAMILY_DWORD, gsize0, 1);
-      DECL_NEW_REG(FAMILY_DWORD, gsize1, 1);
-      DECL_NEW_REG(FAMILY_DWORD, gsize2, 1);
-      DECL_NEW_REG(FAMILY_DWORD, goffset0, 1);
-      DECL_NEW_REG(FAMILY_DWORD, goffset1, 1);
-      DECL_NEW_REG(FAMILY_DWORD, goffset2, 1);
+      DECL_NEW_REG(FAMILY_DWORD, numgroup0, 1, GBE_CURBE_GROUP_NUM_X);
+      DECL_NEW_REG(FAMILY_DWORD, numgroup1, 1, GBE_CURBE_GROUP_NUM_Y);
+      DECL_NEW_REG(FAMILY_DWORD, numgroup2, 1, GBE_CURBE_GROUP_NUM_Z);
+      DECL_NEW_REG(FAMILY_DWORD, lsize0, 1, GBE_CURBE_LOCAL_SIZE_X);
+      DECL_NEW_REG(FAMILY_DWORD, lsize1, 1, GBE_CURBE_LOCAL_SIZE_Y);
+      DECL_NEW_REG(FAMILY_DWORD, lsize2, 1, GBE_CURBE_LOCAL_SIZE_Z);
+      DECL_NEW_REG(FAMILY_DWORD, gsize0, 1, GBE_CURBE_GLOBAL_SIZE_X);
+      DECL_NEW_REG(FAMILY_DWORD, gsize1, 1, GBE_CURBE_GLOBAL_SIZE_Y);
+      DECL_NEW_REG(FAMILY_DWORD, gsize2, 1, GBE_CURBE_GLOBAL_SIZE_Z);
+      DECL_NEW_REG(FAMILY_DWORD, goffset0, 1, GBE_CURBE_GLOBAL_OFFSET_X);
+      DECL_NEW_REG(FAMILY_DWORD, goffset1, 1, GBE_CURBE_GLOBAL_OFFSET_Y);
+      DECL_NEW_REG(FAMILY_DWORD, goffset2, 1, GBE_CURBE_GLOBAL_OFFSET_Z);
       DECL_NEW_REG(FAMILY_DWORD, stackptr, 0);
-      DECL_NEW_REG(FAMILY_QWORD, stackbuffer, 1);
-      DECL_NEW_REG(FAMILY_WORD,  blockip, 0);
+      DECL_NEW_REG(FAMILY_QWORD, stackbuffer, 1, GBE_CURBE_EXTRA_ARGUMENT, GBE_STACK_BUFFER);
+      DECL_NEW_REG(FAMILY_WORD,  blockip, 0, GBE_CURBE_BLOCK_IP);
       DECL_NEW_REG(FAMILY_DWORD, barrierid, 1);
-      DECL_NEW_REG(FAMILY_DWORD, threadn, 1);
-      DECL_NEW_REG(FAMILY_DWORD, workdim, 1);
+      DECL_NEW_REG(FAMILY_DWORD, threadn, 1, GBE_CURBE_THREAD_NUM);
+      DECL_NEW_REG(FAMILY_DWORD, workdim, 1, GBE_CURBE_WORK_DIM);
       DECL_NEW_REG(FAMILY_DWORD, zero, 1);
       DECL_NEW_REG(FAMILY_DWORD, one, 1);
       DECL_NEW_REG(FAMILY_WORD, retVal, 1);
-      DECL_NEW_REG(FAMILY_DWORD, slmoffset, 1);
-      DECL_NEW_REG(FAMILY_DWORD, printfbptr, 1);
-      DECL_NEW_REG(FAMILY_DWORD, printfiptr, 1);
-      DECL_NEW_REG(FAMILY_DWORD, dwblockip, 0);
-      DECL_NEW_REG(FAMILY_DWORD, laneid, 0);
-      DECL_NEW_REG(FAMILY_DWORD, invalid, 1);
-      DECL_NEW_REG(FAMILY_DWORD, btiUtil, 1);
+      DECL_NEW_REG(FAMILY_DWORD, dwblockip, 0, GBE_CURBE_DW_BLOCK_IP);
+      DECL_NEW_REG(FAMILY_QWORD, profilingbptr, 1, GBE_CURBE_PROFILING_BUF_POINTER);
+      DECL_NEW_REG(FAMILY_DWORD, profilingts0, 0, GBE_CURBE_PROFILING_TIMESTAMP0);
+      DECL_NEW_REG(FAMILY_DWORD, profilingts1, 0, GBE_CURBE_PROFILING_TIMESTAMP1);
+      DECL_NEW_REG(FAMILY_DWORD, profilingts2, 0, GBE_CURBE_PROFILING_TIMESTAMP2);
+      DECL_NEW_REG(FAMILY_DWORD, profilingts3, 0, GBE_CURBE_PROFILING_TIMESTAMP3);
+      DECL_NEW_REG(FAMILY_DWORD, profilingts4, 0, GBE_CURBE_PROFILING_TIMESTAMP4);
+      DECL_NEW_REG(FAMILY_DWORD, threadid, 1, GBE_CURBE_THREAD_ID);
     }
 #undef DECL_NEW_REG
 

@@ -77,6 +77,7 @@ static const struct {
   [GEN_OPCODE_LINE] = { .name = "line", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_PLN] = { .name = "pln", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_MAD] = { .name = "mad", .nsrc = 3, .ndst = 1 },
+  [GEN_OPCODE_LRP] = { .name = "lrp", .nsrc = 3, .ndst = 1 },
   [GEN_OPCODE_SAD2] = { .name = "sad2", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_SADA2] = { .name = "sada2", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_DP4] = { .name = "dp4", .nsrc = 2, .ndst = 1 },
@@ -84,6 +85,7 @@ static const struct {
   [GEN_OPCODE_DP3] = { .name = "dp3", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_DP2] = { .name = "dp2", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_MATH] = { .name = "math", .nsrc = 2, .ndst = 1 },
+  [GEN_OPCODE_MADM] = { .name = "madm", .nsrc = 3, .ndst = 1 },
 
   [GEN_OPCODE_AVG] = { .name = "avg", .nsrc = 2, .ndst = 1 },
   [GEN_OPCODE_ADD] = { .name = "add", .nsrc = 2, .ndst = 1 },
@@ -271,6 +273,14 @@ static const char *reg_encoding[11] = {
   [10] = ":HF"
 };
 
+static const char *reg_encoding_3src[5] = {
+  [0] = ":F",
+  [1] = ":D",
+  [2] = ":UD",
+  [3] = ":DF",
+  [4] = ":HF",
+};
+
 int reg_type_size[11] = {
   [0] = 4,
   [1] = 4,
@@ -309,6 +319,18 @@ static const char *writemask[16] = {
   [0xd] = ".xzw",
   [0xe] = ".yzw",
   [0xf] = "",
+};
+
+static const char *special_acc[9] = {
+  [0x0] = ".acc2",
+  [0x1] = ".acc3",
+  [0x2] = ".acc4",
+  [0x3] = ".acc5",
+  [0x4] = ".acc6",
+  [0x5] = ".acc7",
+  [0x6] = ".acc8",
+  [0x7] = ".acc9",
+  [0x8] = ".noacc",
 };
 
 static const char *end_of_thread[2] = {
@@ -383,8 +405,22 @@ static const char *math_function_gen8[16] = {
   [GEN_MATH_FUNCTION_FDIV] = "fdiv",
   [GEN_MATH_FUNCTION_POW] = "pow",
   [GEN_MATH_FUNCTION_INT_DIV_QUOTIENT_AND_REMAINDER] = "intdivmod",
+  [GEN_MATH_FUNCTION_INT_DIV_QUOTIENT] = "intdiv",
+  [GEN_MATH_FUNCTION_INT_DIV_REMAINDER] = "intmod",
   [GEN8_MATH_FUNCTION_INVM] = "invm",
   [GEN8_MATH_FUNCTION_RSQRTM] = "rsqrtm",
+};
+
+static const char *data_port_data_cache_data_size[] = {
+  "1 byte",
+  "2 bytes",
+  "4 bytes",
+  "Reserved"
+};
+
+static const char *data_port_data_cache_byte_scattered_simd_mode[] = {
+  "SIMD8",
+  "SIMD16",
 };
 
 static const char *data_port_data_cache_simd_mode[] = {
@@ -396,6 +432,14 @@ static const char *data_port_data_cache_simd_mode[] = {
 static const char *data_port_data_cache_category[] = {
   "legacy",
   "scratch",
+};
+
+static const char *data_port_data_cache_block_size[] = {
+  "1 OWORD LOW",
+  "1 OWORD HIGH",
+  "2 OWORD",
+  "4 OWORD",
+  "8 OWORD",
 };
 
 static const char *data_port_scratch_block_size[] = {
@@ -455,6 +499,13 @@ static int column;
 
 static int gen_version;
 
+#define GEN7_BITS_FIELD(inst, gen7) \
+  ({                                                            \
+    int bits;                                                   \
+      bits = ((const union Gen7NativeInstruction *)inst)->gen7; \
+    bits;                                                       \
+  })
+
 #define GEN_BITS_FIELD(inst, gen)                               \
   ({                                                            \
     int bits;                                                   \
@@ -509,6 +560,8 @@ static int gen_version;
 #define EXECUTION_SIZE(inst)       GEN_BITS_FIELD(inst, header.execution_size)
 #define BRANCH_JIP(inst)           GEN_BITS_FIELD2(inst, bits3.gen7_branch.jip, bits3.gen8_branch.jip/8)
 #define BRANCH_UIP(inst)           GEN_BITS_FIELD2(inst, bits3.gen7_branch.uip, bits2.gen8_branch.uip/8)
+#define VME_BTI(inst)              GEN7_BITS_FIELD(inst, bits3.vme_gen7.bti)
+#define VME_MSG_TYPE(inst)         GEN7_BITS_FIELD(inst, bits3.vme_gen7.msg_type)
 #define SAMPLE_BTI(inst)           GEN_BITS_FIELD(inst, bits3.sampler_gen7.bti)
 #define SAMPLER(inst)              GEN_BITS_FIELD(inst, bits3.sampler_gen7.sampler)
 #define SAMPLER_MSG_TYPE(inst)     GEN_BITS_FIELD(inst, bits3.sampler_gen7.msg_type)
@@ -518,6 +571,8 @@ static int gen_version;
 #define UNTYPED_RW_SIMD_MODE(inst) GEN_BITS_FIELD(inst, bits3.gen7_untyped_rw.simd_mode)
 #define UNTYPED_RW_CATEGORY(inst)  GEN_BITS_FIELD(inst, bits3.gen7_untyped_rw.category)
 #define UNTYPED_RW_MSG_TYPE(inst)  GEN_BITS_FIELD(inst, bits3.gen7_untyped_rw.msg_type)
+#define BYTE_RW_SIMD_MODE(inst)    GEN_BITS_FIELD(inst, bits3.gen7_byte_rw.simd_mode)
+#define BYTE_RW_DATA_SIZE(inst)    GEN_BITS_FIELD(inst, bits3.gen7_byte_rw.data_size)
 #define SCRATCH_RW_OFFSET(inst)    GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.offset)
 #define SCRATCH_RW_BLOCK_SIZE(inst) GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.block_size)
 #define SCRATCH_RW_INVALIDATE_AFTER_READ(inst) GEN_BITS_FIELD(inst, bits3.gen7_scratch_rw.invalidate_after_read)
@@ -531,6 +586,25 @@ static int gen_version;
 #define MSG_GW_ACKREQ(inst)        GEN_BITS_FIELD(inst, bits3.gen7_msg_gw.ackreq)
 #define GENERIC_MSG_LENGTH(inst)   GEN_BITS_FIELD(inst, bits3.generic_gen5.msg_length)
 #define GENERIC_RESPONSE_LENGTH(inst) GEN_BITS_FIELD(inst, bits3.generic_gen5.response_length)
+#define OWORD_RW_BLOCK_SIZE(inst)    GEN_BITS_FIELD(inst, bits3.gen7_oblock_rw.block_size)
+
+static int is_special_acc(const void* inst)
+{
+  if (gen_version < 80)
+    return 0;
+
+  if (OPCODE(inst) != GEN_OPCODE_MADM && OPCODE(inst) != GEN_OPCODE_MATH)
+    return 0;
+
+  if (OPCODE(inst) == GEN_OPCODE_MATH &&
+    (MATH_FUNCTION(inst) != GEN8_MATH_FUNCTION_INVM && MATH_FUNCTION(inst) != GEN8_MATH_FUNCTION_RSQRTM))
+    return 0;
+
+  if (ACCESS_MODE(inst) != GEN_ALIGN_16)
+    return 0;
+
+  return 1;
+}
 
 static int string(FILE *file, const char *string)
 {
@@ -688,7 +762,12 @@ static int dest(FILE *file, const void* inst)
         format(file, ".%d", GEN_BITS_FIELD(inst, bits1.da16.dest_subreg_nr) /
                reg_type_size[GEN_BITS_FIELD(inst, bits1.da16.dest_reg_type)]);
       string(file, "<1>");
-      err |= control(file, "writemask", writemask, GEN_BITS_FIELD(inst, bits1.da16.dest_writemask), NULL);
+
+      if (is_special_acc(inst)) {
+        err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits1.da16acc.dst_special_acc, NULL);
+      } else {
+        err |= control(file, "writemask", writemask, GEN_BITS_FIELD(inst, bits1.da16.dest_writemask), NULL);
+      }
       err |= control(file, "dest reg encoding", reg_encoding, GEN_BITS_FIELD(inst, bits1.da16.dest_reg_type), NULL);
     } else {
       err = 1;
@@ -710,8 +789,17 @@ static int dest_3src(FILE *file, const void *inst)
   if (GEN_BITS_FIELD(inst, bits1.da3src.dest_subreg_nr))
     format(file, ".%d", GEN_BITS_FIELD(inst, bits1.da3src.dest_subreg_nr));
   string(file, "<1>");
-  err |= control(file, "writemask", writemask, GEN_BITS_FIELD(inst, bits1.da3src.dest_writemask), NULL);
-  err |= control(file, "dest reg encoding", reg_encoding, GEN_TYPE_F, NULL);
+  if (is_special_acc(inst)) {
+    err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits1.da3srcacc.dst_special_acc, NULL);
+  } else {
+    err |= control(file, "writemask", writemask, GEN_BITS_FIELD(inst, bits1.da3src.dest_writemask), NULL);
+  }
+
+  if (gen_version < 80) {
+    err |= control(file, "dest reg encoding", reg_encoding, GEN_TYPE_F, NULL);
+  } else {
+    err |= control(file, "dest reg encoding", reg_encoding_3src, ((const union Gen8NativeInstruction *)inst)->bits1.da3src.dest_type, NULL);
+  }
 
   return 0;
 }
@@ -775,7 +863,7 @@ static int src_ia1(FILE *file,
   return err;
 }
 
-static int src_da16(FILE *file,
+static int src_da16(FILE *file, const void* inst, int src_num,
                     uint32_t _reg_type,
                     uint32_t _reg_file,
                     uint32_t _vert_stride,
@@ -803,6 +891,17 @@ static int src_da16(FILE *file,
 
   err |= control(file, "vert stride", vert_stride, _vert_stride, NULL);
   string(file, ",4,1>");
+
+  if (is_special_acc(inst)) {
+    if (src_num == 0) {
+      err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits2.da16acc.src0_special_acc_lo, NULL);
+    } else {
+      assert(src_num == 1);
+      err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits3.da16acc.src1_special_acc_lo, NULL);
+    }
+    return err;
+  }
+
   /*
    * Three kinds of swizzle display:
    *  identity - nothing printed
@@ -846,10 +945,18 @@ static int src0_3src(FILE *file, const void* inst)
     format(file, ".%d", GEN_BITS_FIELD(inst, bits2.da3src.src0_subreg_nr));
   if (GEN_BITS_FIELD(inst, bits2.da3src.src0_rep_ctrl))
     string(file, "<0,1,0>");
-  else
-    string(file, "<8,8,1>");
-  err |= control(file, "src da16 reg type", reg_encoding,
-                 GEN_TYPE_F, NULL);
+
+  if (gen_version < 80) {
+    err |= control(file, "src da16 reg type", reg_encoding, GEN_TYPE_F, NULL);
+  } else {
+    err |= control(file, "src da16 reg type", reg_encoding_3src, ((const union Gen8NativeInstruction *)inst)->bits1.da3src.src_type, NULL);
+  }
+
+  if (is_special_acc(inst)) {
+    err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits2.da3srcacc.src0_special_acc, NULL);
+    return err;
+  }
+
   /*
    * Three kinds of swizzle display:
    *  identity - nothing printed
@@ -894,10 +1001,18 @@ static int src1_3src(FILE *file, const void* inst)
     format(file, ".%d", src1_subreg_nr);
   if (GEN_BITS_FIELD(inst, bits2.da3src.src1_rep_ctrl))
     string(file, "<0,1,0>");
-  else
-    string(file, "<8,8,1>");
-  err |= control(file, "src da16 reg type", reg_encoding,
-                 GEN_TYPE_F, NULL);
+
+  if (gen_version < 80) {
+    err |= control(file, "src da16 reg type", reg_encoding, GEN_TYPE_F, NULL);
+  } else {
+    err |= control(file, "src da16 reg type", reg_encoding_3src, ((const union Gen8NativeInstruction *)inst)->bits1.da3src.src_type, NULL);
+  }
+
+  if (is_special_acc(inst)) {
+    err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits2.da3srcacc.src1_special_acc, NULL);
+    return err;
+  }
+
   /*
    * Three kinds of swizzle display:
    *  identity - nothing printed
@@ -939,10 +1054,18 @@ static int src2_3src(FILE *file, const void* inst)
     format(file, ".%d", GEN_BITS_FIELD(inst, bits3.da3src.src2_subreg_nr));
   if (GEN_BITS_FIELD(inst, bits3.da3src.src2_rep_ctrl))
     string(file, "<0,1,0>");
-  else
-    string(file, "<8,8,1>");
-  err |= control(file, "src da16 reg type", reg_encoding,
-                 GEN_TYPE_F, NULL);
+
+  if (gen_version < 80) {
+    err |= control(file, "src da16 reg type", reg_encoding, GEN_TYPE_F, NULL);
+  } else {
+    err |= control(file, "src da16 reg type", reg_encoding_3src, ((const union Gen8NativeInstruction *)inst)->bits1.da3src.src_type, NULL);
+  }
+
+  if (is_special_acc(inst)) {
+    err |= control(file, "specialacc", special_acc, ((const union Gen8NativeInstruction *)inst)->bits3.da3srcacc.src2_special_acc, NULL);
+    return err;
+  }
+
   /*
    * Three kinds of swizzle display:
    *  identity - nothing printed
@@ -1066,6 +1189,16 @@ static int imm(FILE *file, uint32_t type, const void* inst)
       format(file, "%-gHF", f);
       break;
     }
+    case GEN_TYPE_DF_IMM:
+    {
+      assert(!(gen_version < 80));
+      double val;
+      uint32_t hi = (((const union Gen8NativeInstruction *)inst)->bits3).ud;
+      uint32_t lo = (((const union Gen8NativeInstruction *)inst)->bits2).ud;
+      memcpy((void *)(&val), &lo, sizeof(uint32_t));
+      memcpy(((void *)(&val) + sizeof(uint32_t)), &hi, sizeof(uint32_t));
+      format(file, "%f", val);
+    }
   }
   return 0;
 }
@@ -1106,7 +1239,7 @@ static int src0(FILE *file, const void* inst)
     }
   } else {
     if (GEN_BITS_FIELD(inst, bits2.da16.src0_address_mode) == GEN_ADDRESS_DIRECT) {
-      return src_da16(file,
+      return src_da16(file, inst, 0,
                       GEN_BITS_FIELD(inst, bits1.da16.src0_reg_type),
                       GEN_BITS_FIELD(inst, bits1.da16.src0_reg_file),
                       GEN_BITS_FIELD(inst, bits2.da16.src0_vert_stride),
@@ -1157,7 +1290,7 @@ static int src1(FILE *file, const void* inst)
     }
   } else {
     if (GEN_BITS_FIELD(inst, bits3.da16.src1_address_mode) == GEN_ADDRESS_DIRECT) {
-      return src_da16(file,
+      return src_da16(file, inst, 1,
                       GEN_BITS_FIELD2(inst, bits1.da16.src1_reg_type, bits2.da16.src1_reg_type),
                       GEN_BITS_FIELD2(inst, bits1.da16.src1_reg_file, bits2.da16.src1_reg_file),
                       GEN_BITS_FIELD(inst, bits3.da16.src1_vert_stride),
@@ -1333,6 +1466,11 @@ int gen_disasm (FILE *file, const void *inst, uint32_t deviceID, uint32_t compac
 
     if (GEN_BITS_FIELD2(inst, bits1.da1.src1_reg_file, bits2.da1.src1_reg_file) == GEN_IMMEDIATE_VALUE) {
       switch (target) {
+        case GEN_SFID_VIDEO_MOTION_EST:
+          format(file, " (bti: %d, msg_type: %d)",
+                 VME_BTI(inst),
+                 VME_MSG_TYPE(inst));
+          break;
         case GEN_SFID_SAMPLER:
           format(file, " (%d, %d, %d, %d)",
                  SAMPLE_BTI(inst),
@@ -1340,14 +1478,39 @@ int gen_disasm (FILE *file, const void *inst, uint32_t deviceID, uint32_t compac
                  SAMPLER_MSG_TYPE(inst),
                  SAMPLER_SIMD_MODE(inst));
           break;
+        case GEN_SFID_DATAPORT_RENDER:
+            if(UNTYPED_RW_MSG_TYPE(inst) == 4 || UNTYPED_RW_MSG_TYPE(inst) == 10)
+              format(file, " (bti: %d, %s, %s)",
+                     UNTYPED_RW_BTI(inst),
+                     data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                     data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            else
+              format(file, " not implemented");
+            break;
         case GEN_SFID_DATAPORT_DATA:
           if(UNTYPED_RW_CATEGORY(inst) == 0) {
-            format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
+            if(UNTYPED_RW_MSG_TYPE(inst) == 5 || UNTYPED_RW_MSG_TYPE(inst) == 13)
+              format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
                    UNTYPED_RW_BTI(inst),
                    UNTYPED_RW_RGBA(inst),
                    data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
                    data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
                    data_port_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            else if(UNTYPED_RW_MSG_TYPE(inst) == 4 || UNTYPED_RW_MSG_TYPE(inst) == 12)
+              format(file, " (bti: %d, data size: %s, %s, %s, %s)",
+                   UNTYPED_RW_BTI(inst),
+                   data_port_data_cache_data_size[BYTE_RW_DATA_SIZE(inst)],
+                   data_port_data_cache_byte_scattered_simd_mode[BYTE_RW_SIMD_MODE(inst)],
+                   data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                   data_port_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            else if(UNTYPED_RW_MSG_TYPE(inst) == 0 || UNTYPED_RW_MSG_TYPE(inst) == 8)
+              format(file, " (bti: %d, data size: %s, %s, %s)",
+                   UNTYPED_RW_BTI(inst),
+                   data_port_data_cache_block_size[OWORD_RW_BLOCK_SIZE(inst)],
+                   data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                   data_port_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            else
+              format(file, " not implemented");
           } else {
             format(file, " (addr: %d, blocks: %s, %s, mode: %s, %s)",
                    SCRATCH_RW_OFFSET(inst),
@@ -1358,12 +1521,18 @@ int gen_disasm (FILE *file, const void *inst, uint32_t deviceID, uint32_t compac
           }
           break;
         case GEN_SFID_DATAPORT1_DATA:
-          format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
-                 UNTYPED_RW_BTI(inst),
-                 UNTYPED_RW_RGBA(inst),
-                 data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
-                 data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
-                 data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            if(UNTYPED_RW_MSG_TYPE(inst) == 4 || UNTYPED_RW_MSG_TYPE(inst) == 10)
+              format(file, " (bti: %d, %s, %s)",
+                     UNTYPED_RW_BTI(inst),
+                     data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                     data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
+            else
+              format(file, " (bti: %d, rgba: %d, %s, %s, %s)",
+                     UNTYPED_RW_BTI(inst),
+                     UNTYPED_RW_RGBA(inst),
+                     data_port_data_cache_simd_mode[UNTYPED_RW_SIMD_MODE(inst)],
+                     data_port_data_cache_category[UNTYPED_RW_CATEGORY(inst)],
+                     data_port1_data_cache_msg_type[UNTYPED_RW_MSG_TYPE(inst)]);
           break;
         case GEN_SFID_DATAPORT_CONSTANT:
           format(file, " (bti: %d, %s)",

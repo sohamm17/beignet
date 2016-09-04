@@ -88,6 +88,9 @@ namespace gbe
     uint32_t deviceID;
     /*! simd width for this codegen */
     uint32_t simdWidth;
+    DebugInfo DBGInfo;
+    vector<DebugInfo> storedbg;
+    void setDBGInfo(DebugInfo in, bool hasHigh);
     ////////////////////////////////////////////////////////////////////////
     // Encoding functions
     ////////////////////////////////////////////////////////////////////////
@@ -125,7 +128,7 @@ namespace gbe
     ALU2(LINE)
     ALU2(PLN)
     ALU3(MAD)
-    //ALU2(MOV_DF);
+    ALU3(LRP)
     ALU2(BRC)
     ALU1(BRD)
 #undef ALU1
@@ -135,13 +138,11 @@ namespace gbe
 
     virtual void F16TO32(GenRegister dest, GenRegister src0);
     virtual void F32TO16(GenRegister dest, GenRegister src0);
-    /*! Get double/long exec width */
-    virtual int getDoubleExecWidth(void) = 0;
-    virtual void MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp = GenRegister::null());
-    virtual void LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value);
     virtual void LOAD_INT64_IMM(GenRegister dest, GenRegister value);
     /*! Barrier message (to synchronize threads of a workgroup) */
     void BARRIER(GenRegister src);
+    /*! Forward the gateway message. */
+    void FWD_GATEWAY_MSG(GenRegister src, uint32_t notifyN = 0);
     /*! Memory fence message (to order loads and stores between threads) */
     void FENCE(GenRegister dst);
     /*! Jump indexed instruction */
@@ -167,7 +168,7 @@ namespace gbe
     /*! No-op */
     void NOP(void);
     /*! Wait instruction (used for the barrier) */
-    void WAIT(void);
+    void WAIT(uint32_t n = 0);
     /*! Atomic instructions */
     virtual void ATOMIC(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum);
     /*! Untyped read (upto 4 channels) */
@@ -205,6 +206,19 @@ namespace gbe
                            bool header_present,
                            uint32_t simd_mode,
                            uint32_t return_format);
+    virtual void VME(unsigned char bti,
+                         GenRegister dest,
+                         GenRegister msg,
+                         uint32_t msg_type,
+                         uint32_t vme_search_path_lut,
+                         uint32_t lut_sub);
+    void setVmeMessage(GenNativeInstruction *insn,
+                          unsigned char bti,
+                          uint32_t response_length,
+                          uint32_t msg_length,
+                          uint32_t msg_type,
+                          unsigned char vme_search_path_lut,
+                          unsigned char lut_sub);
 
     /*! TypedWrite instruction for texture */
     virtual void TYPED_WRITE(GenRegister header,
@@ -247,11 +261,20 @@ namespace gbe
     virtual void setSrc0(GenNativeInstruction *insn, GenRegister reg) = 0;
     virtual void setSrc1(GenNativeInstruction *insn, GenRegister reg) = 0;
     GenCompactInstruction *nextCompact(uint32_t opcode);
-    virtual bool disableCompact() { return false; }
+    virtual uint32_t getCompactVersion() { return 7; }
     GenNativeInstruction *next(uint32_t opcode);
     uint32_t n_instruction(void) const { return store.size(); }
     virtual bool canHandleLong(uint32_t opcode, GenRegister dst, GenRegister src0,
                             GenRegister src1 = GenRegister::null());
+    virtual void handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1 = GenRegister::null());
+    /*! OBlock read */
+    void OBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t elemSize);
+    /*! OBlock write */
+    void OBWRITE(GenRegister header, uint32_t bti, uint32_t elemSize);
+    /*! MBlock read */
+    virtual void MBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t elemSize);
+    /*! MBlock write */
+    virtual void MBWRITE(GenRegister header, uint32_t bti, uint32_t elemSize);
 
     GBE_CLASS(GenEncoder); //!< Use custom allocators
     virtual void alu3(uint32_t opcode, GenRegister dst,

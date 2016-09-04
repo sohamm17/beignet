@@ -90,7 +90,7 @@ namespace gbe {
     /*! Set the instruction stream.*/
     virtual void setCode(const char *, size_t size) = 0;
     /*! Return the instruction stream size (to be implemented) */
-    virtual size_t getCodeSize(void) const = 0;
+    virtual uint32_t getCodeSize(void) const = 0;
     /*! Get the kernel name */
     INLINE const char *getName(void) const { return name.c_str(); }
     /*! Return the number of arguments for the kernel call */
@@ -137,14 +137,22 @@ namespace gbe {
     void setImageSet(ir::ImageSet * from) {
       imageSet = from;
     }
+    /*! Set profiling info. */
+    void setProfilingInfo(ir::ProfilingInfo * from) {
+      profilingInfo = from;
+    }
+    void * dupProfilingInfo() const {
+      void* ptr = profilingInfo ? (void *)(new ir::ProfilingInfo(*profilingInfo)) : NULL;
+      return ptr;
+    }
+    uint32_t getProfilingBTI(void) const {
+      return profilingInfo ? profilingInfo->getBTI() : 0;
+    }
     /*! Set printf set. */
     void setPrintfSet(ir::PrintfSet * from) {
       printfSet = from;
     }
-    /* ! Return the offset in the sizeof(xxx). */
-    uint32_t getPrintfSizeOfSize(void) const {
-      return printfSet ? printfSet->getPrintfSizeOfSize() : 0;
-    }
+
     uint32_t getPrintfNum() const {
       return printfSet ? printfSet->getPrintfNum() : 0;
     }
@@ -158,16 +166,14 @@ namespace gbe {
       return printfSet->getBufBTI();
     }
 
-    uint8_t getPrintfIndexBufBTI() const {
-      GBE_ASSERT(printfSet);
-      return printfSet->getIndexBufBTI();
+    uint32_t getProfilingBufBTI() const {
+      GBE_ASSERT(profilingInfo);
+      return profilingInfo->getBTI();
     }
 
-    void outputPrintf(void* index_addr, void* buf_addr, size_t global_wk_sz0,
-                      size_t global_wk_sz1, size_t global_wk_sz2, size_t output_sz) {
-      if(printfSet)
-        printfSet->outputPrintf(index_addr, buf_addr, global_wk_sz0,
-                                global_wk_sz1, global_wk_sz2, output_sz);
+    void outputProfilingInfo(void* buf) {
+      if(profilingInfo)
+        profilingInfo->outputProfilingInfo(buf);
     }
 
     KernelArgument::ArgInfo* getArgInfo(uint32_t id) const { return &args[id].info; }
@@ -219,8 +225,8 @@ namespace gbe {
     */
 
     /*! Implements the serialization. */
-    virtual size_t serializeToBin(std::ostream& outs);
-    virtual size_t deserializeFromBin(std::istream& ins);
+    virtual uint32_t serializeToBin(std::ostream& outs);
+    virtual uint32_t deserializeFromBin(std::istream& ins);
     virtual void printStatus(int indent, std::ostream& outs);
 
   protected:
@@ -232,7 +238,7 @@ namespace gbe {
     uint32_t argNum;           //!< Number of function arguments
     uint32_t curbeSize;        //!< Size of the data to push
     uint32_t simdWidth;        //!< SIMD size for the kernel (lane number)
-    uint32_t stackSize;        //!< Stack size (may be 0 if unused)
+    uint32_t stackSize;        //!< Stack size (0 if unused)
     uint32_t scratchSize;      //!< Scratch memory size (may be 0 if unused)
     bool useSLM;               //!< SLM requires a special HW config
     uint32_t slmSize;          //!< slm size for kernel variable
@@ -240,7 +246,8 @@ namespace gbe {
     ir::SamplerSet *samplerSet;//!< Copy from the corresponding function.
     ir::ImageSet *imageSet;    //!< Copy from the corresponding function.
     ir::PrintfSet *printfSet;  //!< Copy from the corresponding function.
-    size_t compileWgSize[3];   //!< required work group size by kernel attribute.
+    ir::ProfilingInfo *profilingInfo;  //!< Copy from the corresponding function.
+    uint32_t compileWgSize[3]; //!< required work group size by kernel attribute.
     std::string functionAttributes; //!< function attribute qualifiers combined.
     GBE_CLASS(Kernel);         //!< Use custom allocators
   };
@@ -250,7 +257,7 @@ namespace gbe {
   {
   public:
     /*! Create an empty program */
-    Program(void);
+    Program(uint32_t fast_relaxed_math);
     /*! Destroy the program */
     virtual ~Program(void);
     /*! Clean LLVM resource of the program */
@@ -305,13 +312,15 @@ namespace gbe {
     */
 
     /*! Implements the serialization. */
-    virtual size_t serializeToBin(std::ostream& outs);
-    virtual size_t deserializeFromBin(std::istream& ins);
+    virtual uint32_t serializeToBin(std::ostream& outs);
+    virtual uint32_t deserializeFromBin(std::istream& ins);
     virtual void printStatus(int indent, std::ostream& outs);
+    uint32_t fast_relaxed_math : 1;
 
   protected:
     /*! Compile a kernel */
-    virtual Kernel *compileKernel(const ir::Unit &unit, const std::string &name, bool relaxMath) = 0;
+    virtual Kernel *compileKernel(const ir::Unit &unit, const std::string &name,
+                                  bool relaxMath, int profiling) = 0;
     /*! Allocate an empty kernel. */
     virtual Kernel *allocateKernel(const std::string &name) = 0;
     /*! Kernels sorted by their name */

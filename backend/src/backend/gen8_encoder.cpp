@@ -37,6 +37,7 @@ static const uint32_t untypedRWMask[] = {
 
 namespace gbe
 {
+  extern bool compactAlu3(GenEncoder *p, uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1, GenRegister src2);
   void Gen8Encoder::setHeader(GenNativeInstruction *insn) {
     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
     if (this->curr.execWidth == 8)
@@ -227,73 +228,9 @@ namespace gbe
       this->setSrc1(insn, bti);
     }
   }
-  void Gen8Encoder::LOAD_DF_IMM(GenRegister dest, GenRegister tmp, double value) {
-    union { double d; unsigned u[2]; } u;
-    u.d = value;
-    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_UD);
-    push();
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    curr.execWidth = 1;
-    MOV(r, GenRegister::immud(u.u[0]));
-    MOV(GenRegister::suboffset(r, 1), GenRegister::immud(u.u[1]));
-    pop();
-    r.type = GEN_TYPE_DF;
-    r.vstride = GEN_VERTICAL_STRIDE_0;
-    r.width = GEN_WIDTH_1;
-    r.hstride = GEN_HORIZONTAL_STRIDE_0;
-    push();
-    uint32_t width = curr.execWidth;
-    curr.execWidth = 8;
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    curr.quarterControl = GEN_COMPRESSION_Q1;
-    MOV(dest, r);
-    if (width == 16) {
-      curr.quarterControl = GEN_COMPRESSION_Q2;
-      MOV(GenRegister::offset(dest, 2), r);
-    }
-    pop();
-  }
 
   void Gen8Encoder::LOAD_INT64_IMM(GenRegister dest, GenRegister value) {
     MOV(dest, value);
-  }
-
-  void Gen8Encoder::MOV_DF(GenRegister dest, GenRegister src0, GenRegister tmp) {
-    GBE_ASSERT((src0.type == GEN_TYPE_F && dest.isdf()) || (src0.isdf() && dest.type == GEN_TYPE_F));
-    GenRegister r = GenRegister::retype(tmp, GEN_TYPE_F);
-    int w = curr.execWidth;
-    GenRegister r0;
-    r0 = GenRegister::h2(r);
-    push();
-    curr.execWidth = 4;
-    curr.predicate = GEN_PREDICATE_NONE;
-    curr.noMask = 1;
-    MOV(r0, src0);
-    MOV(GenRegister::suboffset(r0, 4), GenRegister::suboffset(src0, 4));
-    curr.noMask = 0;
-    curr.quarterControl = 0;
-    curr.nibControl = 0;
-    MOV(dest, r0);
-    curr.nibControl = 1;
-    MOV(GenRegister::suboffset(dest, 4), GenRegister::suboffset(r0, 4));
-    pop();
-    if (w == 16) {
-      push();
-      curr.execWidth = 4;
-      curr.predicate = GEN_PREDICATE_NONE;
-      curr.noMask = 1;
-      MOV(r0, GenRegister::suboffset(src0, 8));
-      MOV(GenRegister::suboffset(r0, 4), GenRegister::suboffset(src0, 12));
-      curr.noMask = 0;
-      curr.quarterControl = 1;
-      curr.nibControl = 0;
-      MOV(GenRegister::suboffset(dest, 8), r0);
-      curr.nibControl = 1;
-      MOV(GenRegister::suboffset(dest, 12), GenRegister::suboffset(r0, 4));
-      pop();
-    }
   }
 
   void Gen8Encoder::JMPI(GenRegister src, bool longjmp) {
@@ -360,6 +297,46 @@ namespace gbe
     gen8_insn->bits1.da1.dest_horiz_stride = dest.hstride;
   }
 
+  void Gen8Encoder::setSrc0WithAcc(GenNativeInstruction *insn, GenRegister reg, uint32_t accN) {
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    assert(reg.file == GEN_GENERAL_REGISTER_FILE);
+    assert(reg.nr < 128);
+    assert(gen8_insn->header.access_mode == GEN_ALIGN_16);
+    assert(reg.subnr == 0);
+    assert(gen8_insn->header.execution_size >= GEN_WIDTH_4);
+
+    gen8_insn->bits1.da16acc.src0_reg_file = reg.file;
+    gen8_insn->bits1.da16acc.src0_reg_type = reg.type;
+    gen8_insn->bits2.da16acc.src0_abs = reg.absolute;
+    gen8_insn->bits2.da16acc.src0_negate = reg.negation;
+    gen8_insn->bits2.da16acc.src0_address_mode = reg.address_mode;
+    gen8_insn->bits2.da16acc.src0_subreg_nr = reg.subnr / 16;
+    gen8_insn->bits2.da16acc.src0_reg_nr = reg.nr;
+    gen8_insn->bits2.da16acc.src0_special_acc_lo = accN;
+    gen8_insn->bits2.da16acc.src0_special_acc_hi = 0;
+    gen8_insn->bits2.da16acc.src0_vert_stride = reg.vstride;
+  }
+
+  void Gen8Encoder::setSrc1WithAcc(GenNativeInstruction *insn, GenRegister reg, uint32_t accN) {
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    assert(reg.file == GEN_GENERAL_REGISTER_FILE);
+    assert(reg.nr < 128);
+    assert(gen8_insn->header.access_mode == GEN_ALIGN_16);
+    assert(reg.subnr == 0);
+    assert(gen8_insn->header.execution_size >= GEN_WIDTH_4);
+
+    gen8_insn->bits2.da16acc.src1_reg_file = reg.file;
+    gen8_insn->bits2.da16acc.src1_reg_type = reg.type;
+    gen8_insn->bits3.da16acc.src1_abs = reg.absolute;
+    gen8_insn->bits3.da16acc.src1_negate = reg.negation;
+    gen8_insn->bits3.da16acc.src1_address_mode = reg.address_mode;
+    gen8_insn->bits3.da16acc.src1_subreg_nr = reg.subnr / 16;
+    gen8_insn->bits3.da16acc.src1_reg_nr = reg.nr;
+    gen8_insn->bits3.da16acc.src1_special_acc_lo = accN;
+    gen8_insn->bits3.da16acc.src1_special_acc_hi = 0;
+    gen8_insn->bits3.da16acc.src1_vert_stride = reg.vstride;
+  }
+
   void Gen8Encoder::setSrc0(GenNativeInstruction *insn, GenRegister reg) {
     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
     if (reg.file != GEN_ARCHITECTURE_REGISTER_FILE)
@@ -372,7 +349,7 @@ namespace gbe
       gen8_insn->bits2.da1.src0_negate = reg.negation;
       gen8_insn->bits2.da1.src0_address_mode = reg.address_mode;
       if (reg.file == GEN_IMMEDIATE_VALUE) {
-        if (reg.type == GEN_TYPE_L || reg.type == GEN_TYPE_UL) {
+        if (reg.type == GEN_TYPE_L || reg.type == GEN_TYPE_UL || reg.type == GEN_TYPE_DF_IMM) {
           gen8_insn->bits3.ud = (uint32_t)(reg.value.i64 >> 32);
           gen8_insn->bits2.ud = (uint32_t)(reg.value.i64);
         } else {
@@ -459,6 +436,53 @@ namespace gbe
     return false;
   }
 
+  void Gen8Encoder::handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1)
+  {
+    uint32_t w = p->curr.execWidth;
+    GenNativeInstruction *insn = NULL;
+
+    if (w <= 8) {
+      insn = p->next(opcode);
+      p->setHeader(insn);
+      p->setDst(insn, dst);
+      p->setSrc0(insn, src0);
+      if (!GenRegister::isNull(src1))
+        p->setSrc1(insn, src1);
+      return;
+    } else {
+      GBE_ASSERT(w == 16);
+      GBE_ASSERT(dst.hstride != GEN_HORIZONTAL_STRIDE_0); //Should not be a uniform.
+      p->push(); {
+        p->curr.execWidth = 8;
+        p->curr.quarterControl = GEN_COMPRESSION_Q1;
+        insn = p->next(opcode);
+        p->setHeader(insn);
+        p->setDst(insn, dst);
+        p->setSrc0(insn, src0);
+        if (!GenRegister::isNull(src1))
+          p->setSrc1(insn, src1);
+
+        // second half
+        p->curr.quarterControl = GEN_COMPRESSION_Q2;
+        insn = p->next(opcode);
+        p->setHeader(insn);
+        p->setDst(insn, GenRegister::offset(dst, 2));
+
+        if (src0.hstride != GEN_HORIZONTAL_STRIDE_0)
+          p->setSrc0(insn, GenRegister::offset(src0, 2));
+        else
+          p->setSrc0(insn, src0);
+
+        if (!GenRegister::isNull(src1)) {
+          if (src1.hstride != GEN_HORIZONTAL_STRIDE_0)
+            p->setSrc1(insn, GenRegister::offset(src1, 2));
+          else
+            p->setSrc1(insn, src1);
+        }
+      } p->pop();
+    }
+  }
+
 #define NO_SWIZZLE ((0<<0) | (1<<2) | (2<<4) | (3<<6))
 
   void Gen8Encoder::alu3(uint32_t opcode,
@@ -467,25 +491,44 @@ namespace gbe
                               GenRegister src1,
                               GenRegister src2)
   {
+     if(compactAlu3(this, opcode, dest, src0, src1, src2))
+       return;
      GenNativeInstruction *insn = this->next(opcode);
      Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+
+     int execution_size = 0;
+     if (this->curr.execWidth == 1) {
+       execution_size = GEN_WIDTH_1;
+     }else if(this->curr.execWidth == 8) {
+       execution_size = GEN_WIDTH_8;
+     } else if(this->curr.execWidth == 16) {
+       execution_size = GEN_WIDTH_16;
+     }else
+       NOT_IMPLEMENTED;
 
      assert(dest.file == GEN_GENERAL_REGISTER_FILE);
      assert(dest.nr < 128);
      assert(dest.address_mode == GEN_ADDRESS_DIRECT);
-     assert(dest.type = GEN_TYPE_F);
+     assert(src0.type == GEN_TYPE_HF || src0.type == GEN_TYPE_F || src0.type == GEN_TYPE_DF);
+     assert(src0.type == dest.type);
+     assert(src0.type == src1.type);
+     assert(src0.type == src2.type);
+     int32_t dataType = src0.type == GEN_TYPE_DF ? 3 : (src0.type == GEN_TYPE_HF ? 4 : 0);
      //gen8_insn->bits1.da3src.dest_reg_file = 0;
      gen8_insn->bits1.da3src.dest_reg_nr = dest.nr;
-     gen8_insn->bits1.da3src.dest_subreg_nr = dest.subnr / 16;
+     gen8_insn->bits1.da3src.dest_subreg_nr = dest.subnr / 4;
      gen8_insn->bits1.da3src.dest_writemask = 0xf;
+     gen8_insn->bits1.da3src.dest_type = dataType;
+     gen8_insn->bits1.da3src.src_type = dataType;
+     gen8_insn->bits1.da3src.src1_type = src1.type == GEN_TYPE_HF;
+     gen8_insn->bits1.da3src.src2_type = src2.type == GEN_TYPE_HF;
      this->setHeader(insn);
      gen8_insn->header.access_mode = GEN_ALIGN_16;
-     gen8_insn->header.execution_size = GEN_WIDTH_8;
+     gen8_insn->header.execution_size = execution_size;
 
      assert(src0.file == GEN_GENERAL_REGISTER_FILE);
      assert(src0.address_mode == GEN_ADDRESS_DIRECT);
      assert(src0.nr < 128);
-     assert(src0.type == GEN_TYPE_F);
      gen8_insn->bits2.da3src.src0_swizzle = NO_SWIZZLE;
      gen8_insn->bits2.da3src.src0_subreg_nr = src0.subnr / 4 ;
      gen8_insn->bits2.da3src.src0_reg_nr = src0.nr;
@@ -496,7 +539,6 @@ namespace gbe
      assert(src1.file == GEN_GENERAL_REGISTER_FILE);
      assert(src1.address_mode == GEN_ADDRESS_DIRECT);
      assert(src1.nr < 128);
-     assert(src1.type == GEN_TYPE_F);
      gen8_insn->bits2.da3src.src1_swizzle = NO_SWIZZLE;
      gen8_insn->bits2.da3src.src1_subreg_nr_low = (src1.subnr / 4) & 0x3;
      gen8_insn->bits3.da3src.src1_subreg_nr_high = (src1.subnr / 4) >> 2;
@@ -508,28 +550,91 @@ namespace gbe
      assert(src2.file == GEN_GENERAL_REGISTER_FILE);
      assert(src2.address_mode == GEN_ADDRESS_DIRECT);
      assert(src2.nr < 128);
-     assert(src2.type == GEN_TYPE_F);
      gen8_insn->bits3.da3src.src2_swizzle = NO_SWIZZLE;
      gen8_insn->bits3.da3src.src2_subreg_nr = src2.subnr / 4;
      gen8_insn->bits3.da3src.src2_rep_ctrl = src2.vstride == GEN_VERTICAL_STRIDE_0;
      gen8_insn->bits3.da3src.src2_reg_nr = src2.nr;
      gen8_insn->bits1.da3src.src2_abs = src2.absolute;
      gen8_insn->bits1.da3src.src2_negate = src2.negation;
+  }
 
-     // Emit second half of the instruction
-     if (this->curr.execWidth == 16) {
-      GenNativeInstruction q1Insn = *insn;
-      insn = this->next(opcode);
-      *insn = q1Insn;
-      gen8_insn = &insn->gen8_insn;
-      gen8_insn->header.quarter_control = GEN_COMPRESSION_Q2;
-      gen8_insn->bits1.da3src.dest_reg_nr++;
-      if (gen8_insn->bits2.da3src.src0_rep_ctrl == 0)
-        gen8_insn->bits2.da3src.src0_reg_nr++;
-      if (gen8_insn->bits2.da3src.src1_rep_ctrl == 0)
-        gen8_insn->bits3.da3src.src1_reg_nr++;
-      if (gen8_insn->bits3.da3src.src2_rep_ctrl == 0)
-        gen8_insn->bits3.da3src.src2_reg_nr++;
-     }
+  void Gen8Encoder::MATH_WITH_ACC(GenRegister dst, uint32_t function, GenRegister src0, GenRegister src1,
+                             uint32_t dstAcc, uint32_t src0Acc, uint32_t src1Acc)
+  {
+     GenNativeInstruction *insn = this->next(GEN_OPCODE_MATH);
+     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+     assert(dst.file == GEN_GENERAL_REGISTER_FILE);
+     assert(src0.file == GEN_GENERAL_REGISTER_FILE);
+     assert(src1.file == GEN_GENERAL_REGISTER_FILE);
+     assert(dst.hstride == GEN_HORIZONTAL_STRIDE_1 || dst.hstride == GEN_HORIZONTAL_STRIDE_0);
+
+     gen8_insn->header.access_mode = GEN_ALIGN_16;
+     insn->header.destreg_or_condmod = function;
+     this->setHeader(insn);
+     this->setDst(insn, dst);
+     gen8_insn->bits1.da16acc.dst_special_acc = dstAcc;
+     this->setSrc0WithAcc(insn, src0, src0Acc);
+     this->setSrc1WithAcc(insn, src1, src1Acc);
+  }
+
+  void Gen8Encoder::MADM(GenRegister dst, GenRegister src0, GenRegister src1, GenRegister src2,
+      uint32_t dstAcc, uint32_t src0Acc, uint32_t src1Acc, uint32_t src2Acc)
+  {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_MADM);
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    assert(dst.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src0.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src1.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src2.file == GEN_GENERAL_REGISTER_FILE);
+    assert(dst.hstride == GEN_HORIZONTAL_STRIDE_1 || dst.hstride == GEN_HORIZONTAL_STRIDE_0);
+    assert(src0.type == GEN_TYPE_DF || src0.type == GEN_TYPE_F);
+    assert(src0.type == dst.type);
+    assert(src0.type == src1.type);
+    assert(src0.type == src2.type);
+      // If in double, width should be less than 4
+    assert((src0.type == GEN_TYPE_DF && this->curr.execWidth <= 4)
+      // If in float, width should be less than 8
+        || (src0.type == GEN_TYPE_F && this->curr.execWidth <= 8));
+
+    int32_t dataType = src0.type == GEN_TYPE_DF ? 3 : 0;
+
+    this->setHeader(insn);
+    gen8_insn->bits1.da3srcacc.dest_reg_nr = dst.nr;
+    gen8_insn->bits1.da3srcacc.dest_subreg_nr = dst.subnr / 16;
+    gen8_insn->bits1.da3srcacc.dst_special_acc = dstAcc;
+    gen8_insn->bits1.da3srcacc.src_type = dataType;
+    gen8_insn->bits1.da3srcacc.dest_type = dataType;
+    gen8_insn->header.access_mode = GEN_ALIGN_16;
+
+    assert(src0.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src0.address_mode == GEN_ADDRESS_DIRECT);
+    assert(src0.nr < 128);
+    gen8_insn->bits2.da3srcacc.src0_special_acc = src0Acc;
+    gen8_insn->bits2.da3srcacc.src0_subreg_nr = src0.subnr / 4 ;
+    gen8_insn->bits2.da3srcacc.src0_reg_nr = src0.nr;
+    gen8_insn->bits1.da3srcacc.src0_abs = src0.absolute;
+    gen8_insn->bits1.da3srcacc.src0_negate = src0.negation;
+    gen8_insn->bits2.da3srcacc.src0_rep_ctrl = src0.vstride == GEN_VERTICAL_STRIDE_0;
+
+    assert(src1.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src1.address_mode == GEN_ADDRESS_DIRECT);
+    assert(src1.nr < 128);
+    gen8_insn->bits2.da3srcacc.src1_special_acc = src1Acc;
+    gen8_insn->bits2.da3srcacc.src1_subreg_nr_low = (src1.subnr / 4) & 0x3;
+    gen8_insn->bits3.da3srcacc.src1_subreg_nr_high = (src1.subnr / 4) >> 2;
+    gen8_insn->bits2.da3srcacc.src1_rep_ctrl = src1.vstride == GEN_VERTICAL_STRIDE_0;
+    gen8_insn->bits3.da3srcacc.src1_reg_nr = src1.nr;
+    gen8_insn->bits1.da3srcacc.src1_abs = src1.absolute;
+    gen8_insn->bits1.da3srcacc.src1_negate = src1.negation;
+
+    assert(src2.file == GEN_GENERAL_REGISTER_FILE);
+    assert(src2.address_mode == GEN_ADDRESS_DIRECT);
+    assert(src2.nr < 128);
+    gen8_insn->bits3.da3srcacc.src2_special_acc = src2Acc;
+    gen8_insn->bits3.da3srcacc.src2_subreg_nr = src2.subnr / 4;
+    gen8_insn->bits3.da3srcacc.src2_rep_ctrl = src2.vstride == GEN_VERTICAL_STRIDE_0;
+    gen8_insn->bits3.da3srcacc.src2_reg_nr = src2.nr;
+    gen8_insn->bits1.da3srcacc.src2_abs = src2.absolute;
+    gen8_insn->bits1.da3srcacc.src2_negate = src2.negation;
   }
 } /* End of the name space. */

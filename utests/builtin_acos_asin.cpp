@@ -10,7 +10,9 @@
   printf("\033[0m");\
 }
 
-const float input_data[] = {-30, -1, -0.92, -0.5, -0.09, 0, 0.09, 0.5, 0.92, 1, 30};
+namespace {
+
+float input_data[] = {-30, -1, -0.92, -0.5, -0.09, 0, 0.09, 0.5, 0.92, 1, 30};
 const int count_input = sizeof(input_data) / sizeof(input_data[0]);
 const int max_function = 5;
 
@@ -44,7 +46,8 @@ static void builtin_acos_asin(void)
   locals[0] = 1;
 
   clEnqueueWriteBuffer( queue, buf[1], CL_TRUE, 0, count_input * sizeof(float), input_data, 0, NULL, NULL);
-  clEnqueueWriteBuffer( queue, buf[2], CL_TRUE, 0, sizeof(int), &max_function , 0, NULL, NULL);
+  int maxfunc = max_function;
+  clEnqueueWriteBuffer( queue, buf[2], CL_TRUE, 0, sizeof(int), &maxfunc, 0, NULL, NULL);
 
    // Run the kernel
   OCL_NDRANGE( 1 );
@@ -59,10 +62,10 @@ static void builtin_acos_asin(void)
     {
       index_cur = k * max_function + i;
 #if udebug
-      if (isinf(cpu_data[index_cur]) && !isinf(gpu_data[index_cur])){
+      if (std::isinf(cpu_data[index_cur]) && !std::isinf(gpu_data[index_cur])){
         printf_c("%d/%d: %f -> gpu:%f  cpu:%f\n", k, i, input_data[k], gpu_data[index_cur], cpu_data[index_cur]);
       }
-      else if (isnan(cpu_data[index_cur]) && !isnan(gpu_data[index_cur])){
+      else if (std::isnan(cpu_data[index_cur]) && !std::isnan(gpu_data[index_cur])){
         printf_c("%d/%d: %f -> gpu:%f  cpu:%f\n", k, i, input_data[k], gpu_data[index_cur], cpu_data[index_cur]);
       }
       else if(fabs(gpu_data[index_cur] - cpu_data[index_cur]) > 1e-3f){
@@ -71,10 +74,10 @@ static void builtin_acos_asin(void)
       else
         printf("%d/%d: %f -> gpu:%f  cpu:%f\n", k, i, input_data[k], gpu_data[index_cur], cpu_data[index_cur]);
 #else
-     if (isinf(cpu_data[index_cur]))
-       OCL_ASSERT(isinf(gpu_data[index_cur]));
-     else if (isnan(cpu_data[index_cur]))
-       OCL_ASSERT(isnan(gpu_data[index_cur]));
+     if (std::isinf(cpu_data[index_cur]))
+       OCL_ASSERT(std::isinf(gpu_data[index_cur]));
+     else if (std::isnan(cpu_data[index_cur]))
+       OCL_ASSERT(std::isnan(gpu_data[index_cur]));
      else
      {
        OCL_ASSERT(fabs(gpu_data[index_cur] - cpu_data[index_cur]) < 1e-3f);
@@ -85,3 +88,4 @@ static void builtin_acos_asin(void)
 }
 
 MAKE_UTEST_FROM_FUNCTION(builtin_acos_asin)
+}

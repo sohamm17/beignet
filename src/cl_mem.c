@@ -27,6 +27,7 @@
 #include "cl_khr_icd.h"
 #include "cl_kernel.h"
 #include "cl_command_queue.h"
+#include "cl_cmrt.h"
 
 #include "CL/cl.h"
 #include "CL/cl_intel.h"
@@ -232,7 +233,8 @@ cl_mem_allocate(enum cl_mem_type type,
                 cl_mem_flags flags,
                 size_t sz,
                 cl_int is_tiled,
-                void *host_ptr,
+                void *host_ptr,         //pointer from application
+                cl_mem buffer,          //image2D from buffer
                 cl_int *errcode)
 {
   cl_buffer_mgr bufmgr = NULL;
@@ -267,6 +269,10 @@ cl_mem_allocate(enum cl_mem_type type,
   mem->flags = flags;
   mem->is_userptr = 0;
   mem->offset = 0;
+  mem->cmrt_mem = NULL;
+  if (mem->type == CL_MEM_IMAGE_TYPE) {
+    cl_mem_image(mem)->is_image_from_buffer = 0;
+  }
 
   if (sz != 0) {
     /* Pinning will require stricter alignment rules */
@@ -278,23 +284,25 @@ cl_mem_allocate(enum cl_mem_type type,
     assert(bufmgr);
 
 #ifdef HAS_USERPTR
+    uint8_t bufCreated = 0;
     if (ctx->device->host_unified_memory) {
       int page_size = getpagesize();
       int cacheline_size = 0;
       cl_get_device_info(ctx->device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
 
-      /* currently only cl buf is supported, will add cl image support later */
       if (type == CL_MEM_BUFFER_TYPE) {
         if (flags & CL_MEM_USE_HOST_PTR) {
           assert(host_ptr != NULL);
           /* userptr not support tiling */
           if (!is_tiled) {
-            if (ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr) {
+            if ((ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr) &&
+                (ALIGN((unsigned long)sz, cacheline_size) == (unsigned long)sz)) {
               void* aligned_host_ptr = (void*)(((unsigned long)host_ptr) & (~(page_size - 1)));
               mem->offset = host_ptr - aligned_host_ptr;
               mem->is_userptr = 1;
               size_t aligned_sz = ALIGN((mem->offset + sz), page_size);
               mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", aligned_host_ptr, aligned_sz, 0);
+              bufCreated = 1;
             }
           }
         }
@@ -304,14 +312,48 @@ cl_mem_allocate(enum cl_mem_type type,
           mem->host_ptr = internal_host_ptr;
           mem->is_userptr = 1;
           mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", internal_host_ptr, alignedSZ, 0);
+          bufCreated = 1;
+        }
+      } else if (type == CL_MEM_IMAGE_TYPE) {
+        if (host_ptr != NULL) {
+          assert(flags & CL_MEM_USE_HOST_PTR);
+          assert(!is_tiled);
+          assert(ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr);
+          void* aligned_host_ptr = (void*)(((unsigned long)host_ptr) & (~(page_size - 1)));
+          mem->offset = host_ptr - aligned_host_ptr;
+          mem->is_userptr = 1;
+          size_t aligned_sz = ALIGN((mem->offset + sz), page_size);
+          mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL userptr memory object", aligned_host_ptr, aligned_sz, 0);
+          bufCreated = 1;
         }
       }
     }
 
-    if (!mem->is_userptr)
+    if(type == CL_MEM_IMAGE_TYPE && buffer != NULL) {
+      // if create image from USE_HOST_PTR buffer, the buffer's base address need be aligned.
+      if(buffer->is_userptr) {
+        int base_alignement = 0;
+        cl_get_device_info(ctx->device, CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT, sizeof(base_alignement), &base_alignement, NULL);
+        if(ALIGN((unsigned long)buffer->host_ptr, base_alignement) != (unsigned long)buffer->host_ptr) {
+          err = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
+          goto error;
+        }
+      }
+      // if the image if created from buffer, should use the bo directly to share same bo.
+      mem->bo = buffer->bo;
+      cl_mem_image(mem)->is_image_from_buffer = 1;
+      bufCreated = 1;
+    }
+
+    if (!bufCreated)
       mem->bo = cl_buffer_alloc(bufmgr, "CL memory object", sz, alignment);
 #else
-    mem->bo = cl_buffer_alloc(bufmgr, "CL memory object", sz, alignment);
+    if(type == CL_MEM_IMAGE_TYPE && buffer != NULL) {
+      // if the image if created from buffer, should use the bo directly to share same bo.
+      mem->bo = buffer->bo;
+      cl_mem_image(mem)->is_image_from_buffer = 1;
+    } else
+      mem->bo = cl_buffer_alloc(bufmgr, "CL memory object", sz, alignment);
 #endif
 
     if (UNLIKELY(mem->bo == NULL)) {
@@ -424,7 +466,7 @@ cl_mem_new_buffer(cl_context ctx,
   sz = ALIGN(sz, 4);
 
   /* Create the buffer in video memory */
-  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, flags, sz, CL_FALSE, data, &err);
+  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, flags, sz, CL_FALSE, data, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
@@ -692,7 +734,8 @@ _cl_mem_new_image(cl_context ctx,
                   size_t depth,
                   size_t pitch,
                   size_t slice_pitch,
-                  void *data,
+                  void *data,           //pointer from application
+                  cl_mem buffer,        //for image2D from buffer
                   cl_int *errcode_ret)
 {
   cl_int err = CL_SUCCESS;
@@ -702,6 +745,13 @@ _cl_mem_new_image(cl_context ctx,
   size_t sz = 0, aligned_pitch = 0, aligned_slice_pitch = 0, aligned_h = 0;
   size_t origin_width = w;  // for image1d buffer work around.
   cl_image_tiling_t tiling = CL_NO_TILE;
+  int enable_true_hostptr = 0;
+
+  // can't use BVAR (backend/src/sys/cvar.hpp) here as it's C++
+  const char *env = getenv("OCL_IMAGE_HOSTPTR");
+  if (env != NULL) {
+    sscanf(env, "%i", &enable_true_hostptr);
+  }
 
   /* Check flags consistency */
   if (UNLIKELY((flags & (CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) && data == NULL)) {
@@ -756,6 +806,8 @@ _cl_mem_new_image(cl_context ctx,
       h = (w + ctx->device->image2d_max_width - 1) / ctx->device->image2d_max_width;
       w = w > ctx->device->image2d_max_width ? ctx->device->image2d_max_width : w;
       tiling = CL_NO_TILE;
+    } else if(image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL) {
+      tiling = CL_NO_TILE;
     } else if (cl_driver_get_ver(ctx->drv) != 6) {
       /* Pick up tiling mode (we do only linear on SNB) */
       tiling = cl_get_default_tiling(ctx->drv);
@@ -768,7 +820,7 @@ _cl_mem_new_image(cl_context ctx,
     if (UNLIKELY(w > ctx->device->image2d_max_width)) DO_IMAGE_ERROR;
     if (UNLIKELY(h > ctx->device->image2d_max_height)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_pitch > pitch)) DO_IMAGE_ERROR;
-    if (UNLIKELY(!data && pitch != 0)) DO_IMAGE_ERROR;
+    if (UNLIKELY(!data && pitch != 0 && buffer == NULL)) DO_IMAGE_ERROR;
 
     depth = 1;
   } else if (image_type == CL_MEM_OBJECT_IMAGE3D ||
@@ -801,10 +853,34 @@ _cl_mem_new_image(cl_context ctx,
 
 #undef DO_IMAGE_ERROR
 
+  uint8_t enableUserptr = 0;
+  if (enable_true_hostptr && ctx->device->host_unified_memory && data != NULL && (flags & CL_MEM_USE_HOST_PTR)) {
+    int cacheline_size = 0;
+    cl_get_device_info(ctx->device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
+    if (ALIGN((unsigned long)data, cacheline_size) == (unsigned long)data &&
+        ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1)) == h &&
+        ALIGN(h * pitch * depth, cacheline_size) == h * pitch * depth && //h and pitch should same as aligned_h and aligned_pitch if enable userptr
+        ((image_type != CL_MEM_OBJECT_IMAGE3D && image_type != CL_MEM_OBJECT_IMAGE1D_ARRAY && image_type != CL_MEM_OBJECT_IMAGE2D_ARRAY) || pitch * h == slice_pitch)) {
+      tiling = CL_NO_TILE;
+      enableUserptr = 1;
+    }
+  }
+
   /* Tiling requires to align both pitch and height */
   if (tiling == CL_NO_TILE) {
     aligned_pitch = w * bpp;
-    aligned_h  = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
+    if (aligned_pitch < pitch && enableUserptr)
+      aligned_pitch = pitch;
+    //no need align the height if 2d image from buffer.
+    //the pitch should be same with buffer's pitch as they share same bo.
+    if (image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL) {
+      if(aligned_pitch < pitch) {
+        aligned_pitch = pitch;
+      }
+      aligned_h = h;
+    }
+    else
+      aligned_h  = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1));
   } else if (tiling == CL_TILE_X) {
     aligned_pitch = ALIGN(w * bpp, cl_buffer_get_tiling_align(ctx, CL_TILE_X, 0));
     aligned_h     = ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_TILE_X, 1));
@@ -814,6 +890,15 @@ _cl_mem_new_image(cl_context ctx,
   }
 
   sz = aligned_pitch * aligned_h * depth;
+  if (image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL)  {
+    //image 2d created from buffer: per spec, the buffer sz maybe larger than the image 2d.
+    if (buffer->size >= sz)
+      sz = buffer->size;
+    else {
+      err = CL_INVALID_IMAGE_SIZE;
+      goto error;
+    }
+  }
 
   /* If sz is large than 128MB, map gtt may fail in some system.
      Because there is no obviours performance drop, disable tiling. */
@@ -824,10 +909,17 @@ _cl_mem_new_image(cl_context ctx,
     sz = aligned_pitch * aligned_h * depth;
   }
 
-  if (image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER)
-    mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
-  else {
-    mem = cl_mem_allocate(CL_MEM_BUFFER1D_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, &err);
+  if (image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+    if (image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL)
+      mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, buffer, &err);
+    else {
+      if (enableUserptr)
+        mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, data, NULL, &err);
+      else
+        mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, NULL, &err);
+    }
+  } else {
+    mem = cl_mem_allocate(CL_MEM_BUFFER1D_IMAGE_TYPE, ctx, flags, sz, tiling != CL_NO_TILE, NULL, NULL, &err);
     if (mem != NULL && err == CL_SUCCESS) {
       struct _cl_mem_buffer1d_image *buffer1d_image = (struct _cl_mem_buffer1d_image *)mem;
       buffer1d_image->size = origin_width;;
@@ -837,7 +929,11 @@ _cl_mem_new_image(cl_context ctx,
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
-  cl_buffer_set_tiling(mem->bo, tiling, aligned_pitch);
+  if(!(image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL))  {
+    //no need set tiling if image 2d created from buffer since share same bo.
+    cl_buffer_set_tiling(mem->bo, tiling, aligned_pitch);
+  }
+
   if (image_type == CL_MEM_OBJECT_IMAGE1D ||
       image_type == CL_MEM_OBJECT_IMAGE2D ||
       image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
@@ -851,13 +947,15 @@ _cl_mem_new_image(cl_context ctx,
                     0, 0, 0);
 
   /* Copy the data if required */
-  if (flags & (CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) {
+  if (flags & CL_MEM_COPY_HOST_PTR && data)
     cl_mem_copy_image(cl_mem_image(mem), pitch, slice_pitch, data);
-    if (flags & CL_MEM_USE_HOST_PTR) {
-      mem->host_ptr = data;
-      cl_mem_image(mem)->host_row_pitch = pitch;
-      cl_mem_image(mem)->host_slice_pitch = slice_pitch;
-    }
+
+  if (flags & CL_MEM_USE_HOST_PTR && data) {
+    mem->host_ptr = data;
+    cl_mem_image(mem)->host_row_pitch = pitch;
+    cl_mem_image(mem)->host_slice_pitch = slice_pitch;
+    if (!enableUserptr)
+      cl_mem_copy_image(cl_mem_image(mem), pitch, slice_pitch, data);
   }
 
 exit:
@@ -971,33 +1069,51 @@ _cl_mem_new_image_from_buffer(cl_context ctx,
   if (UNLIKELY((err = cl_image_byte_per_pixel(image_format, &bpp)) != CL_SUCCESS))
     goto error;
 
-  // Per bspec, a image should has a at least 2 line vertical alignment,
-  // thus we can't simply attach a buffer to a 1d image surface which has the same size.
-  // We have to create a new image, and copy the buffer data to this new image.
-  // And replace all the buffer object's reference to this image.
-  image = _cl_mem_new_image(ctx, flags, image_format, image_desc->image_type,
-                    mem_buffer->base.size / bpp, 0, 0, 0, 0, NULL, errcode_ret);
+  if(image_desc->image_type == CL_MEM_OBJECT_IMAGE2D) {
+    image = _cl_mem_new_image(ctx, flags, image_format, image_desc->image_type,
+                             image_desc->image_width, image_desc->image_height, image_desc->image_depth,
+                             image_desc->image_row_pitch, image_desc->image_slice_pitch,
+                             NULL, image_desc->buffer, errcode_ret);
+  } else if (image_desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+    // Per bspec, a image should has a at least 2 line vertical alignment,
+    // thus we can't simply attach a buffer to a 1d image surface which has the same size.
+    // We have to create a new image, and copy the buffer data to this new image.
+    // And replace all the buffer object's reference to this image.
+    image = _cl_mem_new_image(ctx, flags, image_format, image_desc->image_type,
+                    mem_buffer->base.size / bpp, 0, 0, 0, 0, NULL, NULL, errcode_ret);
+  }
+  else
+    assert(0);
+
   if (image == NULL)
     return NULL;
-  void *src = cl_mem_map(buffer, 0);
-  void *dst = cl_mem_map(image, 1);
-  //
-  // FIXME, we could use copy buffer to image to do this on GPU latter.
-  // currently the copy buffer to image function doesn't support 1D image.
-  // 
-  // There is a potential risk that this buffer was mapped and the caller
-  // still hold the pointer and want to access it again. This scenario is
-  // not explicitly forbidden in the spec, although it should not be permitted.
-  memcpy(dst, src, mem_buffer->base.size);
-  cl_mem_unmap(buffer);
-  cl_mem_unmap(image);
+
+  if(image_desc->image_type == CL_MEM_OBJECT_IMAGE2D)  {
+    //no need copy since the image 2d and buffer share same bo.
+  }
+  else if (image_desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)  {
+    // FIXME, we could use copy buffer to image to do this on GPU latter.
+    // currently the copy buffer to image function doesn't support 1D image.
+    //
+    // There is a potential risk that this buffer was mapped and the caller
+    // still hold the pointer and want to access it again. This scenario is
+    // not explicitly forbidden in the spec, although it should not be permitted.
+    void *src = cl_mem_map(buffer, 0);
+    void *dst = cl_mem_map(image, 1);
+    memcpy(dst, src, mem_buffer->base.size);
+    cl_mem_unmap(image);
+    cl_mem_unmap(buffer);
+  }
+  else
+    assert(0);
 
   if (err != 0)
     goto error;
  
   // Now replace buffer's bo to this new bo, need to take care of sub buffer
   // case. 
-  cl_mem_replace_buffer(buffer, image->bo);
+  if (image_desc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
+    cl_mem_replace_buffer(buffer, image->bo);
   /* Now point to the right offset if buffer is a SUB_BUFFER. */
   if (buffer->flags & CL_MEM_USE_HOST_PTR)
     image->host_ptr = buffer->host_ptr + offset;
@@ -1025,18 +1141,26 @@ cl_mem_new_image(cl_context context,
 {
   switch (image_desc->image_type) {
   case CL_MEM_OBJECT_IMAGE1D:
-  case CL_MEM_OBJECT_IMAGE2D:
   case CL_MEM_OBJECT_IMAGE3D:
     return _cl_mem_new_image(context, flags, image_format, image_desc->image_type,
                              image_desc->image_width, image_desc->image_height, image_desc->image_depth,
                              image_desc->image_row_pitch, image_desc->image_slice_pitch,
-                             host_ptr, errcode_ret);
+                             host_ptr, NULL, errcode_ret);
+  case CL_MEM_OBJECT_IMAGE2D:
+    if(image_desc->buffer)
+      return _cl_mem_new_image_from_buffer(context, flags, image_format,
+                             image_desc, errcode_ret);
+    else
+      return _cl_mem_new_image(context, flags, image_format, image_desc->image_type,
+                             image_desc->image_width, image_desc->image_height, image_desc->image_depth,
+                             image_desc->image_row_pitch, image_desc->image_slice_pitch,
+                             host_ptr, NULL, errcode_ret);
   case CL_MEM_OBJECT_IMAGE1D_ARRAY:
   case CL_MEM_OBJECT_IMAGE2D_ARRAY:
     return _cl_mem_new_image(context, flags, image_format, image_desc->image_type,
                              image_desc->image_width, image_desc->image_height, image_desc->image_array_size,
                              image_desc->image_row_pitch, image_desc->image_slice_pitch,
-                             host_ptr, errcode_ret);
+                             host_ptr, NULL, errcode_ret);
   case CL_MEM_OBJECT_IMAGE1D_BUFFER:
     return _cl_mem_new_image_from_buffer(context, flags, image_format,
                                          image_desc, errcode_ret);
@@ -1062,12 +1186,22 @@ cl_mem_delete(cl_mem mem)
   }
 #endif
 
+#ifdef HAS_CMRT
+  if (mem->cmrt_mem != NULL)
+    cmrt_destroy_memory(mem);
+#endif
+
   /* iff we are a image, delete the 1d buffer if has. */
   if (IS_IMAGE(mem)) {
     if (cl_mem_image(mem)->buffer_1d) {
-      assert(cl_mem_image(mem)->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER);
-      cl_mem_delete(cl_mem_image(mem)->buffer_1d);
-      cl_mem_image(mem)->buffer_1d = NULL;
+      assert(cl_mem_image(mem)->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER ||
+          cl_mem_image(mem)->image_type == CL_MEM_OBJECT_IMAGE2D);
+        cl_mem_delete(cl_mem_image(mem)->buffer_1d);
+        if(cl_mem_image(mem)->image_type == CL_MEM_OBJECT_IMAGE2D && cl_mem_image(mem)->is_image_from_buffer == 1)
+        {
+          cl_mem_image(mem)->buffer_1d = NULL;
+          mem->bo = NULL;
+        }
     }
   }
 
@@ -1291,6 +1425,9 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     ker = cl_context_get_static_kernel_from_bin(queue->ctx, CL_ENQUEUE_COPY_BUFFER_UNALIGN_SRC_OFFSET,
              cl_internal_copy_buf_unalign_src_offset_str,
              (size_t)cl_internal_copy_buf_unalign_src_offset_str_size, NULL);
+
+    if (!ker)
+      return CL_OUT_OF_RESOURCES;
 
     cl_kernel_set_arg(ker, 0, sizeof(cl_mem), &src_buf);
     cl_kernel_set_arg(ker, 1, sizeof(int), &dw_src_offset);
@@ -2008,7 +2145,7 @@ LOCAL cl_mem cl_mem_new_libva_buffer(cl_context ctx,
   cl_int err = CL_SUCCESS;
   cl_mem mem = NULL;
 
-  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, 0, 0, CL_FALSE, NULL, &err);
+  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, 0, 0, CL_FALSE, NULL, NULL, &err);
   if (mem == NULL || err != CL_SUCCESS)
     goto error;
 
@@ -2053,20 +2190,22 @@ LOCAL cl_mem cl_mem_new_libva_image(cl_context ctx,
     goto error;
   }
 
-  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, 0, 0, 0, NULL, &err);
-  if (mem == NULL || err != CL_SUCCESS) {
-    err = CL_OUT_OF_HOST_MEMORY;
+  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, 0, 0, 0, NULL, NULL, &err);
+  if (mem == NULL || err != CL_SUCCESS)
     goto error;
-  }
 
   image = cl_mem_image(mem);
 
   mem->bo = cl_buffer_get_image_from_libva(ctx, bo_name, image);
+  if (mem->bo == NULL) {
+    err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    goto error;
+  }
 
   image->w = width;
   image->h = height;
   image->image_type = CL_MEM_OBJECT_IMAGE2D;
-  image->depth = 2;
+  image->depth = 1;
   image->fmt = fmt;
   image->intel_fmt = intel_fmt;
   image->bpp = bpp;
@@ -2096,4 +2235,95 @@ cl_mem_get_fd(cl_mem mem,
   if(cl_buffer_get_fd(mem->bo, fd))
 	err = CL_INVALID_OPERATION;
   return err;
+}
+
+LOCAL cl_mem cl_mem_new_buffer_from_fd(cl_context ctx,
+                                       int fd,
+                                       int buffer_sz,
+                                       cl_int* errcode)
+{
+  cl_int err = CL_SUCCESS;
+  cl_mem mem = NULL;
+
+  mem = cl_mem_allocate(CL_MEM_BUFFER_TYPE, ctx, 0, 0, CL_FALSE, NULL, NULL, &err);
+  if (mem == NULL || err != CL_SUCCESS)
+    goto error;
+
+  mem->bo = cl_buffer_get_buffer_from_fd(ctx, fd, buffer_sz);
+  if (mem->bo == NULL) {
+    err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    goto error;
+  }
+  mem->size = buffer_sz;
+
+exit:
+  if (errcode)
+    *errcode = err;
+  return mem;
+
+error:
+  cl_mem_delete(mem);
+  mem = NULL;
+  goto exit;
+}
+
+LOCAL cl_mem cl_mem_new_image_from_fd(cl_context ctx,
+                                      int fd, int image_sz,
+                                      size_t offset,
+                                      size_t width, size_t height,
+                                      cl_image_format fmt,
+                                      size_t row_pitch,
+                                      cl_int *errcode)
+{
+  cl_int err = CL_SUCCESS;
+  cl_mem mem = NULL;
+  struct _cl_mem_image *image = NULL;
+  uint32_t intel_fmt, bpp;
+
+  /* Get the size of each pixel */
+  if (UNLIKELY((err = cl_image_byte_per_pixel(&fmt, &bpp)) != CL_SUCCESS))
+    goto error;
+
+  intel_fmt = cl_image_get_intel_format(&fmt);
+  if (intel_fmt == INTEL_UNSUPPORTED_FORMAT) {
+    err = CL_IMAGE_FORMAT_NOT_SUPPORTED;
+    goto error;
+  }
+
+  mem = cl_mem_allocate(CL_MEM_IMAGE_TYPE, ctx, 0, 0, 0, NULL, NULL, &err);
+  if (mem == NULL || err != CL_SUCCESS)
+    goto error;
+
+  image = cl_mem_image(mem);
+
+  mem->bo = cl_buffer_get_image_from_fd(ctx, fd, image_sz, image);
+  if (mem->bo == NULL) {
+    err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    goto error;
+  }
+  mem->size = image_sz;
+
+  image->w = width;
+  image->h = height;
+  image->image_type = CL_MEM_OBJECT_IMAGE2D;
+  image->depth = 1;
+  image->fmt = fmt;
+  image->intel_fmt = intel_fmt;
+  image->bpp = bpp;
+  image->row_pitch = row_pitch;
+  image->slice_pitch = 0;
+  // NOTE: tiling of image is set in cl_buffer_get_image_from_fd().
+  image->tile_x = 0;
+  image->tile_y = 0;
+  image->offset = offset;
+
+exit:
+  if (errcode)
+    *errcode = err;
+  return mem;
+
+error:
+  cl_mem_delete(mem);
+  mem = NULL;
+  goto exit;
 }
