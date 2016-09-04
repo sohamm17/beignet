@@ -36,6 +36,8 @@ namespace gbe
   static Module* createOclBitCodeModule(LLVMContext& ctx, bool strictMath)
   {
     std::string bitCodeFiles = OCL_BITCODE_LIB_PATH;
+    if(bitCodeFiles == "")
+      bitCodeFiles = OCL_BITCODE_BIN;
     std::istringstream bitCodeFilePath(bitCodeFiles);
     std::string FilePath;
     bool findBC = false;
@@ -48,7 +50,10 @@ namespace gbe
         break;
       }
     }
-    assert(findBC);
+    if (!findBC) {
+      printf("Fatal Error: ocl lib %s does not exist\n", bitCodeFiles.c_str());
+      return NULL;
+    }
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
     oclLib = getLazyIRFileModule(FilePath, Err, ctx);
@@ -68,8 +73,9 @@ namespace gbe
     return oclLib;
   }
 
-  static bool materializedFuncCall(Module& src, Module& lib, llvm::Function &KF, std::set<std::string>& MFS)
-  {
+  static bool materializedFuncCall(Module& src, Module& lib, llvm::Function& KF,
+                                   std::set<std::string>& MFS,
+                                   std::vector<GlobalValue *>&Gvs) {
     bool fromSrc = false;
     for (llvm::Function::iterator B = KF.begin(), BE = KF.end(); B != BE; B++) {
       for (BasicBlock::iterator instI = B->begin(),
@@ -79,8 +85,12 @@ namespace gbe
           continue;
         }
 
-        if (call->getCalledFunction() &&
-            call->getCalledFunction()->getIntrinsicID() != 0)
+        llvm::Function * callFunc = call->getCalledFunction();
+        if(!callFunc) {
+          continue;
+        }
+
+        if (callFunc->getIntrinsicID() != 0)
           continue;
 
         std::string fnName = call->getCalledValue()->stripPointerCasts()->getName();
@@ -112,9 +122,10 @@ namespace gbe
             printf("Can not materialize the function: %s, because %s\n", fnName.c_str(), EC.message().c_str());
             return false;
           }
+          Gvs.push_back((GlobalValue *)newMF);
 #endif
         }
-        if (!materializedFuncCall(src, lib, *newMF, MFS))
+        if (!materializedFuncCall(src, lib, *newMF, MFS, Gvs))
           return false;
 
       }
@@ -128,8 +139,10 @@ namespace gbe
   {
     LLVMContext& ctx = mod->getContext();
     std::set<std::string> materializedFuncs;
+    std::vector<GlobalValue *> Gvs;
     Module* clonedLib = createOclBitCodeModule(ctx, strictMath);
-    assert(clonedLib && "Can not create the beignet bitcode\n");
+    if (clonedLib == NULL)
+      return NULL;
 
     std::vector<const char *> kernels;
     std::vector<const char *> builtinFuncs;
@@ -173,10 +186,11 @@ namespace gbe
       if (!isKernelFunction(*SF)) continue;
       kernels.push_back(SF->getName().data());
 
-      if (!materializedFuncCall(*mod, *clonedLib, *SF, materializedFuncs)) {
+      if (!materializedFuncCall(*mod, *clonedLib, *SF, materializedFuncs, Gvs)) {
         delete clonedLib;
         return NULL;
       }
+      Gvs.push_back((GlobalValue *)&*SF);
     }
 
     if (kernels.empty()) {
@@ -215,13 +229,42 @@ namespace gbe
       }
 #endif
 
-      if (!materializedFuncCall(*mod, *clonedLib, *newMF, materializedFuncs)) {
+      if (!materializedFuncCall(*mod, *clonedLib, *newMF, materializedFuncs, Gvs)) {
         delete clonedLib;
         return NULL;
       }
 
+      Gvs.push_back((GlobalValue *)newMF);
       kernels.push_back(f);
     }
+
+  /* The llvm 3.8 now has a strict materialized check for all value by checking
+   * module is materialized. If we want to use library as old style that just
+   * materialize what we need, we need to remove what we did not need before
+   * materialize all of the module. To do this, we need all of the builtin
+   * funcitons and what are needed from the kernel functions, these functions
+   * are materalized and are recorded in Gvs, the GlobalValue like PI are also
+   * needed and are added. Now we could not use use_empty to check if the GVs
+   * are needed before the module is marked as all materialized, so we just
+   * materialize all of them as there are only 7 GVs. Then we use GVExtraction
+   * pass to extract the functions and values in Gvs from the library module.
+   * After extract what we need and remove what we do not need, we use 
+   * materializeAll to mark the module as materialized. */
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >=8
+    /* Get all GlobalValue from module. */
+    Module::GlobalListType &GVlist = clonedLib->getGlobalList();
+    for(Module::global_iterator GVitr = GVlist.begin();GVitr != GVlist.end();++GVitr) {
+      GlobalValue * GV = &*GVitr;
+      clonedLib->materialize(GV);
+      Gvs.push_back(GV);
+    }
+    llvm::legacy::PassManager Extract;
+    /* Extract all values we need using GVExtractionPass. */
+    Extract.add(createGVExtractionPass(Gvs, false));
+    Extract.run(*clonedLib);
+    /* Mark the library module as materialized for later use. */
+    clonedLib->materializeAll();
+#endif
 
     /* the SPIR binary datalayout maybe different with beignet's bitcode */
     if(clonedLib->getDataLayout() != mod->getDataLayout())

@@ -349,16 +349,18 @@ static float atan2pi(float y, float x){
   ldexp_input_type2 = ['int','int2','int4','int8','int16']
   ldexp_output_type = ['float','float2','float4','float8','float16']
   ldexp_cpu_func='''
+namespace utest {
 static float ldexp(float x, int y){
     return x * exp2(y);
+}
 } '''
-  ldexpUtests = func('ldexp','ldexp',[ldexp_input_type1,ldexp_input_type2],ldexp_output_type,[ldexp_input_values1,ldexp_input_values2],'0 * FLT_ULP', ldexp_cpu_func)
+  ldexpUtests = func('ldexp','utest::ldexp',[ldexp_input_type1,ldexp_input_type2],ldexp_output_type,[ldexp_input_values1,ldexp_input_values2],'0 * FLT_ULP', ldexp_cpu_func)
 
   ##### gentype lgamma(gentype x)
   lgamma_input_values = base_input_values
   lgamma_input_type = ['float','float2','float4','float8','float16']
   lgamma_output_type = ['float','float2','float4','float8','float16']
-  lgammaUtests = func('lgamma','lgamma',[lgamma_input_type],lgamma_output_type,[lgamma_input_values],'4 * FLT_ULP')
+  lgammaUtests = func('lgamma','lgamma',[lgamma_input_type],lgamma_output_type,[lgamma_input_values],'16 * FLT_ULP')
 
   ##### gentype log(gentype)
   log_input_values = base_input_values
@@ -467,14 +469,30 @@ static float pown(float x, int y){
   pownUtests = func('pown','pown',[pown_input_type1,pown_input_type2],pown_output_type,[pown_input_values1,pown_input_values2],'16 * FLT_ULP', pown_cpu_func)
   
   ##### gentype powr(gentype x, gentype y)
-  powr_input_values1 = [80, -80, 3.14, -3.14, 0.5, 1, -1, 0.0,6,1500.24,-1500.24]
-  powr_input_values2 = [5,6,7,8,10,11,12,13,14,0,12]
+  powr_input_values1 = [80, -80, 3.14, 1, 1.257, +0.0, -0.0, +0.0, -0.0, +0.0, -0.0, +1, +1, -80, +0.0, -0.0, +0.0, -0.0, 'INFINITY','INFINITY', +1, +1, +0.0, 2.5,' NAN', 'NAN', 'NAN']
+  powr_input_values2 = [5.5, 6,7, +0.0, -0.0, -1, -15.67, '-INFINITY', '-INFINITY', 1,  -2.7, 10.5, 3.1415, 3.5, -0.0, -0.0, +0.0, +0.0, +0.0, -0.0, 'INFINITY', '-INFINITY', 'NAN', 'NAN', -1.5, +0.0, 1.5]
   powr_input_type1 = ['float','float2','float4','float8','float16']
   powr_input_type2 = ['float','float2','float4','float8','float16']
   powr_output_type = ['float','float2','float4','float8','float16']
   powr_cpu_func='''
-static float powr(float x, int y){
-    if (x<0)
+static float powr(float x, float y){
+    if (((x > 0) && (x != +INFINITY)) && (y == 0.0f))
+        return 1;
+    else if ((x == 0.0f) && ((y < 0 ) || (y == -INFINITY)))
+        return +INFINITY;
+    else if ((x == 0.0f) && (y > 0))
+        return +0;
+    else if ((x == 0.0f) && (y == 0.0f))
+        return NAN;
+    else if ((x == +1) && ((y == +INFINITY) || (y == -INFINITY)))
+        return NAN;
+    else if ((x == +1) && ((y != +INFINITY) && (y != -INFINITY)))
+        return 1;
+    else if ((x == +INFINITY) && (y == 0.0f))
+        return NAN;
+    else if (std::isnan(x) || (x < 0))
+        return NAN;
+    else if ((x >=  0) && (std::isnan(y)))
         return NAN;
     else
         return powf(x,y);

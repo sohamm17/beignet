@@ -22,6 +22,7 @@
 #include "sys/platform.cpp"
 #include "ir/constant.cpp"
 #include "ir/printf.cpp"
+#include "ir/profiling.cpp"
 
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -64,11 +65,12 @@ struct BinInterpCallBackInitializer
     gbe_kernel_get_sampler_data = gbe::kernelGetSamplerData;
     gbe_kernel_get_image_data = gbe::kernelGetImageData;
     gbe_kernel_get_arg_info = gbe::kernelGetArgInfo;
+    gbe_get_profiling_bti = gbe::kernelGetProfilingBTI;
+    gbe_dup_profiling = gbe::kernelDupProfiling;
+    gbe_output_profiling = gbe::kernelOutputProfiling;
     gbe_get_printf_num = gbe::kernelGetPrintfNum;
     gbe_get_printf_buf_bti = gbe::kernelGetPrintfBufBTI;
-    gbe_get_printf_indexbuf_bti = gbe::kernelGetPrintfIndexBufBTI;
     gbe_dup_printfset = gbe::kernelDupPrintfSet;
-    gbe_get_printf_sizeof_size = gbe::kernelGetPrintfSizeOfSize;
     gbe_release_printf_info = gbe::kernelReleasePrintfSet;
     gbe_output_printf = gbe::kernelOutputPrintf;
   }

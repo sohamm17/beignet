@@ -238,6 +238,22 @@ namespace ir {
     typedef map<ValueUse, DefSet*> UDGraph;
     /*! The UseSet for each definition */
     typedef map<ValueDef, UseSet*> DUGraph;
+    /*! get register's use and define BB set */
+    void getRegUDBBs(Register r, set<const BasicBlock *> &BBs) const;
+    // check whether two register interering in the specific BB.
+    // This function must be called at the following conditions:
+    // 1. The outReg is in the BB's liveout set and not in the livein set.
+    // 2. The inReg is in the BB's livein set but not in the livout set.
+    bool interfere(const BasicBlock *bb, Register inReg, Register outReg) const;
+    // check whether two register interfering to each other.
+    // This function must be called at the following conditions:
+    //   r0 and r1 are both not a local variable which means they have information
+    //   in the liveness object.
+    bool interfere(const Liveness &liveness, Register r0, Register r1) const;
+    /*! check whether two registers which are both in liveout set interfering in the current BB. */
+    bool interfereLiveout(const BasicBlock *bb, Register r0, Register r1) const;
+    /*! check whether two registers which are both in livein set interfering in the current BB. */
+    bool interfereLivein(const BasicBlock *bb, Register r0, Register r1) const;
   private:
     UDGraph udGraph;                   //!< All the UD chains
     DUGraph duGraph;                   //!< All the DU chains

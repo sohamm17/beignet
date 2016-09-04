@@ -46,6 +46,10 @@ void check_opt1_extension(cl_extensions_t *extensions)
     if (id == EXT_ID(khr_spir))
       extensions->extensions[id].base.ext_enabled = 1;
 #endif
+    if (id == EXT_ID(khr_image2d_from_buffer))
+      extensions->extensions[id].base.ext_enabled = 1;
+    if (id == EXT_ID(khr_3d_image_writes))
+      extensions->extensions[id].base.ext_enabled = 1;
   }
 }
 
@@ -63,7 +67,9 @@ check_gl_extension(cl_extensions_t *extensions) {
 void
 check_intel_extension(cl_extensions_t *extensions)
 {
-  /* Should put those map/unmap extensions here. */
+  int id;
+  for(id = INTEL_EXT_START_ID; id <= INTEL_EXT_END_ID; id++)
+    extensions->extensions[id].base.ext_enabled = 1;
 }
 
 void
@@ -104,24 +110,48 @@ cl_intel_platform_get_default_extension(cl_device_id device)
 }
 
 LOCAL void
-cl_intel_platform_enable_fp16_extension(cl_device_id device)
+cl_intel_platform_enable_extension(cl_device_id device, uint32_t ext)
 {
-  cl_extensions_t new_ext;
-  cl_platform_id pf = device->platform;
   int id;
+  char* ext_str = NULL;
+  cl_platform_id pf = device->platform;
   assert(pf);
 
-  memcpy(&new_ext, pf->internal_extensions, sizeof(new_ext));
-
   for(id = OPT1_EXT_START_ID; id <= OPT1_EXT_END_ID; id++) {
-    if (id == EXT_ID(khr_fp16))
-      new_ext.extensions[id].base.ext_enabled = 1;
+    if (id == ext) {
+      if (!pf->internal_extensions->extensions[id].base.ext_enabled)
+        ext_str = pf->internal_extensions->extensions[id].base.ext_name;
+
+      break;
+    }
   }
 
-  process_extension_str(&new_ext);
+  for(id = BASE_EXT_START_ID; id <= BASE_EXT_END_ID; id++) {
+    if (id == ext) {
+      if (!pf->internal_extensions->extensions[id].base.ext_enabled)
+        ext_str = pf->internal_extensions->extensions[id].base.ext_name;
 
-  memcpy((char*)device->extensions, new_ext.ext_str, sizeof(device->extensions));
-  device->extensions_sz = strlen(new_ext.ext_str) + 1;
+      break;
+    }
+  }
+
+  /* already enabled, skip. */
+  if (ext_str && strstr(device->extensions, ext_str))
+    ext_str = NULL;
+
+  if (ext_str) {
+    if (device->extensions_sz <= 1) {
+      memcpy((char*)device->extensions, ext_str, strlen(ext_str));
+      device->extensions_sz = strlen(ext_str) + 1;
+    } else {
+      assert(device->extensions_sz + 1 + strlen(ext_str) < EXTENSTION_LENGTH);
+      *(char*)(device->extensions + device->extensions_sz - 1) = ' ';
+      memcpy((char*)device->extensions + device->extensions_sz, ext_str, strlen(ext_str));
+      device->extensions_sz = device->extensions_sz + strlen(ext_str) + 1;
+    }
+
+    *(char*)(device->extensions + device->extensions_sz - 1) = 0;
+  }
 }
 
 LOCAL void

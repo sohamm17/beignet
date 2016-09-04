@@ -27,6 +27,7 @@
 #include "cl_thread.h"
 #include "CL/cl.h"
 #include "CL/cl_ext.h"
+#include "CL/cl_intel.h"
 #include "cl_gbe_loader.h"
 #include "cl_alloc.h"
 
@@ -116,7 +117,7 @@ static struct _cl_device_id intel_brw_gt1_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen8_device.h"
 };
 
 static struct _cl_device_id intel_brw_gt2_device = {
@@ -127,7 +128,7 @@ static struct _cl_device_id intel_brw_gt2_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen8_device.h"
 };
 
 static struct _cl_device_id intel_brw_gt3_device = {
@@ -138,7 +139,7 @@ static struct _cl_device_id intel_brw_gt3_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen8_device.h"
 };
 
 //Cherryview has the same pciid, must get the max_compute_unit and max_thread_per_unit from drm
@@ -162,7 +163,7 @@ static struct _cl_device_id intel_skl_gt1_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen9_device.h"
 };
 
 static struct _cl_device_id intel_skl_gt2_device = {
@@ -173,7 +174,7 @@ static struct _cl_device_id intel_skl_gt2_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen9_device.h"
 };
 
 static struct _cl_device_id intel_skl_gt3_device = {
@@ -184,7 +185,7 @@ static struct _cl_device_id intel_skl_gt3_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen9_device.h"
 };
 
 static struct _cl_device_id intel_skl_gt4_device = {
@@ -195,7 +196,7 @@ static struct _cl_device_id intel_skl_gt4_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen9_device.h"
 };
 
 static struct _cl_device_id intel_bxt_device = {
@@ -206,7 +207,62 @@ static struct _cl_device_id intel_bxt_device = {
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
-#include "cl_gen75_device.h"
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_kbl_gt1_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 12,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 2,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_kbl_gt15_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 18,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 3,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_kbl_gt2_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 24,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 3,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_kbl_gt3_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 48,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 6,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_kbl_gt4_device = {
+  INIT_ICD(dispatch)
+  .max_compute_unit = 72,
+  .max_thread_per_unit = 7,
+  .sub_slice_count = 9,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
 };
 
 LOCAL cl_device_id
@@ -417,7 +473,11 @@ brw_gt1_break:
       intel_brw_gt1_device.device_id = device_id;
       intel_brw_gt1_device.platform = cl_get_platform_default();
       ret = &intel_brw_gt1_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_BROADWLL_M_GT2:
@@ -434,7 +494,11 @@ brw_gt2_break:
       intel_brw_gt2_device.device_id = device_id;
       intel_brw_gt2_device.platform = cl_get_platform_default();
       ret = &intel_brw_gt2_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_BROADWLL_M_GT3:
@@ -453,7 +517,11 @@ brw_gt3_break:
       intel_brw_gt3_device.device_id = device_id;
       intel_brw_gt3_device.platform = cl_get_platform_default();
       ret = &intel_brw_gt3_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_CHV_0:
@@ -465,7 +533,11 @@ chv_break:
       intel_chv_device.device_id = device_id;
       intel_chv_device.platform = cl_get_platform_default();
       ret = &intel_chv_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
 
@@ -483,7 +555,11 @@ skl_gt1_break:
       intel_skl_gt1_device.device_id = device_id;
       intel_skl_gt1_device.platform = cl_get_platform_default();
       ret = &intel_skl_gt1_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_SKYLAKE_ULT_GT2:
@@ -498,11 +574,17 @@ skl_gt1_break:
       DECL_INFO_STRING(skl_gt2_break, intel_skl_gt2_device, name, "Intel(R) HD Graphics Skylake Halo GT2");
     case PCI_CHIP_SKYLAKE_SRV_GT2:
       DECL_INFO_STRING(skl_gt2_break, intel_skl_gt2_device, name, "Intel(R) HD Graphics Skylake Server GT2");
+    case PCI_CHIP_SKYLAKE_WKS_GT2:
+      DECL_INFO_STRING(skl_gt2_break, intel_skl_gt2_device, name, "Intel(R) HD Graphics Skylake Workstation GT2");
 skl_gt2_break:
       intel_skl_gt2_device.device_id = device_id;
       intel_skl_gt2_device.platform = cl_get_platform_default();
       ret = &intel_skl_gt2_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_SKYLAKE_ULT_GT3:
@@ -511,22 +593,36 @@ skl_gt2_break:
       DECL_INFO_STRING(skl_gt3_break, intel_skl_gt3_device, name, "Intel(R) HD Graphics Skylake Halo GT3");
     case PCI_CHIP_SKYLAKE_SRV_GT3:
       DECL_INFO_STRING(skl_gt3_break, intel_skl_gt3_device, name, "Intel(R) HD Graphics Skylake Server GT3");
+    case PCI_CHIP_SKYLAKE_MEDIA_SRV_GT3:
+      DECL_INFO_STRING(skl_gt3_break, intel_skl_gt3_device, name, "Intel(R) HD Graphics Skylake Media Server GT3");
 skl_gt3_break:
       intel_skl_gt3_device.device_id = device_id;
       intel_skl_gt3_device.platform = cl_get_platform_default();
       ret = &intel_skl_gt3_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
+    case PCI_CHIP_SKYLAKE_DT_GT4:
+      DECL_INFO_STRING(skl_gt4_break, intel_skl_gt4_device, name, "Intel(R) HD Graphics Skylake Desktop GT4");
     case PCI_CHIP_SKYLAKE_HALO_GT4:
       DECL_INFO_STRING(skl_gt4_break, intel_skl_gt4_device, name, "Intel(R) HD Graphics Skylake Halo GT4");
     case PCI_CHIP_SKYLAKE_SRV_GT4:
       DECL_INFO_STRING(skl_gt4_break, intel_skl_gt4_device, name, "Intel(R) HD Graphics Skylake Server GT4");
+    case PCI_CHIP_SKYLAKE_WKS_GT4:
+      DECL_INFO_STRING(skl_gt4_break, intel_skl_gt4_device, name, "Intel(R) HD Graphics Skylake Workstation GT4");
 skl_gt4_break:
       intel_skl_gt4_device.device_id = device_id;
       intel_skl_gt4_device.platform = cl_get_platform_default();
       ret = &intel_skl_gt4_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_BROXTON_P:
@@ -535,7 +631,100 @@ bxt_break:
       intel_bxt_device.device_id = device_id;
       intel_bxt_device.platform = cl_get_platform_default();
       ret = &intel_bxt_device;
-      cl_intel_platform_enable_fp16_extension(ret);
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_KABYLAKE_ULT_GT1:
+      DECL_INFO_STRING(kbl_gt1_break, intel_kbl_gt1_device, name, "Intel(R) HD Graphics Kabylake ULT GT1");
+    case PCI_CHIP_KABYLAKE_DT_GT1:
+      DECL_INFO_STRING(kbl_gt1_break, intel_kbl_gt1_device, name, "Intel(R) HD Graphics Kabylake Desktop GT1");
+    case PCI_CHIP_KABYLAKE_HALO_GT1:
+      DECL_INFO_STRING(kbl_gt1_break, intel_kbl_gt1_device, name, "Intel(R) HD Graphics Kabylake Halo GT1");
+    case PCI_CHIP_KABYLAKE_ULX_GT1:
+      DECL_INFO_STRING(kbl_gt1_break, intel_kbl_gt1_device, name, "Intel(R) HD Graphics Kabylake ULX GT1");
+    case PCI_CHIP_KABYLAKE_SRV_GT1:
+      DECL_INFO_STRING(kbl_gt1_break, intel_kbl_gt1_device, name, "Intel(R) HD Graphics Kabylake Server GT1");
+kbl_gt1_break:
+      intel_kbl_gt1_device.device_id = device_id;
+      intel_kbl_gt1_device.platform = cl_get_platform_default();
+      ret = &intel_kbl_gt1_device;
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_KABYLAKE_ULT_GT15:
+      DECL_INFO_STRING(kbl_gt15_break, intel_kbl_gt15_device, name, "Intel(R) HD Graphics Kabylake ULT GT1.5");
+    case PCI_CHIP_KABYLAKE_DT_GT15:
+      DECL_INFO_STRING(kbl_gt15_break, intel_kbl_gt15_device, name, "Intel(R) HD Graphics Kabylake Desktop GT1.5");
+    case PCI_CHIP_KABYLAKE_HALO_GT15:
+      DECL_INFO_STRING(kbl_gt15_break, intel_kbl_gt15_device, name, "Intel(R) HD Graphics Kabylake Halo GT1.5");
+    case PCI_CHIP_KABYLAKE_ULX_GT15:
+      DECL_INFO_STRING(kbl_gt15_break, intel_kbl_gt15_device, name, "Intel(R) HD Graphics Kabylake ULX GT1.5");
+kbl_gt15_break:
+      intel_kbl_gt15_device.device_id = device_id;
+      intel_kbl_gt15_device.platform = cl_get_platform_default();
+      ret = &intel_kbl_gt15_device;
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_KABYLAKE_ULT_GT2:
+    case PCI_CHIP_KABYLAKE_ULT_GT2_1:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake ULT GT2");
+    case PCI_CHIP_KABYLAKE_DT_GT2:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake Desktop GT2");
+    case PCI_CHIP_KABYLAKE_HALO_GT2:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake Halo GT2");
+    case PCI_CHIP_KABYLAKE_ULX_GT2:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake ULX GT2");
+    case PCI_CHIP_KABYLAKE_SRV_GT2:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake Server GT2");
+    case PCI_CHIP_KABYLAKE_WKS_GT2:
+      DECL_INFO_STRING(kbl_gt2_break, intel_kbl_gt2_device, name, "Intel(R) HD Graphics Kabylake Workstation GT2");
+kbl_gt2_break:
+      intel_kbl_gt2_device.device_id = device_id;
+      intel_kbl_gt2_device.platform = cl_get_platform_default();
+      ret = &intel_kbl_gt2_device;
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_KABYLAKE_ULT_GT3:
+    case PCI_CHIP_KABYLAKE_ULT_GT3_1:
+    case PCI_CHIP_KABYLAKE_ULT_GT3_2:
+      DECL_INFO_STRING(kbl_gt3_break, intel_kbl_gt3_device, name, "Intel(R) HD Graphics Kabylake ULT GT3");
+kbl_gt3_break:
+      intel_kbl_gt3_device.device_id = device_id;
+      intel_kbl_gt3_device.platform = cl_get_platform_default();
+      ret = &intel_kbl_gt3_device;
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_KABYLAKE_HALO_GT4:
+      DECL_INFO_STRING(kbl_gt4_break, intel_kbl_gt4_device, name, "Intel(R) HD Graphics Kabylake ULT GT4");
+kbl_gt4_break:
+      intel_kbl_gt4_device.device_id = device_id;
+      intel_kbl_gt4_device.platform = cl_get_platform_default();
+      ret = &intel_kbl_gt4_device;
+#ifdef ENABLE_FP64
+      cl_intel_platform_enable_extension(ret, cl_khr_fp64_ext_id);
+#endif
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
     case PCI_CHIP_SANDYBRIDGE_BRIDGE:
@@ -568,13 +757,24 @@ bxt_break:
   /* Apply any driver-dependent updates to the device info */
   cl_driver_update_device_info(ret);
 
+  #define toMB(size) (size)&(0xfffffffffffffff<<20)
+  /* Get the global_mem_size and max_mem_alloc size from
+   * driver, system ram and hardware*/
   struct sysinfo info;
   if (sysinfo(&info) == 0) {
-    uint64_t two_gb = 2 * 1024 * 1024 * 1024ul; 
+    uint64_t totalgpumem = ret->global_mem_size;
+	uint64_t maxallocmem = ret->max_mem_alloc_size;
     uint64_t totalram = info.totalram * info.mem_unit;
-    ret->global_mem_size = (totalram > two_gb) ? 
-                            two_gb : info.totalram;
-    ret->max_mem_alloc_size = ret->global_mem_size / 2;
+	/* In case to keep system stable we just use half
+	 * of the raw as global mem */
+    ret->global_mem_size = toMB((totalram / 2 > totalgpumem) ?
+                            totalgpumem: totalram / 2);
+	/* The hardware has some limit about the alloc size
+	 * and the excution of kernel need some global mem
+	 * so we now make sure single mem does not use much
+	 * than 3/4 global mem*/
+    ret->max_mem_alloc_size = toMB((ret->global_mem_size * 3 / 4 > maxallocmem) ?
+                              maxallocmem: ret->global_mem_size * 3 / 4);
   }
 
   return ret;
@@ -609,6 +809,8 @@ cl_self_test(cl_device_id device, cl_self_test_res atomic_in_l3_flag)
     return ret;
   tested = 1;
   ctx = clCreateContext(NULL, 1, &device, NULL, NULL, &status);
+  if(!ctx)
+    return ret;
   cl_driver_set_atomic_flag(ctx->drv, atomic_in_l3_flag);
   if (status == CL_SUCCESS) {
     queue = clCreateCommandQueue(ctx, device, 0, &status);
@@ -732,6 +934,29 @@ cl_get_device_ids(cl_platform_id    platform,
     memcpy(param_value, device->FIELD, device->JOIN(FIELD,_sz));    \
     return CL_SUCCESS;
 
+LOCAL cl_bool is_gen_device(cl_device_id device) {
+  return device == &intel_ivb_gt1_device ||
+         device == &intel_ivb_gt2_device ||
+         device == &intel_baytrail_t_device ||
+         device == &intel_hsw_gt1_device ||
+         device == &intel_hsw_gt2_device ||
+         device == &intel_hsw_gt3_device ||
+         device == &intel_brw_gt1_device ||
+         device == &intel_brw_gt2_device ||
+         device == &intel_brw_gt3_device ||
+         device == &intel_chv_device ||
+         device == &intel_skl_gt1_device ||
+         device == &intel_skl_gt2_device ||
+         device == &intel_skl_gt3_device ||
+         device == &intel_skl_gt4_device ||
+         device == &intel_bxt_device     ||
+         device == &intel_kbl_gt1_device ||
+         device == &intel_kbl_gt15_device ||
+         device == &intel_kbl_gt2_device ||
+         device == &intel_kbl_gt3_device ||
+         device == &intel_kbl_gt4_device;
+}
+
 LOCAL cl_int
 cl_get_device_info(cl_device_id     device,
                    cl_device_info   param_name,
@@ -739,22 +964,7 @@ cl_get_device_info(cl_device_id     device,
                    void *           param_value,
                    size_t *         param_value_size_ret)
 {
-  if (UNLIKELY(device != &intel_ivb_gt1_device &&
-               device != &intel_ivb_gt2_device &&
-               device != &intel_baytrail_t_device &&
-               device != &intel_hsw_gt1_device &&
-               device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device &&
-               device != &intel_brw_gt1_device &&
-               device != &intel_brw_gt2_device &&
-               device != &intel_brw_gt3_device &&
-               device != &intel_chv_device &&
-               device != &intel_skl_gt1_device &&
-               device != &intel_skl_gt2_device &&
-               device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device &&
-               device != &intel_bxt_device
-               ))
+  if (UNLIKELY(is_gen_device(device) == CL_FALSE))
     return CL_INVALID_DEVICE;
 
   /* Find the correct parameter */
@@ -833,6 +1043,8 @@ cl_get_device_info(cl_device_id     device,
     DECL_FIELD(PARTITION_AFFINITY_DOMAIN, affinity_domain)
     DECL_FIELD(PARTITION_TYPE, partition_type)
     DECL_FIELD(REFERENCE_COUNT, device_reference_count)
+    DECL_FIELD(IMAGE_PITCH_ALIGNMENT, image_pitch_alignment)
+    DECL_FIELD(IMAGE_BASE_ADDRESS_ALIGNMENT, image_base_address_alignment)
 
     case CL_DRIVER_VERSION:
       if (param_value_size_ret) {
@@ -852,22 +1064,7 @@ cl_get_device_info(cl_device_id     device,
 LOCAL cl_int
 cl_device_get_version(cl_device_id device, cl_int *ver)
 {
-  if (UNLIKELY(device != &intel_ivb_gt1_device &&
-               device != &intel_ivb_gt2_device &&
-               device != &intel_baytrail_t_device &&
-               device != &intel_hsw_gt1_device &&
-               device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device &&
-               device != &intel_brw_gt1_device &&
-               device != &intel_brw_gt2_device &&
-               device != &intel_brw_gt3_device &&
-               device != &intel_chv_device &&
-               device != &intel_skl_gt1_device &&
-               device != &intel_skl_gt2_device &&
-               device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device &&
-               device != &intel_bxt_device
-               ))
+  if (UNLIKELY(is_gen_device(device) == CL_FALSE))
     return CL_INVALID_DEVICE;
   if (ver == NULL)
     return CL_SUCCESS;
@@ -883,7 +1080,9 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
     *ver = 8;
   } else if (device == &intel_skl_gt1_device || device == &intel_skl_gt2_device
         || device == &intel_skl_gt3_device || device == &intel_skl_gt4_device
-        || device == &intel_bxt_device) {
+        || device == &intel_bxt_device || device == &intel_kbl_gt1_device
+        || device == &intel_kbl_gt2_device || device == &intel_kbl_gt3_device
+        || device == &intel_kbl_gt4_device || device == &intel_kbl_gt15_device) {
     *ver = 9;
   } else
     return CL_INVALID_VALUE;
@@ -958,21 +1157,7 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
 {
   int err = CL_SUCCESS;
   int dimension = 0;
-  if (UNLIKELY(device != &intel_ivb_gt1_device &&
-               device != &intel_ivb_gt2_device &&
-               device != &intel_baytrail_t_device &&
-               device != &intel_hsw_gt1_device &&
-               device != &intel_hsw_gt2_device &&
-               device != &intel_hsw_gt3_device &&
-               device != &intel_brw_gt1_device &&
-               device != &intel_brw_gt2_device &&
-               device != &intel_brw_gt3_device &&
-               device != &intel_chv_device &&
-               device != &intel_skl_gt1_device &&
-               device != &intel_skl_gt2_device &&
-               device != &intel_skl_gt3_device &&
-               device != &intel_skl_gt4_device &&
-               device != &intel_bxt_device))
+  if (UNLIKELY(is_gen_device(device) == CL_FALSE))
     return CL_INVALID_DEVICE;
 
   CHECK_KERNEL(kernel);
@@ -1032,3 +1217,85 @@ error:
   return err;
 }
 
+LOCAL cl_int
+cl_get_kernel_subgroup_info(cl_kernel kernel,
+                            cl_device_id device,
+                            cl_kernel_work_group_info param_name,
+                            size_t input_value_size,
+                            const void* input_value,
+                            size_t param_value_size,
+                            void* param_value,
+                            size_t* param_value_size_ret)
+{
+  int err = CL_SUCCESS;
+  if(device != NULL)
+    if (kernel->program->ctx->device != device)
+      return CL_INVALID_DEVICE;
+
+  CHECK_KERNEL(kernel);
+  switch (param_name) {
+    case CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE_KHR:
+    {
+      int i, dim = 0;
+      size_t local_sz = 1;
+      if (param_value && param_value_size < sizeof(size_t))
+        return CL_INVALID_VALUE;
+      if (param_value_size_ret != NULL)
+        *param_value_size_ret = sizeof(size_t);
+      switch (input_value_size)
+      {
+        case sizeof(size_t)*1:
+        case sizeof(size_t)*2:
+        case sizeof(size_t)*3:
+          dim = input_value_size/sizeof(size_t);
+          break;
+        default: return CL_INVALID_VALUE;
+      }
+      if (input_value == NULL )
+        return CL_INVALID_VALUE;
+      for(i = 0; i < dim; i++)
+        local_sz *= ((size_t*)input_value)[i];
+      if (param_value) {
+        size_t simd_sz = cl_kernel_get_simd_width(kernel);
+        size_t sub_group_size = local_sz >= simd_sz? simd_sz : local_sz;
+        *(size_t*)param_value = sub_group_size;
+        return CL_SUCCESS;
+      }
+      break;
+    }
+    case CL_KERNEL_SUB_GROUP_COUNT_FOR_NDRANGE_KHR:
+    {
+      int i, dim = 0;
+      size_t local_sz = 1;
+      if (param_value && param_value_size < sizeof(size_t))
+        return CL_INVALID_VALUE;
+      if (param_value_size_ret != NULL)
+        *param_value_size_ret = sizeof(size_t);
+      switch (input_value_size)
+      {
+        case sizeof(size_t)*1:
+        case sizeof(size_t)*2:
+        case sizeof(size_t)*3:
+          dim = input_value_size/sizeof(size_t);
+          break;
+        default: return CL_INVALID_VALUE;
+      }
+      if (input_value == NULL )
+        return CL_INVALID_VALUE;
+      for(i = 0; i < dim; i++)
+        local_sz *= ((size_t*)input_value)[i];
+      if (param_value) {
+        size_t simd_sz = cl_kernel_get_simd_width(kernel);
+        size_t sub_group_num = (local_sz + simd_sz - 1) / simd_sz;
+        *(size_t*)param_value = sub_group_num;
+        return CL_SUCCESS;
+      }
+      break;
+    }
+    default:
+      return CL_INVALID_VALUE;
+  };
+
+error:
+  return err;
+}

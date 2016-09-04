@@ -39,7 +39,6 @@ double benchmark_read_buffer(void)
   OCL_FINISH();
   gettimeofday(&stop,0);
 
-  clReleaseMemObject(buf[0]);
   free(buf_data[0]);
   buf_data[0] = NULL;
 
@@ -48,4 +47,4 @@ double benchmark_read_buffer(void)
   return BANDWIDTH(sz * sizeof(float) * 2 * 100, elapsed);
 }
 
-MAKE_BENCHMARK_FROM_FUNCTION(benchmark_read_buffer);
+MAKE_BENCHMARK_FROM_FUNCTION(benchmark_read_buffer, "GB/S");

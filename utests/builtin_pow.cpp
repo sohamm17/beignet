@@ -10,6 +10,9 @@
   printf( __VA_ARGS__ );\
   printf("\033[0m");\
 }
+
+namespace {
+
 const float ori_data[] = {-20.5, -1, -0.9, -0.01, 0, 0.01, 0.9, 1.0, 20.5};
 const int count_input_ori = sizeof(ori_data) / sizeof(ori_data[0]);
 const int count_input = count_input_ori * count_input_ori;
@@ -59,7 +62,8 @@ static void builtin_pow(void)
 
   clEnqueueWriteBuffer( queue, buf[1], CL_TRUE, 0, count_input * sizeof(float), input_data1, 0, NULL, NULL);
   clEnqueueWriteBuffer( queue, buf[2], CL_TRUE, 0, count_input * sizeof(float), input_data2, 0, NULL, NULL);
-  clEnqueueWriteBuffer( queue, buf[3], CL_TRUE, 0, sizeof(int), &max_function, 0, NULL, NULL);
+  int maxfunc = max_function;
+  clEnqueueWriteBuffer( queue, buf[3], CL_TRUE, 0, sizeof(int), &maxfunc, 0, NULL, NULL);
 
    // Run the kernel
   OCL_NDRANGE( 1 );
@@ -74,8 +78,8 @@ static void builtin_pow(void)
     {
       index_cur = k * max_function + i;
 #if udebug
-      if ( (isinf(cpu_data[index_cur]) && !isinf(gpu_data[index_cur])) ||
-           (isnan(cpu_data[index_cur]) && !isnan(gpu_data[index_cur])) ||
+      if ( (std::isinf(cpu_data[index_cur]) && !std::isinf(gpu_data[index_cur])) ||
+           (std::isnan(cpu_data[index_cur]) && !std::isnan(gpu_data[index_cur])) ||
            (fabs(gpu_data[index_cur] - cpu_data[index_cur]) > cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR
            && (denormals_supported || gpu_data[index_cur]!=0 || std::fpclassify(cpu_data[index_cur])!=FP_SUBNORMAL) ) )
 
@@ -85,10 +89,10 @@ static void builtin_pow(void)
       else
         printf("%d/%d: x:%f, y:%f -> gpu:%f  cpu:%f\n", k, i, input_data1[k], input_data2[k], gpu_data[index_cur], cpu_data[index_cur]);
 #else
-     if (isinf(cpu_data[index_cur]))
-       OCL_ASSERT(isinf(gpu_data[index_cur]));
-     else if (isnan(cpu_data[index_cur]))
-       OCL_ASSERT(isnan(gpu_data[index_cur]));
+     if (std::isinf(cpu_data[index_cur]))
+       OCL_ASSERT(std::isinf(gpu_data[index_cur]));
+     else if (std::isnan(cpu_data[index_cur]))
+       OCL_ASSERT(std::isnan(gpu_data[index_cur]));
      else
      {
        OCL_ASSERT((fabs(gpu_data[index_cur] - cpu_data[index_cur]) < cl_FLT_ULP(cpu_data[index_cur]) * ULPSIZE_FACTOR) ||
@@ -100,3 +104,4 @@ static void builtin_pow(void)
 }
 
 MAKE_UTEST_FROM_FUNCTION(builtin_pow)
+}

@@ -26,12 +26,12 @@
 #include <string.h>
 #include "sys/map.hpp"
 #include "sys/vector.hpp"
-#include "unit.hpp"
 
 namespace gbe
 {
   namespace ir
   {
+    class Unit;
 
     /* Things about printf info. */
     enum {
@@ -111,55 +111,62 @@ namespace gbe
     };
 
     struct PrintfSlot {
-      int type;
-      union {
-        char* str;
-        PrintfState* state;
-        void *ptr;
-      };
+      uint32_t type;
+      std::string str;
+      PrintfState state;
 
       PrintfSlot(void) {
         type = PRINTF_SLOT_TYPE_NONE;
-        ptr = NULL;
       }
 
-      PrintfSlot(const char * s) {
+      PrintfSlot(std::string& s) : str(s) {
         type = PRINTF_SLOT_TYPE_STRING;
-        int len = strlen(s);
-        str = (char*)malloc((len + 1) * sizeof(char));
-        memcpy(str, s, (len + 1) * sizeof(char));
-        str[len] = 0;
       }
 
-      PrintfSlot(PrintfState * st) {
+      PrintfSlot(PrintfState& st) {
         type = PRINTF_SLOT_TYPE_STATE;
-        state = new PrintfState(*st);
+        state = st;
       }
 
       PrintfSlot(const PrintfSlot & other) {
         if (other.type == PRINTF_SLOT_TYPE_STRING) {
-          int len = strlen(other.str);
-          str = (char*)malloc((len + 1) * sizeof(char));
-          memcpy(str, other.str, (len + 1) * sizeof(char));
-          str[len] = 0;
           type = PRINTF_SLOT_TYPE_STRING;
+          str = other.str;
         } else if (other.type == PRINTF_SLOT_TYPE_STATE) {
           type = PRINTF_SLOT_TYPE_STATE;
-          state = new PrintfState(*other.state);
+          state = other.state;
         } else {
           type = PRINTF_SLOT_TYPE_NONE;
-          ptr = NULL;
         }
       }
 
-      PrintfSlot(PrintfSlot && other) {
-        void *p = other.ptr;
-        type = other.type;
-        other.ptr = ptr;
-        ptr = p;
+      ~PrintfSlot(void) {
+      }
+    };
+
+    struct PrintfLog {
+      uint32_t magic;  // 0xAABBCCDD as magic for ASSERT.
+      uint32_t size;  // Size of this printf log, include header.
+      uint32_t statementNum; // which printf within one kernel.
+      const char* content;
+
+      PrintfLog(const char* p) {
+        GBE_ASSERT(*((uint32_t *)p) == 0xAABBCCDD);
+        magic = *((uint32_t *)p);
+        p += sizeof(uint32_t);
+        size = *((uint32_t *)p);
+        p += sizeof(uint32_t);
+        statementNum = *((uint32_t *)p);
+        p += sizeof(uint32_t);
+        content = p;
       }
 
-      ~PrintfSlot(void);
+      template <typename T>
+      T getData(void) {
+        T D = *((T *)content);
+        content += sizeof(T);
+        return D;
+      }
     };
 
     class Context;
@@ -168,19 +175,8 @@ namespace gbe
     {
     public:
       PrintfSet(const PrintfSet& other) {
-        for (size_t i = 0; i < other.fmts.size(); ++i) {
-          const PrintfFmt& f = other.fmts[i];
-          fmts.push_back(f);
-        }
-
-        for (size_t i = 0; i < other.slots.size(); ++i) {
-          PrintfSlot s = other.slots[i];
-          slots.push_back(s);
-        }
-
-        sizeOfSize = other.sizeOfSize;
+        fmts = other.fmts;
         btiBuf = other.btiBuf;
-        btiIndexBuf = other.btiIndexBuf;
       }
 
       PrintfSet(void) = default;
@@ -195,32 +191,30 @@ namespace gbe
         }
       };
 
-      typedef std::pair<vector<PrintfSlot>, int> PrintfFmt;
-      uint32_t append(PrintfFmt* fmt, Unit &unit);
+      typedef vector<PrintfSlot> PrintfFmt;
+
+      void append(uint32_t num, PrintfFmt* fmt) {
+        GBE_ASSERT(fmts.find(num) == fmts.end());
+        fmts.insert(std::pair<uint32_t, PrintfFmt>(num, *fmt));
+      }
 
       uint32_t getPrintfNum(void) const {
         return fmts.size();
       }
 
-      uint32_t getPrintfSizeOfSize(void) const {
-        return sizeOfSize;
-      }
-
       void setBufBTI(uint8_t b)      { btiBuf = b; }
-      void setIndexBufBTI(uint8_t b) { btiIndexBuf = b; }
       uint8_t getBufBTI() const      { return btiBuf; }
-      uint8_t getIndexBufBTI() const { return btiIndexBuf; }
 
       uint32_t getPrintfBufferElementSize(uint32_t i) {
-        PrintfSlot& slot = slots[i];
+        PrintfSlot slot;
         int vec_num = 1;
-        if (slot.state->vector_n > 0) {
-          vec_num = slot.state->vector_n;
+        if (slot.state.vector_n > 0) {
+          vec_num = slot.state.vector_n;
         }
 
         assert(vec_num > 0 && vec_num <= 16);
 
-        switch (slot.state->conversion_specifier) {
+        switch (slot.state.conversion_specifier) {
           case PRINTF_CONVERSION_I:
           case PRINTF_CONVERSION_D:
           case PRINTF_CONVERSION_O:
@@ -249,16 +243,12 @@ namespace gbe
         return 0;
       }
 
-      void outputPrintf(void* index_addr, void* buf_addr, size_t global_wk_sz0,
-                        size_t global_wk_sz1, size_t global_wk_sz2, size_t output_sz);
+      void outputPrintf(void* buf_addr);
 
     private:
-      vector<PrintfFmt> fmts;
-      vector<PrintfSlot> slots;
-      uint32_t sizeOfSize; // Total sizeof size.
+      std::map<uint32_t, PrintfFmt> fmts;
       friend struct LockOutput;
       uint8_t btiBuf;
-      uint8_t btiIndexBuf;
       static pthread_mutex_t lock;
       GBE_CLASS(PrintfSet);
     };

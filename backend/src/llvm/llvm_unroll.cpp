@@ -47,8 +47,13 @@ namespace gbe {
         AU.addPreservedID(LoopSimplifyID);
         AU.addRequiredID(LCSSAID);
         AU.addPreservedID(LCSSAID);
+#if LLVM_VERSION_MAJOR == 3 &&  LLVM_VERSION_MINOR >= 8
+        AU.addRequired<ScalarEvolutionWrapperPass>();
+        AU.addPreserved<ScalarEvolutionWrapperPass>();
+#else
         AU.addRequired<ScalarEvolution>();
         AU.addPreserved<ScalarEvolution>();
+#endif
       // FIXME: Loop unroll requires LCSSA. And LCSSA requires dom info.
       // If loop unroll does not preserve dom info then LCSSA pass on next
       // loop will receive invalid dom info.
@@ -156,7 +161,12 @@ namespace gbe {
       // be unrolled.
       bool handleParentLoops(Loop *L, LPPassManager &LPM) {
         Loop *currL = L;
+#if LLVM_VERSION_MAJOR == 3 &&  LLVM_VERSION_MINOR >= 8
+        ScalarEvolution *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+        LoopInfo &loopInfo = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+#else
         ScalarEvolution *SE = &getAnalysis<ScalarEvolution>();
+#endif
         BasicBlock *ExitBlock = currL->getLoopLatch();
         if (!ExitBlock || !L->isLoopExiting(ExitBlock))
           ExitBlock = currL->getExitingBlock();
@@ -165,6 +175,12 @@ namespace gbe {
         bool shouldUnroll = true;
         if (ExitBlock)
           currTripCount = SE->getSmallConstantTripCount(L, ExitBlock);
+
+        if (currTripCount > 32) {
+          shouldUnroll = false;
+          setUnrollID(currL, false);
+          return shouldUnroll;
+        }
 
         while(currL) {
           Loop *parentL = currL->getParentLoop();
@@ -177,16 +193,17 @@ namespace gbe {
             if (parentExitBlock)
               parentTripCount = SE->getSmallConstantTripCount(parentL, parentExitBlock);
           }
-          if ((parentTripCount != 0 && currTripCount / parentTripCount > 16) ||
-              (currTripCount > 32)) {
-            if (currL == L)
-              shouldUnroll = false;
-            setUnrollID(currL, false);
-            if (currL != L)
-              LPM.deleteLoopFromQueue(currL);
+          if (parentTripCount != 0 && currTripCount * parentTripCount > 32) {
+            setUnrollID(parentL, false);
+#if LLVM_VERSION_MAJOR == 3 &&  LLVM_VERSION_MINOR >= 8
+            loopInfo.markAsRemoved(parentL);
+#else
+            LPM.deleteLoopFromQueue(parentL);
+#endif
+            return shouldUnroll;
           }
           currL = parentL;
-          currTripCount = parentTripCount;
+          currTripCount = parentTripCount * currTripCount;
         }
         return shouldUnroll;
       }

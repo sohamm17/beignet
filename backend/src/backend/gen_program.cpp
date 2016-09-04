@@ -80,22 +80,33 @@ namespace gbe {
     insns = (GenInstruction *)ins;
     insnNum = size / sizeof(GenInstruction);
   }
-  size_t GenKernel::getCodeSize(void) const { return insnNum * sizeof(GenInstruction); }
+  uint32_t GenKernel::getCodeSize(void) const { return insnNum * sizeof(GenInstruction); }
 
   void GenKernel::printStatus(int indent, std::ostream& outs) {
 #ifdef GBE_COMPILER_AVAILABLE
     Kernel::printStatus(indent, outs);
 
     FILE *f = fopen("/dev/null", "w");
+    if(!f) {
+      outs << "could not open /dev/null !";
+      return;
+    }
+
     char *buf = new char[4096];
     setbuffer(f, buf, 4096);
     GenCompactInstruction * pCom = NULL;
     GenInstruction insn[2];
 
+    uint32_t insn_version = 0;
+    if (IS_GEN7(deviceID) || IS_GEN75(deviceID))
+      insn_version = 7;
+    else if (IS_GEN8(deviceID) || IS_GEN9(deviceID))
+      insn_version = 8;
+
     for (uint32_t i = 0; i < insnNum;) {
       pCom = (GenCompactInstruction*)(insns+i);
       if(pCom->bits1.cmpt_control == 1) {
-        decompactInstruction(pCom, &insn);
+        decompactInstruction(pCom, &insn, insn_version);
         gen_disasm(f, &insn, deviceID, 1);
         i++;
       } else {
@@ -140,12 +151,15 @@ namespace gbe {
     {8, 16, false},
   };
 
-  Kernel *GenProgram::compileKernel(const ir::Unit &unit, const std::string &name, bool relaxMath) {
+  Kernel *GenProgram::compileKernel(const ir::Unit &unit, const std::string &name,
+                                    bool relaxMath, int profiling) {
 #ifdef GBE_COMPILER_AVAILABLE
     // Be careful when the simdWidth is forced by the programmer. We can see it
     // when the function already provides the simd width we need to use (i.e.
     // non zero)
     const ir::Function *fn = unit.getFunction(name);
+    if(fn == NULL)
+      GBE_ASSERT(0);
     uint32_t codeGenNum = sizeof(codeGenStrategy) / sizeof(codeGenStrategy[0]);
     uint32_t codeGen = 0;
     GenContext *ctx = NULL;
@@ -172,8 +186,16 @@ namespace gbe {
       ctx = GBE_NEW(Gen9Context, unit, name, deviceID, relaxMath);
     } else if (IS_BROXTON(deviceID)) {
       ctx = GBE_NEW(BxtContext, unit, name, deviceID, relaxMath);
+    } else if (IS_KABYLAKE(deviceID)) {
+      ctx = GBE_NEW(KblContext, unit, name, deviceID, relaxMath);
     }
     GBE_ASSERTM(ctx != NULL, "Fail to create the gen context\n");
+
+    if (profiling) {
+      ctx->setProfilingMode(true);
+      unit.getProfilingInfo()->setDeviceID(deviceID);
+    }
+
     ctx->setASMFileName(this->asm_file_name);
 
     for (; codeGen < codeGenNum; ++codeGen) {
@@ -182,14 +204,17 @@ namespace gbe {
       const uint32_t reservedSpillRegs = codeGenStrategy[codeGen].reservedSpillRegs;
 
       // Force the SIMD width now and try to compile
-      unit.getFunction(name)->setSimdWidth(simdWidth);
+      ir::Function *simdFn = unit.getFunction(name);
+      if(simdFn == NULL)
+        GBE_ASSERT(0);
+      simdFn->setSimdWidth(simdWidth);
       ctx->startNewCG(simdWidth, reservedSpillRegs, limitRegisterPressure);
       kernel = ctx->compileKernel();
       if (kernel != NULL) {
         GBE_ASSERT(ctx->getErrCode() == NO_ERROR);
         break;
       }
-      fn->getImageSet()->clearInfo();
+      simdFn->getImageSet()->clearInfo();
       // If we get a out of range if/endif error.
       // We need to set the context to if endif fix mode and restart the previous compile.
       if ( ctx->getErrCode() == OUT_OF_RANGE_IF_ENDIF && !ctx->getIFENDIFFix() ) {
@@ -199,45 +224,97 @@ namespace gbe {
         GBE_ASSERT(!(ctx->getErrCode() == OUT_OF_RANGE_IF_ENDIF && ctx->getIFENDIFFix()));
     }
 
-    GBE_ASSERTM(kernel != NULL, "Fail to compile kernel, may need to increase reserved registers for spilling.");
+    //GBE_ASSERTM(kernel != NULL, "Fail to compile kernel, may need to increase reserved registers for spilling.");
     return kernel;
 #else
     return NULL;
 #endif
   }
 
-#define BINARY_HEADER_LENGTH 8
-#define IS_GEN_BINARY(binary) (*binary == '\0' && *(binary+1) == 'G'&& *(binary+2) == 'E' &&*(binary+3) == 'N' &&*(binary+4) == 'C')
-#define FILL_GEN_BINARY(binary) do{*binary = '\0'; *(binary+1) = 'G'; *(binary+2) = 'E'; *(binary+3) = 'N'; *(binary+4) = 'C';}while(0)
-#define FILL_DEVICE_ID(binary, src_hw_info) do {*(binary+5) = src_hw_info[0]; *(binary+6) = src_hw_info[1]; *(binary+7) = src_hw_info[2];}while(0)
-#define DEVICE_MATCH(typeA, src_hw_info) ((IS_IVYBRIDGE(typeA) && !strcmp(src_hw_info, "IVB")) ||  \
-                                      (IS_IVYBRIDGE(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
-                                      (IS_BAYTRAIL_T(typeA) && !strcmp(src_hw_info, "BYT")) ||  \
-                                      (IS_HASWELL(typeA) && !strcmp(src_hw_info, "HSW")) ||  \
-                                      (IS_BROADWELL(typeA) && !strcmp(src_hw_info, "BDW")) ||  \
-                                      (IS_CHERRYVIEW(typeA) && !strcmp(src_hw_info, "CHV")) ||  \
-                                      (IS_SKYLAKE(typeA) && !strcmp(src_hw_info, "SKL")) || \
-                                      (IS_BROXTON(typeA) && !strcmp(src_hw_info, "BXT")) )
+#define GEN_BINARY_HEADER_LENGTH 8
+
+  enum GEN_BINARY_HEADER_INDEX {
+    GBHI_BYT = 0,
+    GBHI_IVB = 1,
+    GBHI_HSW = 2,
+    GBHI_CHV = 3,
+    GBHI_BDW = 4,
+    GBHI_SKL = 5,
+    GBHI_BXT = 6,
+    GBHI_KBL = 7,
+    GBHI_MAX,
+  };
+#define GEN_BINARY_VERSION  1
+  static const unsigned char gen_binary_header[GBHI_MAX][GEN_BINARY_HEADER_LENGTH]= \
+                                             {{GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'B', 'Y', 'T'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'I', 'V', 'B'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'H', 'S', 'W'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'C', 'H', 'V'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'B', 'D', 'W'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'S', 'K', 'L'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'B', 'X', 'T'},
+                                              {GEN_BINARY_VERSION, 'G','E', 'N', 'C', 'K', 'B', 'T'}
+                                              };
+
+#define FILL_GEN_HEADER(binary, index)  do {int i = 0; do {*(binary+i) = gen_binary_header[index][i]; i++; }while(i < GEN_BINARY_HEADER_LENGTH);}while(0)
+#define FILL_BYT_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_BYT)
+#define FILL_IVB_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_IVB)
+#define FILL_HSW_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_HSW)
+#define FILL_CHV_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_CHV)
+#define FILL_BDW_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_BDW)
+#define FILL_SKL_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_SKL)
+#define FILL_BXT_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_BXT)
+#define FILL_KBL_HEADER(binary) FILL_GEN_HEADER(binary, GBHI_KBL)
+
+  static bool genHeaderCompare(const unsigned char *BufPtr, GEN_BINARY_HEADER_INDEX index)
+  {
+    bool matched = true;
+    for (int i = 1; i < GEN_BINARY_HEADER_LENGTH; ++i)
+    {
+      matched = matched && (BufPtr[i] == gen_binary_header[index][i]);
+    }
+    if(matched) {
+      if(BufPtr[0] != gen_binary_header[index][0]) {
+        std::cout << "Beignet binary format have been changed, please generate binary again.\n";
+        matched = false;
+      }
+    }
+    return matched;
+  }
+
+#define MATCH_BYT_HEADER(binary) genHeaderCompare(binary, GBHI_BYT)
+#define MATCH_IVB_HEADER(binary) genHeaderCompare(binary, GBHI_IVB)
+#define MATCH_HSW_HEADER(binary) genHeaderCompare(binary, GBHI_HSW)
+#define MATCH_CHV_HEADER(binary) genHeaderCompare(binary, GBHI_CHV)
+#define MATCH_BDW_HEADER(binary) genHeaderCompare(binary, GBHI_BDW)
+#define MATCH_SKL_HEADER(binary) genHeaderCompare(binary, GBHI_SKL)
+#define MATCH_BXT_HEADER(binary) genHeaderCompare(binary, GBHI_BXT)
+#define MATCH_KBL_HEADER(binary) genHeaderCompare(binary, GBHI_KBL)
+
+#define MATCH_DEVICE(deviceID, binary) ((IS_IVYBRIDGE(deviceID) && MATCH_IVB_HEADER(binary)) ||  \
+                                      (IS_IVYBRIDGE(deviceID) && MATCH_IVB_HEADER(binary)) ||  \
+                                      (IS_BAYTRAIL_T(deviceID) && MATCH_BYT_HEADER(binary)) ||  \
+                                      (IS_HASWELL(deviceID) && MATCH_HSW_HEADER(binary)) ||  \
+                                      (IS_BROADWELL(deviceID) && MATCH_BDW_HEADER(binary)) ||  \
+                                      (IS_CHERRYVIEW(deviceID) && MATCH_CHV_HEADER(binary)) ||  \
+                                      (IS_SKYLAKE(deviceID) && MATCH_SKL_HEADER(binary)) || \
+                                      (IS_BROXTON(deviceID) && MATCH_BXT_HEADER(binary)) || \
+                                      (IS_KABYLAKE(deviceID) && MATCH_KBL_HEADER(binary)) \
+                                      )
 
   static gbe_program genProgramNewFromBinary(uint32_t deviceID, const char *binary, size_t size) {
     using namespace gbe;
     std::string binary_content;
-    //the header length is 8 bytes: 1 byte is binary type, 4 bytes are bitcode header, 3  bytes are hw info.
-    char src_hw_info[4]="";
-    src_hw_info[0] = *(binary+5);
-    src_hw_info[1] = *(binary+6);
-    src_hw_info[2] = *(binary+7);
 
-    // check whether is gen binary ('/0GENC')
-    if(!IS_GEN_BINARY(binary)){
-        return NULL;
-    }
-    // check the whether the current device ID match the binary file's.
-    if(!DEVICE_MATCH(deviceID, src_hw_info)){
+    if(size < GEN_BINARY_HEADER_LENGTH)
+      return NULL;
+
+    //the header length is 8 bytes: 1 byte is binary type, 4 bytes are bitcode header, 3  bytes are hw info.
+    if(!MATCH_DEVICE(deviceID, (unsigned char*)binary)){
       return NULL;
     }
 
-    binary_content.assign(binary+BINARY_HEADER_LENGTH, size-BINARY_HEADER_LENGTH);
+    binary_content.assign(binary+GEN_BINARY_HEADER_LENGTH, size-GEN_BINARY_HEADER_LENGTH);
     GenProgram *program = GBE_NEW(GenProgram, deviceID);
     std::istringstream ifs(binary_content, std::ostringstream::binary);
 
@@ -302,47 +379,35 @@ namespace gbe {
 
       //add header to differetiate from llvm bitcode binary.
       //the header length is 8 bytes: 1 byte is binary type, 4 bytes are bitcode header, 3  bytes are hw info.
-      *binary = (char *)malloc(sizeof(char) * (sz+BINARY_HEADER_LENGTH) );
-      memset(*binary, 0, sizeof(char) * (sz+BINARY_HEADER_LENGTH) );
-      FILL_GEN_BINARY(*binary);
-      char src_hw_info[4]="";
+      *binary = (char *)malloc(sizeof(char) * (sz+GEN_BINARY_HEADER_LENGTH) );
+      if(*binary == NULL)
+        return 0;
+
+      memset(*binary, 0, sizeof(char) * (sz+GEN_BINARY_HEADER_LENGTH) );
       if(IS_IVYBRIDGE(prog->deviceID)){
-        src_hw_info[0]='I';
-        src_hw_info[1]='V';
-        src_hw_info[2]='B';
+        FILL_IVB_HEADER(*binary);
         if(IS_BAYTRAIL_T(prog->deviceID)){
-          src_hw_info[0]='B';
-          src_hw_info[1]='Y';
-          src_hw_info[2]='T';
+        FILL_BYT_HEADER(*binary);
         }
       }else if(IS_HASWELL(prog->deviceID)){
-        src_hw_info[0]='H';
-        src_hw_info[1]='S';
-        src_hw_info[2]='W';
+        FILL_HSW_HEADER(*binary);
       }else if(IS_BROADWELL(prog->deviceID)){
-        src_hw_info[0]='B';
-        src_hw_info[1]='D';
-        src_hw_info[2]='W';
+        FILL_BDW_HEADER(*binary);
       }else if(IS_CHERRYVIEW(prog->deviceID)){
-        src_hw_info[0]='C';
-        src_hw_info[1]='H';
-        src_hw_info[2]='V';
+        FILL_CHV_HEADER(*binary);
       }else if(IS_SKYLAKE(prog->deviceID)){
-        src_hw_info[0]='S';
-        src_hw_info[1]='K';
-        src_hw_info[2]='L';
+        FILL_SKL_HEADER(*binary);
       }else if(IS_BROXTON(prog->deviceID)){
-        src_hw_info[0]='B';
-        src_hw_info[1]='X';
-        src_hw_info[2]='T';
+        FILL_BXT_HEADER(*binary);
+      }else if(IS_KABYLAKE(prog->deviceID)){
+        FILL_KBL_HEADER(*binary);
       }else {
         free(*binary);
         *binary = NULL;
         return 0;
       }
-      FILL_DEVICE_ID(*binary, src_hw_info);
-      memcpy(*binary+BINARY_HEADER_LENGTH, oss.str().c_str(), sz*sizeof(char));
-      return sz+BINARY_HEADER_LENGTH;
+      memcpy(*binary+GEN_BINARY_HEADER_LENGTH, oss.str().c_str(), sz*sizeof(char));
+      return sz+GEN_BINARY_HEADER_LENGTH;
     }else{
 #ifdef GBE_COMPILER_AVAILABLE
       std::string str;
@@ -351,6 +416,9 @@ namespace gbe {
       std::string& bin_str = OS.str();
       int llsz = bin_str.size();
       *binary = (char *)malloc(sizeof(char) * (llsz+1) );
+      if(*binary == NULL)
+        return 0;
+
       *(*binary) = binary_type;
       memcpy(*binary+1, bin_str.c_str(), llsz);
       return llsz+1;
@@ -368,10 +436,16 @@ namespace gbe {
                                            size_t stringSize,
                                            char *err,
                                            size_t *errSize,
-                                           int optLevel)
+                                           int optLevel,
+                                           const char* options)
   {
     using namespace gbe;
-    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx, asm_file_name);
+    uint32_t fast_relaxed_math = 0;
+    if (options != NULL)
+      if (strstr(options, "-cl-fast-relaxed-math") != NULL)
+        fast_relaxed_math = 1;
+
+    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx, asm_file_name, fast_relaxed_math);
 #ifdef GBE_COMPILER_AVAILABLE
     std::string error;
     // Try to compile the program
@@ -390,9 +464,9 @@ namespace gbe {
   }
 
   static gbe_program genProgramNewGenProgram(uint32_t deviceID, const void* module,
-                                             const void* llvm_ctx)  {
+                                             const void* llvm_ctx,const char* asm_file_name)  {
     using namespace gbe;
-    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx);
+    GenProgram *program = GBE_NEW(GenProgram, deviceID, module, llvm_ctx, asm_file_name);
     // Everything run fine
     return (gbe_program) program;
   }
@@ -407,7 +481,11 @@ namespace gbe {
     using namespace gbe;
     char* errMsg;
     if(((GenProgram*)dst_program)->module == NULL){
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+      ((GenProgram*)dst_program)->module = llvm::CloneModule((llvm::Module*)((GenProgram*)src_program)->module).release();
+#else
       ((GenProgram*)dst_program)->module = llvm::CloneModule((llvm::Module*)((GenProgram*)src_program)->module);
+#endif
       errSize = 0;
     }else{
       llvm::Module* src = (llvm::Module*)((GenProgram*)src_program)->module;
@@ -440,17 +518,47 @@ namespace gbe {
 #ifdef GBE_COMPILER_AVAILABLE
     using namespace gbe;
     std::string error;
-
     int optLevel = 1;
+    std::string dumpASMFileName;
+    size_t start = 0, end = 0;
+    uint32_t fast_relaxed_math = 0;
 
     if(options) {
       char *p;
       p = strstr(const_cast<char *>(options), "-cl-opt-disable");
       if (p)
         optLevel = 0;
+
+      if (options != NULL)
+        if (strstr(options, "-cl-fast-relaxed-math") != NULL)
+          fast_relaxed_math = 1;
+
+    char *options_str = (char *)malloc(sizeof(char) * (strlen(options) + 1));
+      memcpy(options_str, options, strlen(options) + 1);
+      std::string optionStr(options_str);
+      while (end != std::string::npos) {
+        end = optionStr.find(' ', start);
+        std::string str = optionStr.substr(start, end - start);
+        start = end + 1;
+        if(str.size() == 0)
+          continue;
+
+        if(str.find("-dump-opt-asm=") != std::string::npos) {
+          dumpASMFileName = str.substr(str.find("=") + 1);
+          continue; // Don't push this str back; ignore it.
+        }
+      }
+      free(options_str);
     }
 
     GenProgram* p = (GenProgram*) program;
+    p->fast_relaxed_math = fast_relaxed_math;
+    if (!dumpASMFileName.empty()) {
+        p->asm_file_name = dumpASMFileName.c_str();
+        FILE *asmDumpStream = fopen(dumpASMFileName.c_str(), "w");
+        if (asmDumpStream)
+          fclose(asmDumpStream);
+      }
     // Try to compile the program
     acquireLLVMContextLock();
     llvm::Module* module = (llvm::Module*)p->module;

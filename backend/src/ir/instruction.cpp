@@ -316,60 +316,104 @@ namespace ir {
       Type srcType; //!< Type to convert from
     };
 
+    class ALIGNED_INSTRUCTION MemInstruction :
+      public BasePolicy
+    {
+    public:
+      MemInstruction(AddressMode   _AM,
+                     AddressSpace _AS,
+                     bool _dwAligned,
+                     Type _type,
+                     Register _offset)
+                   : AM(_AM),
+                     AS(_AS),
+                     dwAligned(_dwAligned),
+                     type(_type),
+                     SurfaceIndex(0),
+                     offset(_offset) {
+      }
+      AddressMode  getAddressMode()    const { return AM; }
+      AddressSpace getAddressSpace()   const { return AS; }
+      /*! MemInstruction may have one possible btiReg */
+      Register     getBtiReg()         const { assert(AM == AM_DynamicBti); return BtiReg; }
+      unsigned     getSurfaceIndex()   const { assert(AM != AM_DynamicBti); return SurfaceIndex; }
+      Register     getAddressRegister()const { return offset; }
+      unsigned     getAddressIndex()   const { return 0; }
+      Type         getValueType()      const { return type; }
+      INLINE bool  isAligned(void)     const { return !!dwAligned; }
+
+      void         setSurfaceIndex (unsigned id)  { SurfaceIndex = id; }
+      void         setBtiReg(Register reg)        { BtiReg = reg;      }
+    protected:
+      /*! including address reg + optional bti reg */
+      int          getBaseSrcNum()    const { return AM == AM_DynamicBti ? 2 : 1; }
+      bool         hasExtraBtiReg()   const { return AM == AM_DynamicBti; }
+      AddressMode       AM;
+      AddressSpace      AS;
+      uint8_t           dwAligned : 1;
+      Type              type;
+      union {
+        Register        BtiReg;
+        unsigned        SurfaceIndex;
+      };
+      Register          offset;
+    };
+
     class ALIGNED_INSTRUCTION AtomicInstruction :
-      public BasePolicy,
+      public MemInstruction,
       public NDstPolicy<AtomicInstruction, 1>
     {
     public:
       AtomicInstruction(AtomicOps atomicOp,
+                         Type type,
                          Register dst,
                          AddressSpace addrSpace,
-                         Register bti,
-                         bool fixedBTI,
-                         Tuple src)
+                         Register address,
+                         Tuple payload,
+                         AddressMode AM)
+        : MemInstruction(AM, addrSpace, true, type, address)
       {
         this->opcode = OP_ATOMIC;
         this->atomicOp = atomicOp;
         this->dst[0] = dst;
-        this->src = src;
-        this->addrSpace = addrSpace;
-        this->bti = bti;
-        this->fixedBTI = fixedBTI ? 1: 0;
-        srcNum = 2;
+        this->payload = payload;
+
+        int payloadNum = 1;
         if((atomicOp == ATOMIC_OP_INC) ||
           (atomicOp == ATOMIC_OP_DEC))
-          srcNum = 1;
+          payloadNum = 0;
         if(atomicOp == ATOMIC_OP_CMPXCHG)
-          srcNum = 3;
-        srcNum++;
+          payloadNum = 2;
+
+        srcNum = payloadNum + getBaseSrcNum();
       }
       INLINE Register getSrc(const Function &fn, uint32_t ID) const {
-        GBE_ASSERTM(ID < srcNum, "Out-of-bound source register for atomic");
-        if (ID == 0u)
-          return bti;
-        else
-          return fn.getRegister(src, ID -1);
+        GBE_ASSERTM((int)ID < (int)srcNum, "Out-of-bound source register for atomic");
+        if (ID == 0) {
+          return offset;
+        } else if (hasExtraBtiReg() && (int)ID == (int)srcNum-1) {
+          return getBtiReg();
+        } else {
+          return fn.getRegister(payload, ID - 1);
+        }
       }
       INLINE void setSrc(Function &fn, uint32_t ID, Register reg) {
-        GBE_ASSERTM(ID < srcNum, "Out-of-bound source register for atomic");
-        if (ID == 0u)
-          bti = reg;
-        else
-          fn.setRegister(src, ID - 1, reg);
+        GBE_ASSERTM((int)ID < (int)srcNum, "Out-of-bound source register for atomic");
+        if (ID == 0) {
+          offset = reg;
+        } else if (hasExtraBtiReg() && (int)ID == (int)srcNum - 1) {
+          setBtiReg(reg);
+        } else {
+          fn.setRegister(payload, ID - 1, reg);
+        }
       }
       INLINE uint32_t getSrcNum(void) const { return srcNum; }
 
-      INLINE AddressSpace getAddressSpace(void) const { return this->addrSpace; }
-      INLINE Register getBTI(void) const { return bti; }
-      INLINE bool isFixedBTI(void) const { return !!fixedBTI; }
       INLINE AtomicOps getAtomicOpcode(void) const { return this->atomicOp; }
       INLINE bool wellFormed(const Function &fn, std::string &whyNot) const;
       INLINE void out(std::ostream &out, const Function &fn) const;
       Register dst[1];
-      Tuple src;
-      AddressSpace addrSpace; //!< Address space
-      Register bti;               //!< bti
-      uint8_t fixedBTI:1;      //!< fixed bti or not
+      Tuple payload;
       uint8_t srcNum:3;     //!<Source Number
       AtomicOps atomicOp:6;     //!<Source Number
     };
@@ -428,119 +472,111 @@ namespace ir {
       Register dst[0];       //!< No destination
     };
 
-    class ALIGNED_INSTRUCTION LoadInstruction :
-      public BasePolicy,
-      public NSrcPolicy<LoadInstruction, 2>
-    {
-    public:
-      LoadInstruction(Type type,
-                      Tuple dstValues,
-                      Register offset,
-                      AddressSpace addrSpace,
-                      uint32_t valueNum,
-                      bool dwAligned,
-                      bool fixedBTI,
-                      Register bti)
-      {
-        GBE_ASSERT(valueNum < 128);
-        this->opcode = OP_LOAD;
-        this->type = type;
-        this->offset = offset;
-        this->values = dstValues;
-        this->addrSpace = addrSpace;
-        this->valueNum = valueNum;
-        this->dwAligned = dwAligned ? 1 : 0;
-        this->fixedBTI = fixedBTI ? 1 : 0;
-        this->bti = bti;
-      }
-      INLINE Register getDst(const Function &fn, uint32_t ID) const {
-        GBE_ASSERTM(ID < valueNum, "Out-of-bound source register");
-        return fn.getRegister(values, ID);
-      }
-      INLINE void setDst(Function &fn, uint32_t ID, Register reg) {
-        GBE_ASSERTM(ID < valueNum, "Out-of-bound source register");
-        fn.setRegister(values, ID, reg);
-      }
-      INLINE uint32_t getDstNum(void) const { return valueNum; }
-      INLINE Type getValueType(void) const { return type; }
-      INLINE uint32_t getValueNum(void) const { return valueNum; }
-      INLINE AddressSpace getAddressSpace(void) const { return addrSpace; }
-      INLINE Register getBTI(void) const { return bti; }
-      INLINE bool wellFormed(const Function &fn, std::string &why) const;
-      INLINE void out(std::ostream &out, const Function &fn) const;
-      INLINE bool isAligned(void) const { return !!dwAligned; }
-      INLINE bool isFixedBTI(void) const { return !!fixedBTI; }
-      Type type;              //!< Type to store
-      Register src[0];        //!< Address where to load from
-      Register bti;
-      Register offset;        //!< Alias to make it similar to store
-      Tuple values;           //!< Values to load
-      AddressSpace addrSpace; //!< Where to load
-      uint8_t fixedBTI:1;
-      uint8_t valueNum:7;     //!< Number of values to load
-      uint8_t dwAligned:1;    //!< DWORD aligned is what matters with GEN
-    };
 
-    class ALIGNED_INSTRUCTION StoreInstruction :
-      public BasePolicy, public NDstPolicy<StoreInstruction, 0>
+    class ALIGNED_INSTRUCTION LoadInstruction :
+      public MemInstruction
     {
-    public:
-      StoreInstruction(Type type,
-                       Tuple values,
-                       Register offset,
-                       AddressSpace addrSpace,
-                       uint32_t valueNum,
-                       bool dwAligned,
-                       bool fixedBTI,
-                       Register bti)
-      {
-        GBE_ASSERT(valueNum < 255);
-        this->opcode = OP_STORE;
-        this->type = type;
-        this->offset = offset;
-        this->values = values;
-        this->addrSpace = addrSpace;
-        this->valueNum = valueNum;
-        this->dwAligned = dwAligned ? 1 : 0;
-        this->fixedBTI = fixedBTI ? 1 : 0;
-        this->bti = bti;
-      }
-      INLINE Register getSrc(const Function &fn, uint32_t ID) const {
-        GBE_ASSERTM(ID < valueNum + 2u, "Out-of-bound source register for store");
-        if (ID == 0u)
-          return bti;
-        else if (ID == 1u)
-          return offset;
-        else
-          return fn.getRegister(values, ID - 2);
-      }
-      INLINE void setSrc(Function &fn, uint32_t ID, Register reg) {
-        GBE_ASSERTM(ID < valueNum + 2u, "Out-of-bound source register for store");
-        if (ID == 0u)
-          bti = reg;
-        else if (ID == 1u)
-          offset = reg;
-        else
-          fn.setRegister(values, ID - 2, reg);
-      }
-      INLINE uint32_t getSrcNum(void) const { return valueNum + 2u; }
-      INLINE uint32_t getValueNum(void) const { return valueNum; }
-      INLINE Type getValueType(void) const { return type; }
-      INLINE AddressSpace getAddressSpace(void) const { return addrSpace; }
-      INLINE Register getBTI(void) const { return bti; }
-      INLINE bool wellFormed(const Function &fn, std::string &why) const;
-      INLINE void out(std::ostream &out, const Function &fn) const;
-      INLINE bool isAligned(void) const { return !!dwAligned; }
-      INLINE bool isFixedBTI(void) const { return !!fixedBTI; }
-      Type type;              //!< Type to store
-      Register bti;
-      Register offset;        //!< First source is the offset where to store
-      Tuple values;           //!< Values to store
-      AddressSpace addrSpace; //!< Where to store
-      uint8_t fixedBTI:1;                //!< Which btis need access
-      uint8_t valueNum:7;     //!< Number of values to store
-      uint8_t dwAligned:1;    //!< DWORD aligned is what matters with GEN
-      Register dst[0];        //!< No destination
+      public:
+        LoadInstruction(Type type,
+                        Tuple dstValues,
+                        Register offset,
+                        AddressSpace AS,
+                        uint32_t _valueNum,
+                        bool dwAligned,
+                        AddressMode AM,
+                        bool ifBlock = false)
+                      : MemInstruction(AM, AS, dwAligned, type, offset),
+                        valueNum(_valueNum),
+                        values(dstValues),
+                        ifBlock(ifBlock)
+        {
+          this->opcode = OP_LOAD;
+        }
+
+        INLINE unsigned getSrcNum() const { return getBaseSrcNum(); }
+        INLINE Register getSrc(const Function &fn, unsigned id) const {
+          if (id == 0) return offset;
+          if (hasExtraBtiReg() && id == 1) return BtiReg;
+          assert(0 && "LoadInstruction::getSrc() out-of-range");
+          return ir::Register(0);
+        }
+        INLINE void     setSrc(Function &fn, unsigned id, Register reg) {
+          assert(id < getSrcNum());
+          if (id == 0) { offset = reg;   return; }
+          if (id == 1) { setBtiReg(reg); return; }
+        }
+        INLINE unsigned getDstNum() const { return valueNum; }
+        INLINE Register getDst(const Function &fn, unsigned id) const {
+          assert(id < valueNum);
+          return fn.getRegister(values, id);
+        }
+        INLINE void     setDst(Function &fn, unsigned id, Register reg) {
+          assert(id < getDstNum());
+          fn.setRegister(values, id, reg);
+        }
+        INLINE uint32_t getValueNum(void) const { return valueNum; }
+        INLINE Register getValue(const Function &fn, unsigned id) const {
+          assert(id < valueNum);
+          return fn.getRegister(values, id);
+        }
+        INLINE bool wellFormed(const Function &fn, std::string &why) const;
+        INLINE void out(std::ostream &out, const Function &fn) const;
+        INLINE bool isBlock() const { return ifBlock; }
+
+        uint8_t         valueNum;
+        Tuple             values;
+        bool             ifBlock;
+    };
+    class ALIGNED_INSTRUCTION StoreInstruction :
+      public MemInstruction,
+      public NDstPolicy<StoreInstruction, 0>
+    {
+      public:
+        StoreInstruction(Type type,
+                         Tuple values,
+                         Register offset,
+                         AddressSpace addrSpace,
+                         uint32_t valueNum,
+                         bool dwAligned,
+                         AddressMode AM,
+                         bool ifBlock = false)
+          : MemInstruction(AM, addrSpace, dwAligned, type, offset)
+        {
+          this->opcode = OP_STORE;
+          this->values = values;
+          this->valueNum = valueNum;
+          this->ifBlock = ifBlock;
+        }
+        INLINE unsigned getValueNum()      const { return valueNum; }
+        INLINE Register getValue(const Function &fn, unsigned id) const {
+          return fn.getRegister(values, id);
+        }
+        INLINE unsigned getSrcNum()        const { return getBaseSrcNum() + valueNum; }
+        INLINE Register getSrc(const Function &fn, unsigned id) const {
+          if (id == 0)  return offset;
+          if (id <= valueNum) return fn.getRegister(values, id-1);
+          if (hasExtraBtiReg() && (int)id == (int)valueNum+1) return getBtiReg();
+          assert(0 && "StoreInstruction::getSrc() out-of-range");
+          return Register(0);
+        }
+        INLINE void     setSrc(Function &fn, unsigned id, Register reg) {
+          if (id == 0)                   { offset = reg; return; }
+          if (id > 0 && id <= valueNum)  { fn.setRegister(values, id-1, reg); return; }
+          if (hasExtraBtiReg() &&
+              (int)id == (int)valueNum + 1)        {
+            setBtiReg(reg);
+            return;
+          }
+          assert(0 && "StoreInstruction::setSrc() index out-of-range");
+        }
+        INLINE bool wellFormed(const Function &fn, std::string &why) const;
+        INLINE void out(std::ostream &out, const Function &fn) const;
+        INLINE bool isBlock() const { return ifBlock; }
+
+        Register      dst[0];
+        uint8_t     valueNum;
+        Tuple         values;
+        bool         ifBlock;
     };
 
     class ALIGNED_INSTRUCTION SampleInstruction : // TODO
@@ -594,6 +630,58 @@ namespace ir {
       uint8_t srcNum;
       static const uint32_t dstNum = 4;
     };
+
+    class ALIGNED_INSTRUCTION VmeInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<VmeInstruction>,
+      public TupleDstPolicy<VmeInstruction>
+    {
+    public:
+      VmeInstruction(uint8_t imageIdx, Tuple dstTuple, Tuple srcTuple,
+                     uint32_t dstNum, uint32_t srcNum, int msg_type,
+                     int vme_search_path_lut, int lut_sub) {
+        this->opcode = OP_VME;
+        this->dst = dstTuple;
+        this->src = srcTuple;
+        this->dstNum = dstNum;
+        this->srcNum = srcNum;
+        this->imageIdx = imageIdx;
+        this->msg_type = msg_type;
+        this->vme_search_path_lut = vme_search_path_lut;
+        this->lut_sub = lut_sub;
+      }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const {
+        this->outOpcode(out);
+        out << " src_surface id " << (int)this->getImageIndex()
+            << " ref_surface id " << (int)this->getImageIndex() + 1;
+        for(uint32_t i = 0; i < dstNum; i++){
+          out<< " %" << this->getDst(fn, i);
+        }
+        for(uint32_t i = 0; i < srcNum; i++){
+          out<< " %" << this->getSrc(fn, i);
+        }
+        out
+            << " msg_type " << (int)this->getMsgType()
+            << " vme_search_path_lut " << (int)this->vme_search_path_lut
+            << " lut_sub " << (int)this->lut_sub;
+      }
+      Tuple src;
+      Tuple dst;
+
+      INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
+      INLINE uint8_t getMsgType(void) const { return this->msg_type; }
+
+      INLINE Type getSrcType(void) const { return TYPE_U32; }
+      INLINE Type getDstType(void) const { return TYPE_U32; }
+      uint8_t imageIdx;
+      uint8_t msg_type;
+      uint8_t vme_search_path_lut;
+      uint8_t lut_sub;
+      uint32_t srcNum;
+      uint32_t dstNum;
+    };
+
 
     class ALIGNED_INSTRUCTION TypedWriteInstruction : // TODO
       public BasePolicy,
@@ -675,6 +763,58 @@ namespace ir {
       Register src[1];                  //!< surface info register.
       Register dst[1];                  //!< dest register to put the information.
       static const uint32_t dstNum = 1;
+    };
+
+    class ALIGNED_INSTRUCTION CalcTimestampInstruction :
+      public BasePolicy,
+      public NSrcPolicy<CalcTimestampInstruction, 0>,
+      public NDstPolicy<CalcTimestampInstruction, 0>
+    {
+    public:
+      CalcTimestampInstruction(uint32_t pointNum, uint32_t timestampType) {
+        this->opcode = OP_CALC_TIMESTAMP;
+        this->timestampType = static_cast<uint8_t>(timestampType);
+        this->pointNum = static_cast<uint8_t>(pointNum);
+      }
+
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const {
+        this->outOpcode(out);
+        out << "TimeStamp pointer " << static_cast<uint32_t>(pointNum)
+          << " (Type " << static_cast<uint32_t>(timestampType) << ")";
+      }
+      uint32_t getPointNum(void) const { return this->pointNum; }
+      uint32_t getTimestamptType(void) const { return this->timestampType; }
+      uint8_t timestampType;       //!< Type of the time stamp, 16bits or 32bits, eg.
+      uint8_t pointNum;            //!< The insert point number.
+      Register dst[0], src[0];
+    };
+
+    class ALIGNED_INSTRUCTION StoreProfilingInstruction :
+      public BasePolicy,
+      public NSrcPolicy<StoreProfilingInstruction, 0>,
+      public NDstPolicy<StoreProfilingInstruction, 0>
+    {
+    public:
+      StoreProfilingInstruction(uint32_t bti, uint32_t profilingType) {
+        this->opcode = OP_STORE_PROFILING;
+        this->profilingType = static_cast<uint8_t>(profilingType);
+        this->bti = static_cast<uint8_t>(bti);
+      }
+
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const {
+        this->outOpcode(out);
+        out << " BTI " << static_cast<uint32_t>(this->bti)
+          << " (Type " << static_cast<uint32_t>(this->profilingType) << ")";
+      }
+
+      uint32_t getProfilingType(void) const { return this->profilingType; }
+      uint32_t getBTI(void) const { return this->bti; }
+      uint8_t profilingType;     //!< Type format of profiling, 16bits or 32bits, eg.
+      uint8_t bti;
+      Register src[0];
+      Register dst[0];
     };
 
     class ALIGNED_INSTRUCTION LoadImmInstruction :
@@ -816,6 +956,184 @@ namespace ir {
       INLINE void out(std::ostream &out, const Function &fn) const;
       LabelIndex labelIndex;  //!< Index of the label
       Register dst[0], src[0];
+    };
+
+    /*! Wait instructions */
+    class ALIGNED_INSTRUCTION WaitInstruction :
+      public BasePolicy,
+      public NSrcPolicy<WaitInstruction, 0>,
+      public NDstPolicy<WaitInstruction, 0>
+    {
+    public:
+      INLINE WaitInstruction() {
+        this->opcode = OP_WAIT;
+      }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const;
+      Register dst[0], src[0];
+    };
+
+    class ALIGNED_INSTRUCTION WorkGroupInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<WorkGroupInstruction>,
+      public NDstPolicy<WorkGroupInstruction, 1>
+    {
+      public:
+        INLINE WorkGroupInstruction(WorkGroupOps opcode, uint32_t slmAddr, Register dst,
+            Tuple srcTuple, uint8_t srcNum, Type type) {
+          this->opcode = OP_WORKGROUP;
+          this->workGroupOp = opcode;
+          this->type = type;
+          this->dst[0] = dst;
+          this->src = srcTuple;
+          this->srcNum = srcNum;
+          this->slmAddr = slmAddr;
+        }
+        INLINE Type getType(void) const { return this->type; }
+        INLINE bool wellFormed(const Function &fn, std::string &whyNot) const;
+        INLINE void out(std::ostream &out, const Function &fn) const;
+        INLINE WorkGroupOps getWorkGroupOpcode(void) const { return this->workGroupOp; }
+        uint32_t getSlmAddr(void) const { return this->slmAddr; }
+
+        WorkGroupOps workGroupOp:5;
+        uint32_t srcNum:3;          //!< Source Number
+        uint32_t slmAddr:24;        //!< Thread Map in SLM.
+        Type type;                  //!< Type of the instruction
+        Tuple src;
+        Register dst[1];
+    };
+
+    class ALIGNED_INSTRUCTION SubGroupInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<SubGroupInstruction>,
+      public NDstPolicy<SubGroupInstruction, 1>
+    {
+      public:
+        INLINE SubGroupInstruction(WorkGroupOps opcode, Register dst,
+            Tuple srcTuple, uint8_t srcNum, Type type) {
+          this->opcode = OP_SUBGROUP;
+          this->workGroupOp = opcode;
+          this->type = type;
+          this->dst[0] = dst;
+          this->src = srcTuple;
+          this->srcNum = srcNum;
+        }
+        INLINE Type getType(void) const { return this->type; }
+        INLINE bool wellFormed(const Function &fn, std::string &whyNot) const;
+        INLINE void out(std::ostream &out, const Function &fn) const;
+        INLINE WorkGroupOps getWorkGroupOpcode(void) const { return this->workGroupOp; }
+
+        WorkGroupOps workGroupOp:5;
+        uint32_t srcNum:3;          //!< Source Number
+        Type type;                  //!< Type of the instruction
+        Tuple src;
+        Register dst[1];
+    };
+
+    class ALIGNED_INSTRUCTION PrintfInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<PrintfInstruction>,
+      public NDstPolicy<PrintfInstruction, 1>
+    {
+      public:
+        INLINE PrintfInstruction(Register dst, Tuple srcTuple, Tuple typeTuple,
+                                 uint8_t srcNum, uint8_t bti, uint16_t num) {
+          this->opcode = OP_PRINTF;
+          this->dst[0] = dst;
+          this->src = srcTuple;
+          this->type = typeTuple;
+          this->srcNum = srcNum;
+          this->bti = bti;
+          this->num = num;
+        }
+        INLINE bool wellFormed(const Function &fn, std::string &whyNot) const;
+        INLINE void out(std::ostream &out, const Function &fn) const;
+
+        uint32_t getNum(void) const { return this->num; }
+        uint32_t getBti(void) const { return this->bti; }
+        Type getType(const Function& fn, uint32_t ID) const {
+          GBE_ASSERTM(ID < this->srcNum, "Out-of-bound types");
+          return (Type)fn.getType(type, ID);
+        }
+
+        uint32_t srcNum:8;    //!< Source Number
+        uint32_t bti:8;       //!< The BTI
+        uint32_t num:16;      //!< The printf statement number of one kernel.
+        Tuple src;
+        Tuple type;
+        Register dst[1];
+    };
+
+    class ALIGNED_INSTRUCTION MediaBlockReadInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<MediaBlockReadInstruction>,
+      public TupleDstPolicy<MediaBlockReadInstruction>
+    {
+    public:
+      INLINE MediaBlockReadInstruction(uint8_t imageIdx, Tuple dst, uint8_t vec_size, Tuple srcTuple, uint8_t srcNum) {
+        this->opcode = OP_MBREAD;
+        this->dst = dst;
+        this->dstNum = vec_size;
+        this->src = srcTuple;
+        this->srcNum = srcNum;
+        this->imageIdx = imageIdx;
+      }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const {
+        this->outOpcode(out);
+        out << (int)this->getVectorSize();
+        out << " {";
+        for (uint32_t i = 0; i < dstNum; ++i)
+          out << "%" << this->getDst(fn, i) << (i != (dstNum-1u) ? " " : "");
+        out << "}";
+        out << " 2D surface id " << (int)this->getImageIndex()
+            << " byte coord x %" << this->getSrc(fn, 0)
+            << " row coord y %" << this->getSrc(fn, 1);
+      }
+      INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
+      INLINE uint8_t getVectorSize(void) const { return this->dstNum; }
+
+      Tuple src;
+      Tuple dst;
+      uint8_t imageIdx;
+      uint8_t srcNum;
+      uint8_t dstNum;
+    };
+
+    class ALIGNED_INSTRUCTION MediaBlockWriteInstruction :
+      public BasePolicy,
+      public TupleSrcPolicy<MediaBlockWriteInstruction>,
+      public NDstPolicy<MediaBlockWriteInstruction, 0>
+    {
+    public:
+
+      INLINE MediaBlockWriteInstruction(uint8_t imageIdx, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size) {
+        this->opcode = OP_MBWRITE;
+        this->src = srcTuple;
+        this->srcNum = srcNum;
+        this->imageIdx = imageIdx;
+        this->vec_size = vec_size;
+      }
+      INLINE bool wellFormed(const Function &fn, std::string &why) const;
+      INLINE void out(std::ostream &out, const Function &fn) const {
+        this->outOpcode(out);
+        out << (int)this->getVectorSize()
+            << " 2D surface id " << (int)this->getImageIndex()
+            << " byte coord x %" << this->getSrc(fn, 0)
+            << " row coord y %" << this->getSrc(fn, 1);
+        out << " {";
+        for (uint32_t i = 0; i < vec_size; ++i)
+          out << "%" << this->getSrc(fn, i + 2) << (i != (vec_size-1u) ? " " : "");
+        out << "}";
+      }
+      INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
+      INLINE uint8_t getVectorSize(void) const { return this->vec_size; }
+
+      Tuple src;
+      Register dst[0];
+      uint8_t imageIdx;
+      uint8_t srcNum;
+      uint8_t vec_size;
     };
 
 #undef ALIGNED_INSTRUCTION
@@ -1037,8 +1355,6 @@ namespace ir {
         if (UNLIKELY(checkRegisterData(FAMILY_DWORD, getSrc(fn, srcID+1u), fn, whyNot) == false))
           return false;
 
-      if (UNLIKELY(checkRegisterData(FAMILY_DWORD, bti, fn, whyNot) == false))
-        return false;
       return true;
     }
 
@@ -1065,7 +1381,7 @@ namespace ir {
     template <typename T>
     INLINE bool wellFormedLoadStore(const T &insn, const Function &fn, std::string &whyNot)
     {
-      if (UNLIKELY(insn.offset >= fn.regNum())) {
+      if (UNLIKELY(insn.getAddressRegister() >= fn.regNum())) {
         whyNot = "Out-of-bound offset register index";
         return false;
       }
@@ -1073,10 +1389,11 @@ namespace ir {
         whyNot = "Out-of-bound tuple index";
         return false;
       }
+
       // Check all registers
-      const RegisterFamily family = getFamily(insn.type);
-      for (uint32_t valueID = 0; valueID < insn.valueNum; ++valueID) {
-        const Register regID = fn.getRegister(insn.values, valueID);
+      const RegisterFamily family = getFamily(insn.getValueType());
+      for (uint32_t valueID = 0; valueID < insn.getValueNum(); ++valueID) {
+        const Register regID = insn.getValue(fn, valueID);;
         if (UNLIKELY(checkRegisterData(family, regID, fn, whyNot) == false))
           return false;
       }
@@ -1111,9 +1428,13 @@ namespace ir {
     // TODO
     INLINE bool SampleInstruction::wellFormed(const Function &fn, std::string &why) const
     { return true; }
+    INLINE bool VmeInstruction::wellFormed(const Function &fn, std::string &why) const
+    { return true; }
     INLINE bool TypedWriteInstruction::wellFormed(const Function &fn, std::string &why) const
     { return true; }
     INLINE bool GetImageInfoInstruction::wellFormed(const Function &fn, std::string &why) const
+    { return true; }
+    INLINE bool WaitInstruction::wellFormed(const Function &fn, std::string &why) const
     { return true; }
 
 
@@ -1226,6 +1547,138 @@ namespace ir {
       return true;
     }
 
+    INLINE bool CalcTimestampInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      if (UNLIKELY(this->timestampType != 1)) {
+        whyNot = "Wrong time stamp type";
+        return false;
+      }
+      if (UNLIKELY(this->pointNum >= 20 && this->pointNum != 0xff && this->pointNum != 0xfe)) {
+        whyNot = "To much Insert pointer";
+        return false;
+      }
+      return true;
+    }
+
+    INLINE bool StoreProfilingInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      if (UNLIKELY(this->profilingType != 1)) {
+        whyNot = "Wrong profiling format";
+        return false;
+      }
+      return true;
+    }
+
+    INLINE bool WorkGroupInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      const RegisterFamily family = getFamily(this->type);
+
+      if (UNLIKELY(checkSpecialRegForWrite(dst[0], fn, whyNot) == false))
+        return false;
+      if (UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
+        return false;
+
+      switch (this->workGroupOp) {
+        case WORKGROUP_OP_ANY:
+        case WORKGROUP_OP_ALL:
+        case WORKGROUP_OP_REDUCE_ADD:
+        case WORKGROUP_OP_REDUCE_MIN:
+        case WORKGROUP_OP_REDUCE_MAX:
+        case WORKGROUP_OP_INCLUSIVE_ADD:
+        case WORKGROUP_OP_INCLUSIVE_MIN:
+        case WORKGROUP_OP_INCLUSIVE_MAX:
+        case WORKGROUP_OP_EXCLUSIVE_ADD:
+        case WORKGROUP_OP_EXCLUSIVE_MIN:
+        case WORKGROUP_OP_EXCLUSIVE_MAX:
+          if (this->srcNum != 3) {
+            whyNot = "Wrong number of source.";
+            return false;
+          }
+          break;
+        case WORKGROUP_OP_BROADCAST:
+          if (this->srcNum <= 1) {
+            whyNot = "Wrong number of source.";
+            return false;
+          } else {
+            const RegisterFamily fam = fn.getPointerFamily();
+            for (uint32_t srcID = 1; srcID < this->srcNum; ++srcID) {
+              const Register regID = fn.getRegister(src, srcID);
+              if (UNLIKELY(checkRegisterData(fam, regID, fn, whyNot) == false))
+                return false;
+            }
+          }
+          break;
+        default:
+          whyNot = "No such work group function.";
+          return false;
+      }
+
+      return true;
+    }
+
+    INLINE bool SubGroupInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      const RegisterFamily family = getFamily(this->type);
+
+      if (UNLIKELY(checkSpecialRegForWrite(dst[0], fn, whyNot) == false))
+        return false;
+      if (UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
+        return false;
+
+      switch (this->workGroupOp) {
+        case WORKGROUP_OP_ANY:
+        case WORKGROUP_OP_ALL:
+        case WORKGROUP_OP_REDUCE_ADD:
+        case WORKGROUP_OP_REDUCE_MIN:
+        case WORKGROUP_OP_REDUCE_MAX:
+        case WORKGROUP_OP_INCLUSIVE_ADD:
+        case WORKGROUP_OP_INCLUSIVE_MIN:
+        case WORKGROUP_OP_INCLUSIVE_MAX:
+        case WORKGROUP_OP_EXCLUSIVE_ADD:
+        case WORKGROUP_OP_EXCLUSIVE_MIN:
+        case WORKGROUP_OP_EXCLUSIVE_MAX:
+          if (this->srcNum != 1) {
+            whyNot = "Wrong number of source.";
+            return false;
+          }
+          break;
+        case WORKGROUP_OP_BROADCAST:
+          if (this->srcNum != 2) {
+            whyNot = "Wrong number of source.";
+            return false;
+          } else {
+            const RegisterFamily fam = fn.getPointerFamily();
+            for (uint32_t srcID = 1; srcID < this->srcNum; ++srcID) {
+              const Register regID = fn.getRegister(src, srcID);
+              if (UNLIKELY(checkRegisterData(fam, regID, fn, whyNot) == false))
+                return false;
+            }
+          }
+          break;
+        default:
+          whyNot = "No such sub group function.";
+          return false;
+      }
+
+      return true;
+    }
+
+    INLINE bool PrintfInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      return true;
+    }
+
+    INLINE bool MediaBlockReadInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      if (this->srcNum != 2) {
+        whyNot = "Wrong number of source.";
+        return false;
+      }
+      return true;
+    }
+
+    INLINE bool MediaBlockWriteInstruction::wellFormed(const Function &fn, std::string &whyNot) const {
+      if (this->srcNum != 2 + this->vec_size) {
+        whyNot = "Wrong number of source.";
+        return false;
+      }
+      return true;
+    }
+
 #undef CHECK_TYPE
 
     /////////////////////////////////////////////////////////////////////////
@@ -1260,12 +1713,18 @@ namespace ir {
 
     INLINE void AtomicInstruction::out(std::ostream &out, const Function &fn) const {
       this->outOpcode(out);
-      out << "." << addrSpace;
+      out << "." << AS;
       out << " %" << this->getDst(fn, 0);
-      out << " {" << "%" << this->getSrc(fn, 1) << "}";
-      for (uint32_t i = 2; i < srcNum; ++i)
+      out << " {" << "%" << this->getSrc(fn, 0) << "}";
+      for (uint32_t i = 1; i < srcNum; ++i)
         out << " %" << this->getSrc(fn, i);
-      out <<  (fixedBTI ? " bti" : " bti(mixed)") << " %" << this->getBTI();
+      AddressMode am = this->getAddressMode();
+      out << " bti:";
+      if ( am == AM_DynamicBti) {
+        out << " %" << this->getBtiReg();
+      } else {
+        out << this->getSurfaceIndex();
+      }
     }
 
 
@@ -1293,24 +1752,40 @@ namespace ir {
     }
 
     INLINE void LoadInstruction::out(std::ostream &out, const Function &fn) const {
+      if(ifBlock)
+        out<< "BLOCK";
       this->outOpcode(out);
-      out << "." << type << "." << addrSpace << (dwAligned ? "." : ".un") << "aligned";
+      out << "." << type << "." << AS << (dwAligned ? "." : ".un") << "aligned";
       out << " {";
       for (uint32_t i = 0; i < valueNum; ++i)
         out << "%" << this->getDst(fn, i) << (i != (valueNum-1u) ? " " : "");
       out << "}";
-      out << " %" << this->getSrc(fn, 1);
-      out << (fixedBTI ? " bti" : " bti(mixed)") << " %" << this->getBTI();
+      out << " %" << this->getSrc(fn, 0);
+      AddressMode am = this->getAddressMode();
+      out << " bti:";
+      if ( am == AM_DynamicBti) {
+        out << " %" << this->getBtiReg();
+      } else {
+        out << this->getSurfaceIndex();
+      }
     }
 
     INLINE void StoreInstruction::out(std::ostream &out, const Function &fn) const {
+      if(ifBlock)
+        out<< "BLOCK";
       this->outOpcode(out);
-      out << "." << type << "." << addrSpace << (dwAligned ? "." : ".un") << "aligned";
-      out << " %" << this->getSrc(fn, 1) << " {";
+      out << "." << type << "." << AS << (dwAligned ? "." : ".un") << "aligned";
+      out << " %" << this->getSrc(fn, 0) << " {";
       for (uint32_t i = 0; i < valueNum; ++i)
-        out << "%" << this->getSrc(fn, i+2) << (i != (valueNum-1u) ? " " : "");
+        out << "%" << this->getSrc(fn, i+1) << (i != (valueNum-1u) ? " " : "");
       out << "}";
-      out <<  (fixedBTI ? " bti" : " bti(mixed)") << " %" << this->getBTI();
+      AddressMode am = this->getAddressMode();
+      out << " bti:";
+      if ( am == AM_DynamicBti) {
+        out << " %" << this->getBtiReg();
+      } else {
+        out << this->getSurfaceIndex();
+      }
     }
 
     INLINE void ReadARFInstruction::out(std::ostream &out, const Function &fn) const {
@@ -1361,6 +1836,147 @@ namespace ir {
           out << "." << syncStr[field];
     }
 
+    INLINE void WaitInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+    }
+
+    INLINE void WorkGroupInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+
+      switch (this->workGroupOp) {
+        case WORKGROUP_OP_ANY:
+          out << "_" << "ANY";
+          break;
+        case WORKGROUP_OP_ALL:
+          out << "_" << "ALL";
+          break;
+        case WORKGROUP_OP_REDUCE_ADD:
+          out << "_" << "REDUCE_ADD";
+          break;
+        case WORKGROUP_OP_REDUCE_MIN:
+          out << "_" << "REDUCE_MIN";
+          break;
+        case WORKGROUP_OP_REDUCE_MAX:
+          out << "_" << "REDUCE_MAX";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_ADD:
+          out << "_" << "INCLUSIVE_ADD";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_MIN:
+          out << "_" << "INCLUSIVE_MIN";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_MAX:
+          out << "_" << "INCLUSIVE_MAX";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_ADD:
+          out << "_" << "EXCLUSIVE_ADD";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_MIN:
+          out << "_" << "EXCLUSIVE_MIN";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_MAX:
+          out << "_" << "EXCLUSIVE_MAX";
+          break;
+        case WORKGROUP_OP_BROADCAST:
+          out << "_" << "BROADCAST";
+          break;
+        default:
+          GBE_ASSERT(0);
+      }
+
+      out << " %" << this->getDst(fn, 0);
+      out << " %" << this->getSrc(fn, 0);
+
+      if (this->workGroupOp == WORKGROUP_OP_BROADCAST) {
+        do {
+          int localN = srcNum - 1;
+          GBE_ASSERT(localN);
+          out << " Local X:";
+          out << " %" << this->getSrc(fn, 1);
+          localN--;
+          if (!localN)
+            break;
+
+          out << " Local Y:";
+          out << " %" << this->getSrc(fn, 2);
+          localN--;
+          if (!localN)
+            break;
+
+          out << " Local Z:";
+          out << " %" << this->getSrc(fn, 3);
+          localN--;
+          GBE_ASSERT(!localN);
+        } while(0);
+      }
+
+      out << "TheadID Map at SLM: " << this->slmAddr;
+    }
+
+    INLINE void SubGroupInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+
+      switch (this->workGroupOp) {
+        case WORKGROUP_OP_ANY:
+          out << "_" << "ANY";
+          break;
+        case WORKGROUP_OP_ALL:
+          out << "_" << "ALL";
+          break;
+        case WORKGROUP_OP_REDUCE_ADD:
+          out << "_" << "REDUCE_ADD";
+          break;
+        case WORKGROUP_OP_REDUCE_MIN:
+          out << "_" << "REDUCE_MIN";
+          break;
+        case WORKGROUP_OP_REDUCE_MAX:
+          out << "_" << "REDUCE_MAX";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_ADD:
+          out << "_" << "INCLUSIVE_ADD";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_MIN:
+          out << "_" << "INCLUSIVE_MIN";
+          break;
+        case WORKGROUP_OP_INCLUSIVE_MAX:
+          out << "_" << "INCLUSIVE_MAX";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_ADD:
+          out << "_" << "EXCLUSIVE_ADD";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_MIN:
+          out << "_" << "EXCLUSIVE_MIN";
+          break;
+        case WORKGROUP_OP_EXCLUSIVE_MAX:
+          out << "_" << "EXCLUSIVE_MAX";
+          break;
+        case WORKGROUP_OP_BROADCAST:
+          out << "_" << "BROADCAST";
+          break;
+        default:
+          GBE_ASSERT(0);
+      }
+
+      out << " %" << this->getDst(fn, 0);
+      out << " %" << this->getSrc(fn, 0);
+
+      if (this->workGroupOp == WORKGROUP_OP_BROADCAST) {
+        do {
+          int localN = srcNum - 1;
+          GBE_ASSERT(localN);
+          out << " Local ID:";
+          out << " %" << this->getSrc(fn, 1);
+          localN--;
+          if (!localN)
+            break;
+        } while(0);
+      }
+
+    }
+
+    INLINE void PrintfInstruction::out(std::ostream &out, const Function &fn) const {
+      this->outOpcode(out);
+    }
 
   } /* namespace internal */
 
@@ -1466,6 +2082,14 @@ START_INTROSPECTION(GetImageInfoInstruction)
 #include "ir/instruction.hxx"
 END_INTROSPECTION(GetImageInfoInstruction)
 
+START_INTROSPECTION(CalcTimestampInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(CalcTimestampInstruction)
+
+START_INTROSPECTION(StoreProfilingInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(StoreProfilingInstruction)
+
 START_INTROSPECTION(LoadImmInstruction)
 #include "ir/instruction.hxx"
 END_INTROSPECTION(LoadImmInstruction)
@@ -1501,6 +2125,34 @@ END_INTROSPECTION(IndirectMovInstruction)
 START_INTROSPECTION(LabelInstruction)
 #include "ir/instruction.hxx"
 END_INTROSPECTION(LabelInstruction)
+
+START_INTROSPECTION(WaitInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(WaitInstruction)
+
+START_INTROSPECTION(VmeInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(VmeInstruction)
+
+START_INTROSPECTION(WorkGroupInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(WorkGroupInstruction)
+
+START_INTROSPECTION(SubGroupInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(SubGroupInstruction)
+
+START_INTROSPECTION(PrintfInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(PrintfInstruction)
+
+START_INTROSPECTION(MediaBlockReadInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(MediaBlockReadInstruction)
+
+START_INTROSPECTION(MediaBlockWriteInstruction)
+#include "ir/instruction.hxx"
+END_INTROSPECTION(MediaBlockWriteInstruction)
 
 #undef END_INTROSPECTION
 #undef START_INTROSPECTION
@@ -1645,7 +2297,12 @@ END_FUNCTION(Instruction, Register)
     return opcode == OP_STORE ||
            opcode == OP_TYPED_WRITE ||
            opcode == OP_SYNC ||
-           opcode == OP_ATOMIC;
+           opcode == OP_ATOMIC ||
+           opcode == OP_CALC_TIMESTAMP ||
+           opcode == OP_STORE_PROFILING ||
+           opcode == OP_WAIT ||
+           opcode == OP_PRINTF ||
+           opcode == OP_MBWRITE;
   }
 
 #define DECL_MEM_FN(CLASS, RET, PROTOTYPE, CALL) \
@@ -1664,19 +2321,19 @@ DECL_MEM_FN(BitCastInstruction, Type, getSrcType(void), getSrcType())
 DECL_MEM_FN(BitCastInstruction, Type, getDstType(void), getDstType())
 DECL_MEM_FN(ConvertInstruction, Type, getSrcType(void), getSrcType())
 DECL_MEM_FN(ConvertInstruction, Type, getDstType(void), getDstType())
-DECL_MEM_FN(AtomicInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
+DECL_MEM_FN(MemInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
+DECL_MEM_FN(MemInstruction, AddressMode, getAddressMode(void), getAddressMode())
+DECL_MEM_FN(MemInstruction, Register, getAddressRegister(void), getAddressRegister())
+DECL_MEM_FN(MemInstruction, Register, getBtiReg(void), getBtiReg())
+DECL_MEM_FN(MemInstruction, unsigned, getSurfaceIndex(void), getSurfaceIndex())
+DECL_MEM_FN(MemInstruction, Type,     getValueType(void), getValueType())
+DECL_MEM_FN(MemInstruction, bool,     isAligned(void), isAligned())
+DECL_MEM_FN(MemInstruction, unsigned, getAddressIndex(void), getAddressIndex())
 DECL_MEM_FN(AtomicInstruction, AtomicOps, getAtomicOpcode(void), getAtomicOpcode())
-DECL_MEM_FN(AtomicInstruction, bool, isFixedBTI(void), isFixedBTI())
-DECL_MEM_FN(StoreInstruction, Type, getValueType(void), getValueType())
 DECL_MEM_FN(StoreInstruction, uint32_t, getValueNum(void), getValueNum())
-DECL_MEM_FN(StoreInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
-DECL_MEM_FN(StoreInstruction, bool, isAligned(void), isAligned())
-DECL_MEM_FN(StoreInstruction, bool, isFixedBTI(void), isFixedBTI())
-DECL_MEM_FN(LoadInstruction, Type, getValueType(void), getValueType())
+DECL_MEM_FN(StoreInstruction, bool, isBlock(void), isBlock())
 DECL_MEM_FN(LoadInstruction, uint32_t, getValueNum(void), getValueNum())
-DECL_MEM_FN(LoadInstruction, AddressSpace, getAddressSpace(void), getAddressSpace())
-DECL_MEM_FN(LoadInstruction, bool, isAligned(void), isAligned())
-DECL_MEM_FN(LoadInstruction, bool, isFixedBTI(void), isFixedBTI())
+DECL_MEM_FN(LoadInstruction, bool, isBlock(void), isBlock())
 DECL_MEM_FN(LoadImmInstruction, Type, getType(void), getType())
 DECL_MEM_FN(LabelInstruction, LabelIndex, getLabelIndex(void), getLabelIndex())
 DECL_MEM_FN(BranchInstruction, bool, isPredicated(void), isPredicated())
@@ -1694,11 +2351,40 @@ DECL_MEM_FN(SampleInstruction, Type, getDstType(void), getDstType())
 DECL_MEM_FN(SampleInstruction, uint8_t, getSamplerIndex(void), getSamplerIndex())
 DECL_MEM_FN(SampleInstruction, uint8_t, getSamplerOffset(void), getSamplerOffset())
 DECL_MEM_FN(SampleInstruction, uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(VmeInstruction, Type, getSrcType(void), getSrcType())
+DECL_MEM_FN(VmeInstruction, Type, getDstType(void), getDstType())
+DECL_MEM_FN(VmeInstruction, uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(VmeInstruction, uint8_t, getMsgType(void), getMsgType())
 DECL_MEM_FN(TypedWriteInstruction, Type, getSrcType(void), getSrcType())
 DECL_MEM_FN(TypedWriteInstruction, Type, getCoordType(void), getCoordType())
 DECL_MEM_FN(TypedWriteInstruction, uint8_t, getImageIndex(void), getImageIndex())
 DECL_MEM_FN(GetImageInfoInstruction, uint32_t, getInfoType(void), getInfoType())
 DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(CalcTimestampInstruction, uint32_t, getPointNum(void), getPointNum())
+DECL_MEM_FN(CalcTimestampInstruction, uint32_t, getTimestamptType(void), getTimestamptType())
+DECL_MEM_FN(StoreProfilingInstruction, uint32_t, getProfilingType(void), getProfilingType())
+DECL_MEM_FN(StoreProfilingInstruction, uint32_t, getBTI(void), getBTI())
+DECL_MEM_FN(WorkGroupInstruction, Type, getType(void), getType())
+DECL_MEM_FN(WorkGroupInstruction, WorkGroupOps, getWorkGroupOpcode(void), getWorkGroupOpcode())
+DECL_MEM_FN(WorkGroupInstruction, uint32_t, getSlmAddr(void), getSlmAddr())
+DECL_MEM_FN(SubGroupInstruction, Type, getType(void), getType())
+DECL_MEM_FN(SubGroupInstruction, WorkGroupOps, getWorkGroupOpcode(void), getWorkGroupOpcode())
+DECL_MEM_FN(PrintfInstruction, uint32_t, getNum(void), getNum())
+DECL_MEM_FN(PrintfInstruction, uint32_t, getBti(void), getBti())
+DECL_MEM_FN(PrintfInstruction, Type, getType(const Function& fn, uint32_t ID), getType(fn, ID))
+DECL_MEM_FN(MediaBlockReadInstruction, uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(MediaBlockReadInstruction, uint8_t, getVectorSize(void), getVectorSize())
+DECL_MEM_FN(MediaBlockWriteInstruction, uint8_t, getImageIndex(void), getImageIndex())
+DECL_MEM_FN(MediaBlockWriteInstruction, uint8_t, getVectorSize(void), getVectorSize())
+
+#undef DECL_MEM_FN
+
+#define DECL_MEM_FN(CLASS, RET, PROTOTYPE, CALL) \
+  RET CLASS::PROTOTYPE { \
+    return reinterpret_cast<internal::CLASS*>(this)->CALL; \
+  }
+DECL_MEM_FN(MemInstruction, void,     setSurfaceIndex(unsigned id), setSurfaceIndex(id))
+DECL_MEM_FN(MemInstruction, void,     setBtiReg(Register reg), setBtiReg(reg))
 
 #undef DECL_MEM_FN
 
@@ -1800,6 +2486,10 @@ DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex
   Instruction MAD(Type type, Register dst, Tuple src) {
     return internal::TernaryInstruction(OP_MAD, type, dst, src).convert();
   }
+
+  Instruction LRP(Type type, Register dst, Tuple src) {
+    return internal::TernaryInstruction(OP_LRP, type, dst, src).convert();
+  }
   // All compare functions
 #define DECL_EMIT_FUNCTION(NAME) \
   Instruction NAME(Type type, Register dst,  Register src0, Register src1) { \
@@ -1843,8 +2533,16 @@ DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex
   }
 
   // For all unary functions with given opcode
-  Instruction ATOMIC(AtomicOps atomicOp, Register dst, AddressSpace space, Register bti, bool fixedBTI, Tuple src) {
-    return internal::AtomicInstruction(atomicOp, dst, space, bti, fixedBTI, src).convert();
+  Instruction ATOMIC(AtomicOps atomicOp, Type type, Register dst, AddressSpace space, Register address, Tuple payload, AddressMode AM, Register bti) {
+    internal::AtomicInstruction insn = internal::AtomicInstruction(atomicOp, type, dst, space, address, payload, AM);
+    insn.setBtiReg(bti);
+    return insn.convert();
+  }
+
+  Instruction ATOMIC(AtomicOps atomicOp, Type type, Register dst, AddressSpace space, Register address, Tuple payload, AddressMode AM, unsigned SurfaceIndex) {
+    internal::AtomicInstruction insn = internal::AtomicInstruction(atomicOp, type, dst, space, address, payload, AM);
+    insn.setSurfaceIndex(SurfaceIndex);
+    return insn.convert();
   }
 
   // BRA
@@ -1892,10 +2590,26 @@ DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex
                    AddressSpace space, \
                    uint32_t valueNum, \
                    bool dwAligned, \
-                   bool fixedBTI, \
+                   AddressMode AM, \
+                   unsigned SurfaceIndex, \
+                   bool isBlock) \
+  { \
+    internal::CLASS insn = internal::CLASS(type,tuple,offset,space,valueNum,dwAligned,AM, isBlock); \
+    insn.setSurfaceIndex(SurfaceIndex);\
+    return insn.convert(); \
+  } \
+  Instruction NAME(Type type, \
+                   Tuple tuple, \
+                   Register offset, \
+                   AddressSpace space, \
+                   uint32_t valueNum, \
+                   bool dwAligned, \
+                   AddressMode AM, \
                    Register bti) \
   { \
-    return internal::CLASS(type,tuple,offset,space,valueNum,dwAligned,fixedBTI,bti).convert(); \
+    internal::CLASS insn = internal::CLASS(type,tuple,offset,space,valueNum,dwAligned,AM); \
+    insn.setBtiReg(bti); \
+    return insn.convert(); \
   }
 
   DECL_EMIT_FUNCTION(LOAD, LoadInstruction)
@@ -1932,6 +2646,10 @@ DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex
     return internal::SampleInstruction(imageIndex, dst, src, srcNum, dstIsFloat, srcIsFloat, sampler, samplerOffset).convert();
   }
 
+  Instruction VME(uint8_t imageIndex, Tuple dst, Tuple src, uint32_t dstNum, uint32_t srcNum, int msg_type, int vme_search_path_lut, int lut_sub) {
+    return internal::VmeInstruction(imageIndex, dst, src, dstNum, srcNum, msg_type, vme_search_path_lut, lut_sub).convert();
+  }
+
   Instruction TYPED_WRITE(uint8_t imageIndex, Tuple src, uint8_t srcNum, Type srcType, Type coordType) {
     return internal::TypedWriteInstruction(imageIndex, src, srcNum, srcType, coordType).convert();
   }
@@ -1939,6 +2657,40 @@ DECL_MEM_FN(GetImageInfoInstruction, uint8_t, getImageIndex(void), getImageIndex
   Instruction GET_IMAGE_INFO(int infoType, Register dst, uint8_t imageIndex, Register infoReg) {
     return internal::GetImageInfoInstruction(infoType, dst, imageIndex, infoReg).convert();
   }
+
+  Instruction CALC_TIMESTAMP(uint32_t pointNum, uint32_t tsType) {
+    return internal::CalcTimestampInstruction(pointNum, tsType).convert();
+  }
+
+  Instruction STORE_PROFILING(uint32_t bti, uint32_t profilingType) {
+    return internal::StoreProfilingInstruction(bti, profilingType).convert();
+  }
+
+  // WAIT
+  Instruction WAIT(void) {
+    return internal::WaitInstruction().convert();
+  }
+
+  Instruction WORKGROUP(WorkGroupOps opcode, uint32_t slmAddr, Register dst, Tuple srcTuple, uint8_t srcNum, Type type) {
+    return internal::WorkGroupInstruction(opcode, slmAddr, dst, srcTuple, srcNum, type).convert();
+  }
+
+  Instruction SUBGROUP(WorkGroupOps opcode, Register dst, Tuple srcTuple, uint8_t srcNum, Type type) {
+    return internal::SubGroupInstruction(opcode, dst, srcTuple, srcNum, type).convert();
+  }
+
+  Instruction PRINTF(Register dst, Tuple srcTuple, Tuple typeTuple, uint8_t srcNum, uint8_t bti, uint16_t num) {
+    return internal::PrintfInstruction(dst, srcTuple, typeTuple, srcNum, bti, num).convert();
+  }
+
+  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum) {
+    return internal::MediaBlockReadInstruction(imageIndex, dst, vec_size, coord, srcNum).convert();
+  }
+
+  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size) {
+    return internal::MediaBlockWriteInstruction(imageIndex, srcTuple, srcNum, vec_size).convert();
+  }
+
 
   std::ostream &operator<< (std::ostream &out, const Instruction &insn) {
     const Function &fn = insn.getFunction();

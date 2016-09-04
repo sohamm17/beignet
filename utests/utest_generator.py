@@ -1,11 +1,11 @@
 #!/usr/bin/python
 from __future__ import print_function
-import os,sys,re
+import os,sys,re,string
 
 FLT_MAX_POSI='0x1.fffffep127f'
 FLT_MIN_NEGA='-0x1.fffffep127f'
-FLT_MIN_POSI='0x1.0p-126f'
-FLT_MAX_NEGA='-0x1.0p-126f'
+FLT_MIN_POSI='ldexpf(1.0, -126)'
+FLT_MAX_NEGA='ldexpf(-1.0, -126)'
 
 paraTypeList={'float':'%e','int':'%d','double':'%lf','uint':'%d','string':'%s'}
 
@@ -112,10 +112,10 @@ def udebug(ulpSize,returnType,function):
     ULPSIZE_FACTOR = select_ulpsize(ULPSIZE_FAST_MATH,ULPSIZE_NO_FAST_MATH);
     bool fast_math = ULPSIZE_FACTOR == ULPSIZE_FAST_MATH;
 
-    if (isinf(cpu_data[index])){
+    if (std::isinf(cpu_data[index])){
       INFORNAN="INF";
     }
-    else if (isnan(cpu_data[index])){
+    else if (std::isnan(cpu_data[index])){
       INFORNAN="NAN";
     }
     else{
@@ -124,14 +124,14 @@ def udebug(ulpSize,returnType,function):
     }
 
 #if udebug 
-    if (isinf(cpu_data[index])){ 
-      if (isinf(gpu_data[index]))
+    if (std::isinf(cpu_data[index])){
+      if (std::isinf(gpu_data[index]))
         printf("%s expect:%s\\n", log, INFORNAN);
       else
         printf_c("%s expect:%s\\n", log, INFORNAN);
       }
-    else if (isnan(cpu_data[index])){
-      if (isnan(gpu_data[index]))
+    else if (std::isnan(cpu_data[index])){
+      if (std::isnan(gpu_data[index]))
         printf("%s expect:%s\\n", log, INFORNAN);
       else
         printf_c("%s expect:%s\\n", log, INFORNAN);
@@ -142,13 +142,13 @@ def udebug(ulpSize,returnType,function):
     else
       printf_c("%s expect:%s\\n", log, ULPSIZE);
 #else
-    if (isinf(cpu_data[index])){
+    if (std::isinf(cpu_data[index])){
       sprintf(log, "%s expect:%s\\n", log, INFORNAN);
-      OCL_ASSERTM(isinf(gpu_data[index]) || fast_math,log);
+      OCL_ASSERTM(std::isinf(gpu_data[index]) || fast_math,log);
     }
-    else if (isnan(cpu_data[index])){
+    else if (std::isnan(cpu_data[index])){
       sprintf(log, "%s expect:%s\\n", log, INFORNAN);
-      OCL_ASSERTM(isnan(gpu_data[index]) || fast_math,log);
+      OCL_ASSERTM(std::isnan(gpu_data[index]) || fast_math,log);
     }
     else{
       sprintf(log, "%s expect:%s\\n", log, ULPSIZE);
@@ -247,7 +247,7 @@ which can print more values and information to assist debuging the issue.
   def argvector(self,paraN,index):
     vector=re.findall(r"[0-9]+",self.inputtype[paraN][index])
     if vector:
-      vector=vector[0]
+      vector=string.atoi(vector[0])
     else:
       vector=1
     return vector
@@ -272,10 +272,17 @@ which can print more values and information to assist debuging the issue.
 #####Cpu values analyse
   def GenInputValues(self,index):
     #namesuffix=self.inputtype[0][index]
+    vlen = self.argvector(self.inputtype.__len__()-1,index)
     for i in range(0,self.values.__len__()):
-      self.cpplines += [ "const %s input_data%d[] = {%s};" %(self.argtype(i,index),i+1,str(self.values[i]).strip('[]').replace('\'','')) ]
+      vals = []
+      for j in range(0, vlen):
+        if (len(vals) >= 128):	#avoid too many data
+          vals = vals[0:128]
+          break
+        vals += self.values[i]
+      self.cpplines += [ "%s input_data%d[] = {%s};" %(self.argtype(i,index),i+1,str(vals).strip('[]').replace('\'','')) ]
     self.cpplines += [ "const int count_input = sizeof(input_data1) / sizeof(input_data1[0]);" ]
-    self.cpplines += [ "const int vector = %s;\n"%(self.argvector(self.inputtype.__len__()-1,index)) ]
+    self.cpplines += [ "int vector = %s;\n"%(vlen) ]
 
 #####Cpu Function
   def GenCpuCompilerMath(self,index):
@@ -340,7 +347,7 @@ static void %s_%s(void)
   OCL_CREATE_KERNEL(\"%s_%s\");
   OCL_CREATE_BUFFER(buf[0], CL_MEM_READ_WRITE, count_input * sizeof(%s), NULL); 
 
-  globals[0] = count_input;
+  globals[0] = count_input / vector;
   locals[0] = 1;
  '''%(self.fileName,namesuffix,\
      self.retType(index),\
@@ -361,10 +368,14 @@ static void %s_%s(void)
 
     funcrun='''
   // Run the kernel:
+  //int errRead = clEnqueueReadBuffer( queue, buf[0], CL_TRUE, 0, sizeof(%s) * count_input, gpu_data, 0, NULL, NULL);
   OCL_NDRANGE( 1 );
-  clEnqueueReadBuffer( queue, buf[0], CL_TRUE, 0, sizeof(%s) * count_input, gpu_data, 0, NULL, NULL);
-'''%(self.inputtype.__len__()+1)
+  OCL_MAP_BUFFER(0);
+'''%(self.argtype(0,index))
     funcline += [ funcrun ]
+
+    text = ''' memcpy(gpu_data, buf_data[0], sizeof(gpu_data)); '''
+    funcline += [ text ]
 
     funcsprintfa='    sprintf(log, \"'
     funcsprintfb=''
@@ -418,8 +429,8 @@ static void %s_%s(void)
       clhead += ' __global %s *src%d,'%(self.argtype(i,index),i+1)
       clvalueDef +=   '  %s x%d = (%s) ('%(self.inputtype[i][index],i+1,self.inputtype[i][index])
       tmp = 'src%d[i * (*vector) + '%(i+1)
-      for j in range(0,int(self.argvector(i,index))):
-        clvalueDef += tmp + ((int(self.argvector(i-1,index)) == j+1 ) and '%d]);\n'%(j) or '%d],'%(j))
+      for j in range(0,self.argvector(i,index)):
+        clvalueDef += tmp + ((self.argvector(i-1,index) == j+1 ) and '%d]);\n'%(j) or '%d],'%(j))
       clcomputer += (self.values.__len__() == i+1) and 'x%d);'%(i+1) or 'x%d,'%(i+1)
       
     clhead += ' __global int *vector) {\n'
@@ -446,6 +457,8 @@ static void %s_%s(void)
       #The head:
       self.cpplines += [self.Head]
 
+      self.cpplines += ["namespace {\n"]
+
       #Parameters:
       self.GenInputValues(i)
 
@@ -457,6 +470,8 @@ static void %s_%s(void)
 
       #utest function
       self.utestFunc(i)
+
+      self.cpplines += ["}\n"]
 
       #kernel cl
       self.genCL(i)

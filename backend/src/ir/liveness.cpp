@@ -27,7 +27,7 @@
 namespace gbe {
 namespace ir {
 
-  Liveness::Liveness(Function &fn) : fn(fn) {
+  Liveness::Liveness(Function &fn, bool isInGenBackend) : fn(fn) {
     // Initialize UEVar and VarKill for each block
     fn.foreachBlock([this](const BasicBlock &bb) {
       this->initBlock(bb);
@@ -48,12 +48,58 @@ namespace ir {
     }
     // extend register (def in loop, use out-of-loop) liveness to the whole loop
     set<Register> extentRegs;
-    this->computeExtraLiveInOut(extentRegs);
-    // analyze uniform values. The extentRegs contains all the values which is
-    // defined in a loop and use out-of-loop which could not be a uniform. The reason
-    // is that when it reenter the second time, it may active different lanes. So
-    // reenter many times may cause it has different values in different lanes.
-    this->analyzeUniform(&extentRegs);
+    // Only in Gen backend we need to take care of extra live out analysis.
+    if (isInGenBackend) {
+      this->computeExtraLiveInOut(extentRegs);
+      // analyze uniform values. The extentRegs contains all the values which is
+      // defined in a loop and use out-of-loop which could not be a uniform. The reason
+      // is that when it reenter the second time, it may active different lanes. So
+      // reenter many times may cause it has different values in different lanes.
+      this->analyzeUniform(&extentRegs);
+    }
+  }
+
+  void Liveness::removeRegs(const set<Register> &removes) {
+    for (auto &pair : liveness) {
+      BlockInfo &info = *(pair.second);
+      for (auto reg : removes) {
+        if (info.liveOut.contains(reg))
+          info.liveOut.erase(reg);
+        if (info.upwardUsed.contains(reg))
+          info.upwardUsed.erase(reg);
+      }
+    }
+  }
+
+  void Liveness::replaceRegs(const map<Register, Register> &replaceMap) {
+
+    for (auto &pair : liveness) {
+      BlockInfo &info = *pair.second;
+      BasicBlock *bb = const_cast<BasicBlock *>(&info.bb);
+      for (auto &pair : replaceMap) {
+        Register from = pair.first;
+        Register to = pair.second;
+        if (info.liveOut.contains(from)) {
+          info.liveOut.erase(from);
+          info.liveOut.insert(to);
+          // FIXME, a hack method to avoid the "to" register be treated as
+          // uniform value.
+          bb->definedPhiRegs.insert(to);
+        }
+        if (info.upwardUsed.contains(from)) {
+          info.upwardUsed.erase(from);
+          info.upwardUsed.insert(to);
+        }
+        if (info.varKill.contains(from)) {
+          info.varKill.erase(from);
+          info.varKill.insert(to);
+        }
+        if (bb->undefPhiRegs.contains(from)) {
+          bb->undefPhiRegs.erase(from);
+          bb->undefPhiRegs.insert(to);
+        }
+      }
+    }
   }
 
   Liveness::~Liveness(void) {
@@ -71,11 +117,17 @@ namespace ir {
         if (insn.getOpcode() == ir::OP_SIMD_ID)
           uniform = false;
 
+        // do not change dst uniform for block read
+        if ((insn.getOpcode() == ir::OP_LOAD && ir::cast<ir::LoadInstruction>(insn).isBlock()) ||
+            insn.getOpcode() == ir::OP_MBREAD)
+          uniform = false;
+
         for (uint32_t srcID = 0; srcID < srcNum; ++srcID) {
           const Register reg = insn.getSrc(srcID);
           if (!fn.isUniformRegister(reg))
             uniform = false;
         }
+
         // A destination is a killed value
         for (uint32_t dstID = 0; dstID < dstNum; ++dstID) {
           const Register reg = insn.getDst(dstID);
@@ -154,25 +206,6 @@ namespace ir {
           workSet.insert(prevInfo);
       }
     };
-#if 0
-    fn.foreachBlock([this](const BasicBlock &bb){
-      printf("label %d:\n", bb.getLabelIndex());
-      BlockInfo *info = liveness[&bb];
-      auto &outVarSet = info->liveOut;
-      auto &inVarSet = info->upwardUsed;
-      printf("\n\tin Lives: ");
-      for (auto inVar : inVarSet) {
-        printf("%d ", inVar);
-      }
-      printf("\n");
-      printf("\tout Lives: ");
-      for (auto outVar : outVarSet) {
-        printf("%d ", outVar);
-      }
-      printf("\n");
-
-    });
-#endif
    }
 /*
   As we run in SIMD mode with prediction mask to indicate active lanes.
@@ -190,19 +223,38 @@ namespace ir {
     if(loops.size() == 0) return;
 
     for (auto l : loops) {
+      const BasicBlock &preheader = fn.getBlock(l->preheader);
+      BlockInfo *preheaderInfo = liveness[&preheader];
       for (auto x : l->exits) {
         const BasicBlock &a = fn.getBlock(x.first);
         const BasicBlock &b = fn.getBlock(x.second);
         BlockInfo * exiting = liveness[&a];
         BlockInfo * exit = liveness[&b];
         std::vector<Register> toExtend;
+        std::vector<Register> toExtendCand;
 
-        if(b.getPredecessorSet().size() > 1) {
+        if(b.getPredecessorSet().size() <= 1) {
+          // the exits only have one predecessor
           for (auto p : exit->upwardUsed)
-            toExtend.push_back(p);
+            toExtendCand.push_back(p);
         } else {
-          std::set_intersection(exiting->liveOut.begin(), exiting->liveOut.end(), exit->upwardUsed.begin(), exit->upwardUsed.end(), std::back_inserter(toExtend));
+          // the exits have more than one predecessors
+          std::set_intersection(exiting->liveOut.begin(),
+                                exiting->liveOut.end(),
+                                exit->upwardUsed.begin(),
+                                exit->upwardUsed.end(),
+                                std::back_inserter(toExtendCand));
         }
+        // toExtendCand may contain some virtual register defined before loop,
+        // which need to be excluded. Because what we need is registers defined
+        // in the loop. Such kind of registers must be in live-out of the loop's
+        // preheader. So we do the subtraction here.
+        std::set_difference(toExtendCand.begin(),
+                            toExtendCand.end(),
+                            preheaderInfo->liveOut.begin(),
+                            preheaderInfo->liveOut.end(),
+                            std::back_inserter(toExtend));
+
         if (toExtend.size() == 0) continue;
         for(auto r : toExtend)
           extentRegs.insert(r);
@@ -216,27 +268,28 @@ namespace ir {
         }
       }
     }
-#if 0
-    fn.foreachBlock([this](const BasicBlock &bb){
-      printf("label %d:\n", bb.getLabelIndex());
-      BlockInfo *info = liveness[&bb];
-      auto &outVarSet = info->liveOut;
-      auto &inVarSet = info->upwardUsed;
-      printf("\n\tLive Ins: ");
-      for (auto inVar : inVarSet) {
-        printf("%d ", inVar);
-      }
-      printf("\n");
-      printf("\tLive outs: ");
-      for (auto outVar : outVarSet) {
-        printf("%d ", outVar);
-      }
-      printf("\n");
-
-    });
-#endif
    }
 
+  std::ostream &operator<< (std::ostream &out, const Liveness &live) {
+    const Function &fn = live.getFunction();
+    fn.foreachBlock([&] (const BasicBlock &bb) {
+      out << std::endl;
+      out << "Label $" << bb.getLabelIndex() << std::endl;
+      const Liveness::BlockInfo &bbInfo = live.getBlockInfo(&bb);
+      out << "liveIn:" << std::endl;
+      for (auto &x: bbInfo.upwardUsed) {
+        out << x << " ";
+      }
+      out << std::endl << "liveOut:" << std::endl;
+      for (auto &x : bbInfo.liveOut)
+        out << x << " ";
+      out << std::endl << "varKill:" << std::endl;
+      for (auto &x : bbInfo.varKill)
+        out << x << " ";
+      out << std::endl;
+    });
+    return out;
+  }
 
   /*! To pretty print the livfeness info */
   static const uint32_t prettyInsnStrSize = 48;

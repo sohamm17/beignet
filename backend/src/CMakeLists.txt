@@ -1,6 +1,6 @@
-set (OCL_BITCODE_BIN "${BEIGNET_INSTALL_DIR}beignet.bc")
+set (OCL_BITCODE_BIN "${BEIGNET_INSTALL_DIR}/beignet.bc")
 set (OCL_HEADER_DIR "${BEIGNET_INSTALL_DIR}/include")
-set (OCL_PCH_OBJECT "${BEIGNET_INSTALL_DIR}beignet.pch")
+set (OCL_PCH_OBJECT "${BEIGNET_INSTALL_DIR}/beignet.pch")
 set (GBE_OBJECT_DIR "${BEIGNET_INSTALL_DIR}/libgbe.so")
 set (INTERP_OBJECT_DIR "${BEIGNET_INSTALL_DIR}/libgbeinterp.so")
 
@@ -12,7 +12,6 @@ configure_file (
 #do not involve libocl if the standalone compiler is given,
 if (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
 add_subdirectory(libocl)
-add_dependencies(beignet_bitcode libocl)
 endif ()
 
 set (LOCAL_GBE_OBJECT_DIR "${CMAKE_CURRENT_BINARY_DIR}/libgbe.so" PARENT_SCOPE)
@@ -66,6 +65,8 @@ set (GBE_SRC
     ir/value.hpp
     ir/lowering.cpp
     ir/lowering.hpp
+    ir/profiling.cpp
+    ir/profiling.hpp
     ir/printf.cpp
     ir/printf.hpp
     ir/immediate.hpp
@@ -85,6 +86,7 @@ set (GBE_SRC
     llvm/llvm_intrinsic_lowering.cpp
     llvm/llvm_barrier_nodup.cpp
     llvm/llvm_printf_parser.cpp
+    llvm/llvm_profiling.cpp
     llvm/ExpandConstantExpr.cpp
     llvm/ExpandUtils.cpp
     llvm/PromoteIntegers.cpp
@@ -99,8 +101,11 @@ set (GBE_SRC
     backend/gen/gen_mesa_disasm.c
     backend/gen_insn_selection.cpp
     backend/gen_insn_selection.hpp
+    backend/gen_insn_selection_optimize.cpp
     backend/gen_insn_scheduling.cpp
     backend/gen_insn_scheduling.hpp
+    backend/gen_insn_selection_output.cpp
+    backend/gen_insn_selection_output.hpp
     backend/gen_reg_allocation.cpp
     backend/gen_reg_allocation.hpp
     backend/gen_context.cpp

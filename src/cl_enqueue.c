@@ -48,7 +48,10 @@ cl_int cl_enqueue_read_buffer(enqueue_data* data)
     if (src_ptr == NULL)
       err = CL_MAP_FAILURE;
     else {
-      memcpy(data->ptr, (char*)src_ptr + data->offset + buffer->sub_offset, data->size);
+      //sometimes, application invokes read buffer, instead of map buffer, even if userptr is enabled
+      //memcpy is not necessary for this case
+      if (data->ptr != (char*)src_ptr + data->offset + buffer->sub_offset)
+        memcpy(data->ptr, (char*)src_ptr + data->offset + buffer->sub_offset, data->size);
       cl_mem_unmap_auto(mem);
     }
   }
@@ -316,8 +319,9 @@ cl_int cl_enqueue_map_image(enqueue_data *data)
 
   if(mem->flags & CL_MEM_USE_HOST_PTR) {
     assert(mem->host_ptr);
-    //src and dst need add offset in function cl_mem_copy_image_region
-    cl_mem_copy_image_region(data->origin, data->region,
+    if (!mem->is_userptr)
+      //src and dst need add offset in function cl_mem_copy_image_region
+      cl_mem_copy_image_region(data->origin, data->region,
                              mem->host_ptr, image->host_row_pitch, image->host_slice_pitch,
                              data->ptr, row_pitch, image->slice_pitch, image, CL_TRUE, CL_TRUE);
   }
@@ -374,8 +378,9 @@ cl_int cl_enqueue_unmap_mem_object(enqueue_data *data)
         row_pitch = image->slice_pitch;
       else
         row_pitch = image->row_pitch;
-      //v_ptr have added offset, host_ptr have not added offset.
-      cl_mem_copy_image_region(origin, region, v_ptr, row_pitch, image->slice_pitch,
+      if (!memobj->is_userptr)
+        //v_ptr have added offset, host_ptr have not added offset.
+        cl_mem_copy_image_region(origin, region, v_ptr, row_pitch, image->slice_pitch,
                                memobj->host_ptr, image->host_row_pitch, image->host_slice_pitch,
                                image, CL_FALSE, CL_TRUE);
     }

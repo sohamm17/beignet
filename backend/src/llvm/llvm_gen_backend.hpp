@@ -83,12 +83,13 @@ namespace gbe
 
       if (it == map.end()) {
         int status;
-        const char *realName = abi::__cxa_demangle(symbol.c_str(), NULL, NULL, &status);
+        char *realName = abi::__cxa_demangle(symbol.c_str(), NULL, NULL, &status);
         if (status == 0) {
           std::string realFnName(realName), stripName;
           stripName = realFnName.substr(0, realFnName.find("("));
           it = map.find(stripName);
         }
+        free(realName);
       }
       // FIXME, should create a complete error reporting mechanism
       // when found error in beignet managed passes including Gen pass.
@@ -140,7 +141,10 @@ namespace gbe
   llvm::BasicBlockPass *createIntrinsicLoweringPass();
 
   /*! Passer the printf function call. */
-  llvm::FunctionPass* createPrintfParserPass();
+  llvm::FunctionPass* createPrintfParserPass(ir::Unit &unit);
+
+  /*! Insert the time stamp for profiling. */
+  llvm::FunctionPass* createProfilingInserterPass(int profilingType, ir::Unit &unit);
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
   /* customized loop unrolling pass. */

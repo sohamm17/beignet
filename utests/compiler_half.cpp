@@ -2,126 +2,7 @@
 #include <cstring>
 #include <iostream>
 #include <cmath>
-#include <algorithm>
 #include "utest_helper.hpp"
-
-static uint32_t __half_to_float(uint16_t h, bool* isInf = NULL, bool* infSign = NULL)
-{
-  struct __FP32 {
-    uint32_t mantissa:23;
-    uint32_t exponent:8;
-    uint32_t sign:1;
-  };
-  struct __FP16 {
-    uint32_t mantissa:10;
-    uint32_t exponent:5;
-    uint32_t sign:1;
-  };
-  uint32_t f;
-  __FP32 o;
-  memset(&o, 0, sizeof(o));
-  __FP16 i;
-  memcpy(&i, &h, sizeof(uint16_t));
-
-  if (isInf)
-    *isInf = false;
-  if (infSign)
-    *infSign = false;
-
-  if (i.exponent == 0 && i.mantissa == 0) // (Signed) zero
-    o.sign = i.sign;
-  else {
-    if (i.exponent == 0) { // Denormal (converts to normalized)
-      // Adjust mantissa so it's normalized (and keep
-      // track of exponent adjustment)
-      int e = -1;
-      uint m = i.mantissa;
-      do {
-        e++;
-        m <<= 1;
-      } while ((m & 0x400) == 0);
-
-      o.mantissa = (m & 0x3ff) << 13;
-      o.exponent = 127 - 15 - e;
-      o.sign = i.sign;
-    } else if (i.exponent == 0x1f) { // Inf/NaN
-      // NOTE: Both can be handled with same code path
-      // since we just pass through mantissa bits.
-      o.mantissa = i.mantissa << 13;
-      o.exponent = 255;
-      o.sign = i.sign;
-
-      if (isInf) {
-        *isInf = (i.mantissa == 0);
-        if (infSign)
-          *infSign = !i.sign;
-      }
-    } else { // Normalized number
-      o.mantissa = i.mantissa << 13;
-      o.exponent = 127 - 15 + i.exponent;
-      o.sign = i.sign;
-    }
-  }
-
-  memcpy(&f, &o, sizeof(uint32_t));
-  return f;
-}
-
-
-static uint16_t __float_to_half(uint32_t x)
-{
-  uint16_t bits = (x >> 16) & 0x8000; /* Get the sign */
-  uint16_t m = (x >> 12) & 0x07ff; /* Keep one extra bit for rounding */
-  unsigned int e = (x >> 23) & 0xff; /* Using int is faster here */
-
-  /* If zero, or denormal, or exponent underflows too much for a denormal
-   * half, return signed zero. */
-  if (e < 103)
-    return bits;
-
-  /* If NaN, return NaN. If Inf or exponent overflow, return Inf. */
-  if (e > 142) {
-    bits |= 0x7c00u;
-    /* If exponent was 0xff and one mantissa bit was set, it means NaN,
-     * not Inf, so make sure we set one mantissa bit too. */
-    bits |= e == 255 && (x & 0x007fffffu);
-    return bits;
-  }
-
-  /* If exponent underflows but not too much, return a denormal */
-  if (e < 113) {
-    m |= 0x0800u;
-    /* Extra rounding may overflow and set mantissa to 0 and exponent
-     * to 1, which is OK. */
-    bits |= (m >> (114 - e)) + ((m >> (113 - e)) & 1);
-    return bits;
-  }
-
-  bits |= ((e - 112) << 10) | (m >> 1);
-  /* Extra rounding. An overflow will set mantissa to 0 and increment
-   * the exponent, which is OK. */
-  bits += m & 1;
-  return bits;
-}
-
-static int check_half_device(void)
-{
-  std::string extStr;
-  size_t param_value_size;
-  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, 0, 0, &param_value_size);
-  std::vector<char> param_value(param_value_size);
-  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, param_value_size,
-           param_value.empty() ? NULL : &param_value.front(), &param_value_size);
-  if (!param_value.empty())
-    extStr = std::string(&param_value.front(), param_value_size-1);
-
-  if (std::strstr(extStr.c_str(), "cl_khr_fp16") == NULL) {
-    printf("No cl_khr_fp16, Skip!");
-    return 0;
-  }
-
-  return 1;
-}
 
 void compiler_half_basic(void)
 {
@@ -131,7 +12,7 @@ void compiler_half_basic(void)
   float f = 2.5;
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   memcpy(&tmp_f, &f, sizeof(float));
@@ -172,7 +53,7 @@ void compiler_half_basic(void)
   for (int32_t i = 0; i < (int32_t) n; ++i) {
     tmp_f = __half_to_float(((uint16_t *)buf_data[1])[i]);
     memcpy(&f, &tmp_f, sizeof(float));
-    printf("%f %f\n", f, fdst[i]);
+    //printf("%f %f\n", f, fdst[i]);
     OCL_ASSERT(fabs(f - fdst[i]) <= 0.01 * fabs(fdst[i]) || (fdst[i] == 0.0 && f == 0.0));
   }
   OCL_UNMAP_BUFFER(1);
@@ -180,17 +61,24 @@ void compiler_half_basic(void)
 
 MAKE_UTEST_FROM_FUNCTION(compiler_half_basic);
 
+static const int half_n = 16;
+static float half_test_src[half_n] = {
+  -0.23455f, 1.23413f, 2.3412, 8.234f,
+  -122.31f, -14.233f, 0.0023f, 99.322f,
+  0.0f, 0.332f, 123.12f, -0.003f,
+  16.0f, 19.22f, 128.006f, 25.032f
+};
 
-#define HALF_MATH_TEST_1ARG(NAME, CPPNAME, RANGE_L, RANGE_H)            \
+#define HALF_MATH_TEST_1ARG(NAME, CPPNAME)                              \
   void compiler_half_math_##NAME(void)                                  \
   {                                                                     \
-    const size_t n = 16;                                                \
+    const size_t n = half_n;                                            \
     uint16_t hsrc[n];                                                   \
     float fsrc[n], fdst[n];                                             \
     uint32_t tmp_f;                                                     \
     float f;                                                            \
                                                                         \
-    if (!check_half_device())                                           \
+    if (!cl_check_half())                                           \
       return;                                                           \
                                                                         \
     OCL_CREATE_KERNEL_FROM_FILE("compiler_half_math", "compiler_half_math_" #NAME); \
@@ -202,7 +90,7 @@ MAKE_UTEST_FROM_FUNCTION(compiler_half_basic);
     locals[0] = 16;                                                     \
                                                                         \
     for (int32_t i = 0; i < (int32_t) n; ++i) {                         \
-      fsrc[i] = RANGE_L + ((rand()%1000) / 1000.0f ) * ((RANGE_H) - (RANGE_L)); \
+      fsrc[i] = half_test_src[i];                                       \
       memcpy(&tmp_f, &fsrc[i], sizeof(float));                          \
       hsrc[i] = __float_to_half(tmp_f);                                 \
     }                                                                   \
@@ -225,27 +113,27 @@ MAKE_UTEST_FROM_FUNCTION(compiler_half_basic);
       bool isInf, infSign;                                              \
       tmp_f = __half_to_float(((uint16_t *)buf_data[1])[i], &isInf, &infSign); \
       memcpy(&f, &tmp_f, sizeof(float));                                \
-      /*printf("%.15f %.15f, diff is %%%f\n", f, fdst[i], (fabs(f - fdst[i])/fabs(fdst[i]))); */ \
+      /* printf("%.15f %.15f, diff is %f\n", f, fdst[i], (fabs(f - fdst[i])/fabs(fdst[i]))); */ \
       OCL_ASSERT(((fabs(fdst[i]) < 6e-8f) && (fabs(f) < 6e-8f)) ||      \
                  (fabs(f - fdst[i]) <= 0.03 * fabs(fdst[i])) ||         \
                  (isInf && ((infSign && fdst[i] > 65504.0f) || (!infSign && fdst[i] < -65504.0f))) || \
-                 (isnan(f) && isnan(fdst[i])));                         \
+                 (std::isnan(f) && std::isnan(fdst[i])));               \
     }                                                                   \
     OCL_UNMAP_BUFFER(1);                                                \
   }                                                                     \
   MAKE_UTEST_FROM_FUNCTION(compiler_half_math_##NAME);
 
-HALF_MATH_TEST_1ARG(sin, sinf, -10, 10);
-HALF_MATH_TEST_1ARG(cos, cosf, -10, 10);
-HALF_MATH_TEST_1ARG(sinh, sinh, -10, 10);
-HALF_MATH_TEST_1ARG(cosh, cosh, -10, 10);
-HALF_MATH_TEST_1ARG(tan, tanf, -3.14/2, 3.14/2);
-HALF_MATH_TEST_1ARG(log10, log10f, 0.1, 100);
-HALF_MATH_TEST_1ARG(log, logf, 0.01, 1000);
-HALF_MATH_TEST_1ARG(trunc, truncf, -1000, 1000);
-HALF_MATH_TEST_1ARG(exp, expf, -19.0, 20.0);
-HALF_MATH_TEST_1ARG(sqrt, sqrtf, -19.0, 10.0);
-HALF_MATH_TEST_1ARG(ceil, ceilf, -19.0, 20.0);
+HALF_MATH_TEST_1ARG(sin, sinf);
+HALF_MATH_TEST_1ARG(cos, cosf);
+HALF_MATH_TEST_1ARG(sinh, sinh);
+HALF_MATH_TEST_1ARG(cosh, cosh);
+HALF_MATH_TEST_1ARG(tan, tanf);
+HALF_MATH_TEST_1ARG(log10, log10f);
+HALF_MATH_TEST_1ARG(log, logf);
+HALF_MATH_TEST_1ARG(trunc, truncf);
+HALF_MATH_TEST_1ARG(exp, expf);
+HALF_MATH_TEST_1ARG(sqrt, sqrtf);
+HALF_MATH_TEST_1ARG(ceil, ceilf);
 
 #define HALF_MATH_TEST_2ARG(NAME, CPPNAME, RANGE_L, RANGE_H)            \
   void compiler_half_math_##NAME(void)                                  \
@@ -256,7 +144,7 @@ HALF_MATH_TEST_1ARG(ceil, ceilf, -19.0, 20.0);
     uint32_t tmp_f;                                                     \
     float f;                                                            \
                                                                         \
-    if (!check_half_device())                                           \
+    if (!cl_check_half())                                           \
       return;                                                           \
                                                                         \
     OCL_CREATE_KERNEL_FROM_FILE("compiler_half_math", "compiler_half_math_" #NAME); \
@@ -273,7 +161,7 @@ HALF_MATH_TEST_1ARG(ceil, ceilf, -19.0, 20.0);
       fsrc0[i] = RANGE_L + (((RANGE_H) - (RANGE_L))/n) * i;            \
       memcpy(&tmp_f, &fsrc0[i], sizeof(float));                         \
       hsrc0[i] = __float_to_half(tmp_f);                                \
-      fsrc1[i] = RANGE_L + ((rand()%1000) / 1000.0f ) * ((RANGE_H) - (RANGE_L));            \
+      fsrc1[i] = RANGE_L + (half_test_src[i/4] + 63) * ((RANGE_H) - (RANGE_L));            \
       memcpy(&tmp_f, &fsrc1[i], sizeof(float));                         \
       hsrc1[i] = __float_to_half(tmp_f);                                \
     }                                                                   \
@@ -303,7 +191,7 @@ HALF_MATH_TEST_1ARG(ceil, ceilf, -19.0, 20.0);
     OCL_ASSERT(((fabs(fdst[i]) < 6e-8f) && (fabs(f) < 6e-8f)) ||        \
                (fabs(f - fdst[i]) <= 0.03 * fabs(fdst[i])) ||           \
                (isInf && ((infSign && fdst[i] > 65504.0f) || (!infSign && fdst[i] < -65504.0f))) || \
-               (isnan(f) && isnan(fdst[i])));                           \
+               (std::isnan(f) && std::isnan(fdst[i])));                 \
     }                                                                   \
     OCL_UNMAP_BUFFER(2);                                                \
   }                                                                     \
@@ -318,7 +206,7 @@ void compiler_half_isnan(void)
   const size_t n = 16*2;
   uint16_t hsrc[n];
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -359,7 +247,7 @@ void compiler_half_isinf(void)
   const size_t n = 16;
   uint16_t hsrc[n];
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -406,7 +294,7 @@ void compiler_half_to_float(void)
   float fdst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -451,7 +339,7 @@ void compiler_half_as_char2(void)
   uint16_t hsrc[n];
   uint8_t* csrc = (uint8_t*)hsrc;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -493,7 +381,7 @@ void compiler_half2_as_int(void)
   uint16_t hsrc[n];
   int* isrc = (int*)hsrc;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -537,7 +425,7 @@ void compiler_half_to_char_sat(void)
   char dst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -590,7 +478,7 @@ void compiler_half_to_ushort_sat(void)
   uint16_t dst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -641,7 +529,7 @@ void compiler_half_to_uint_sat(void)
   uint32_t dst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -691,7 +579,7 @@ void compiler_uchar_to_half(void)
   float fdst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -738,7 +626,7 @@ void compiler_int_to_half(void)
   float fdst[n];
   uint32_t tmp_f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -786,7 +674,7 @@ void compiler_half_to_long(void)
   uint32_t tmp_f;
   float f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -833,7 +721,7 @@ void compiler_ulong_to_half(void)
   uint32_t tmp_f;
   float f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -880,7 +768,7 @@ void compiler_half_to_long_sat(void)
   uint32_t tmp_f;
   float f;
 
-  if (!check_half_device())
+  if (!cl_check_half())
     return;
 
   // Setup kernel and buffers
@@ -922,3 +810,105 @@ void compiler_half_to_long_sat(void)
   OCL_UNMAP_BUFFER(1);
 }
 MAKE_UTEST_FROM_FUNCTION(compiler_half_to_long_sat);
+
+void compiler_half_to_double(void)
+{
+  const size_t n = 16;
+  uint16_t hsrc[n];
+  double ddst[n];
+  uint32_t tmp_f;
+  float f;
+
+//  if (!cl_check_half())
+//    return;
+  if (!cl_check_double())
+    return;
+
+  // Setup kernel and buffers
+  OCL_CREATE_KERNEL_FROM_FILE("compiler_half_convert", "compiler_half_to_double");
+  OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(uint16_t), NULL);
+  OCL_CREATE_BUFFER(buf[1], 0, n * sizeof(double), NULL);
+  OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
+  OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
+  globals[0] = n;
+  locals[0] = 16;
+
+  for (int32_t i = 0; i < (int32_t) n; ++i) {
+    f = -100.1f + 10.3f * i;
+    memcpy(&tmp_f, &f, sizeof(float));
+    hsrc[i] = __float_to_half(tmp_f);
+    ddst[i] = (double)f;
+  }
+
+  OCL_MAP_BUFFER(0);
+  OCL_MAP_BUFFER(1);
+  memcpy(buf_data[0], hsrc, sizeof(hsrc));
+  memset(buf_data[1], 0, n*sizeof(double));
+  OCL_UNMAP_BUFFER(0);
+  OCL_UNMAP_BUFFER(1);
+
+  // Run the kernel on GPU
+  OCL_NDRANGE(1);
+
+  // Compare
+  OCL_MAP_BUFFER(1);
+  for (int32_t i = 0; i < (int32_t) n; ++i) {
+    double dd = ((double *)(buf_data[1]))[i];
+//    printf("%f	   %f, diff is %%%f\n", dd, ddst[i], fabs(dd - ddst[i])/fabs(ddst[i]));
+    OCL_ASSERT(fabs(dd - ddst[i]) < 0.001f * fabs(ddst[i]));
+  }
+  OCL_UNMAP_BUFFER(1);
+}
+MAKE_UTEST_FROM_FUNCTION(compiler_half_to_double);
+
+void compiler_double_to_half(void)
+{
+  const size_t n = 16;
+  uint16_t hdst[n];
+  double src[n];
+  uint32_t tmp_f;
+  float f;
+
+//  if (!cl_check_half())
+//    return;
+  if (!cl_check_double())
+    return;
+
+  // Setup kernel and buffers
+  OCL_CREATE_KERNEL_FROM_FILE("compiler_half_convert", "compiler_double_to_half");
+  OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(double), NULL);
+  OCL_CREATE_BUFFER(buf[1], 0, n * sizeof(uint16_t), NULL);
+  OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
+  OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
+  globals[0] = n;
+  locals[0] = 16;
+
+  for (int32_t i = 0; i < (int32_t) n; ++i) {
+    f = -100.1f + 10.3f * i;
+    src[i] = (double)f;
+    memcpy(&tmp_f, &f, sizeof(float));
+    hdst[i] = __float_to_half(tmp_f);
+  }
+
+  OCL_MAP_BUFFER(0);
+  OCL_MAP_BUFFER(1);
+  memcpy(buf_data[0], src, sizeof(src));
+  memset(buf_data[1], 0, n*sizeof(uint16_t));
+  OCL_UNMAP_BUFFER(0);
+  OCL_UNMAP_BUFFER(1);
+
+  // Run the kernel on GPU
+  OCL_NDRANGE(1);
+
+  // Compare
+  OCL_MAP_BUFFER(1);
+  for (int32_t i = 0; i < (int32_t) n; ++i) {
+    uint16_t hf = ((uint16_t *)(buf_data[1]))[i];
+    //tmp_f = __half_to_float(hf);
+    //memcpy(&f, &tmp_f, sizeof(float));
+    //printf("%f, %x, %x\n", f, hf, hdst[i]);
+    OCL_ASSERT(hf == hdst[i]);
+  }
+  OCL_UNMAP_BUFFER(1);
+}
+MAKE_UTEST_FROM_FUNCTION(compiler_double_to_half);

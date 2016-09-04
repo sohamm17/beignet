@@ -65,6 +65,13 @@ namespace ir {
     MEM_INVALID
   };
 
+  enum AddressMode : uint8_t {
+    AM_DynamicBti = 0,
+    AM_Stateless,
+    AM_StaticBti,
+    AM_INVALID
+  };
+
   enum AtomicOps {
     ATOMIC_OP_AND       = 1,
     ATOMIC_OP_OR        = 2,
@@ -80,6 +87,22 @@ namespace ir {
     ATOMIC_OP_UMIN      = 13,
     ATOMIC_OP_CMPXCHG   = 14,
     ATOMIC_OP_INVALID
+  };
+
+  enum WorkGroupOps {
+    WORKGROUP_OP_ANY = 1,
+    WORKGROUP_OP_ALL = 2,
+    WORKGROUP_OP_BROADCAST = 3,
+    WORKGROUP_OP_REDUCE_ADD = 4,
+    WORKGROUP_OP_REDUCE_MIN = 5,
+    WORKGROUP_OP_REDUCE_MAX = 6,
+    WORKGROUP_OP_INCLUSIVE_ADD = 7,
+    WORKGROUP_OP_INCLUSIVE_MIN = 8,
+    WORKGROUP_OP_INCLUSIVE_MAX = 9,
+    WORKGROUP_OP_EXCLUSIVE_ADD = 10,
+    WORKGROUP_OP_EXCLUSIVE_MIN = 11,
+    WORKGROUP_OP_EXCLUSIVE_MAX = 12,
+    WORKGROUP_OP_INVALID
   };
 
   /* Vote function per hardware thread */
@@ -111,10 +134,10 @@ namespace ir {
   {
   public:
     /*! Initialize the instruction from a 8 bytes stream */
-    INLINE InstructionBase(const char *stream) {
-      opcode = Opcode(stream[0]);
+    INLINE InstructionBase(Opcode op, const char* opaque) {
+      opcode = op;
       for (uint32_t byte = 0; byte < opaqueSize; ++byte)
-        opaque[byte] = stream[byte+1];
+        this->opaque[byte] = opaque[byte];
     }
     /*! Uninitialized instruction */
     INLINE InstructionBase(void) {}
@@ -132,12 +155,12 @@ namespace ir {
   {
   public:
     /*! Initialize the instruction from a 8 bytes stream */
-    INLINE Instruction(const char *stream) : InstructionBase(stream) {
+    INLINE Instruction(const char *stream) : InstructionBase(Opcode(stream[0]), &stream[1]) {
       parent = NULL;
     }
     /*! Copy the private fields and give it the same parent */
     INLINE Instruction(const Instruction &other) :
-      InstructionBase(reinterpret_cast<const char*>(&other.opcode)) {
+      InstructionBase(other.opcode, other.opaque) {
       parent = other.parent;
     }
 
@@ -185,15 +208,17 @@ namespace ir {
     void remove(void);
     /* Insert the instruction after the previous one. */
     void insert(Instruction *prev, Instruction ** new_ins = NULL);
+    void setDBGInfo(DebugInfo in) { DBGInfo = in; }
     /*! Indicates if the instruction belongs to instruction type T. Typically, T
      *  can be BinaryInstruction, UnaryInstruction, LoadInstruction and so on
      */
     template <typename T> INLINE bool isMemberOf(void) const {
       return T::isClassOf(*this);
     }
-    /*! max_src for store instruction (vec16 + addr) */
-    static const uint32_t MAX_SRC_NUM = 32;
+    /*! max_src used by vme for payload passing and setting */
+    static const uint32_t MAX_SRC_NUM = 40;
     static const uint32_t MAX_DST_NUM = 32;
+    DebugInfo DBGInfo;
   protected:
     BasicBlock *parent;      //!< The basic block containing the instruction
     GBE_CLASS(Instruction);  //!< Use internal allocators
@@ -288,20 +313,30 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
   };
 
+  class MemInstruction : public Instruction {
+  public:
+    unsigned getSurfaceIndex() const;
+    unsigned getAddressIndex() const;
+    /*! Address space that is manipulated here */
+    AddressMode getAddressMode() const;
+    Register getBtiReg() const;
+    /*! Return the register that contains the addresses */
+    Register getAddressRegister() const;
+    AddressSpace getAddressSpace() const;
+    /*! Return the types of the values */
+    Type getValueType() const;
+    bool isAligned(void) const;
+    void setBtiReg(Register reg);
+    void setSurfaceIndex(unsigned idx);
+  };
+
   /*! Atomic instruction */
-  class AtomicInstruction : public Instruction {
+  class AtomicInstruction : public MemInstruction {
   public:
     /*! Where the address register goes */
-    static const uint32_t btiIndex = 0;
-    static const uint32_t addressIndex = 1;
-    /*! Address space that is manipulated here */
-    AddressSpace getAddressSpace(void) const;
-    Register getBTI(void) const { return this->getSrc(btiIndex); }
-    bool isFixedBTI(void) const;
+    static const uint32_t addressIndex = 0;
     /*! Return the atomic function code */
     AtomicOps getAtomicOpcode(void) const;
-    /*! Return the register that contains the addresses */
-    INLINE Register getAddress(void) const { return this->getSrc(addressIndex); }
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
   };
@@ -309,56 +344,38 @@ namespace ir {
   /*! Store instruction. First source is the address. Next sources are the
    *  values to store contiguously at the given address
    */
-  class StoreInstruction : public Instruction {
+  class StoreInstruction : public MemInstruction {
   public:
     /*! Where the address register goes */
-    static const uint32_t btiIndex = 0;
-    static const uint32_t addressIndex = 1;
-    /*! Return the types of the values to store */
-    Type getValueType(void) const;
-    /*! Give the number of values the instruction is storing (srcNum-1) */
+    static const uint32_t addressIndex = 0;
     uint32_t getValueNum(void) const;
-    Register getBTI(void) const { return this->getSrc(btiIndex); }
-    bool isFixedBTI(void) const;
-    /*! Address space that is manipulated here */
-    AddressSpace getAddressSpace(void) const;
-    /*! DWORD aligned means untyped read for Gen. That is what matters */
-    bool isAligned(void) const;
-    /*! Return the register that contains the addresses */
-    INLINE Register getAddress(void) const { return this->getSrc(addressIndex); }
     /*! Return the register that contain value valueID */
     INLINE Register getValue(uint32_t valueID) const {
       GBE_ASSERT(valueID < this->getValueNum());
-      return this->getSrc(valueID + 2u);
+      return this->getSrc(valueID + 1u);
     }
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
+    /*! Return true if the given instruction is block write */
+    bool isBlock() const;
   };
 
   /*! Load instruction. The source is simply the address where to get the data.
    *  The multiple destinations are the contiguous values loaded at the given
    *  address
    */
-  class LoadInstruction : public Instruction {
+  class LoadInstruction : public MemInstruction {
   public:
-    /*! Type of the loaded values (ie type of all the destinations) */
-    Type getValueType(void) const;
     /*! Number of values loaded (ie number of destinations) */
     uint32_t getValueNum(void) const;
-    /*! Address space that is manipulated here */
-    AddressSpace getAddressSpace(void) const;
-    /*! DWORD aligned means untyped read for Gen. That is what matters */
-    bool isAligned(void) const;
-    /*! Return the register that contains the addresses */
-    INLINE Register getAddress(void) const { return this->getSrc(1u); }
-    Register getBTI(void) const {return this->getSrc(0u);}
-    bool isFixedBTI(void) const;
     /*! Return the register that contain value valueID */
     INLINE Register getValue(uint32_t valueID) const {
       return this->getDst(valueID);
     }
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
+    /*! Return true if the given instruction is block read */
+    bool isBlock() const;
   };
 
   /*! Load immediate instruction loads an typed immediate value into the given
@@ -399,8 +416,20 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
   };
 
+  /*! Video motion estimation */
+  class VmeInstruction : public Instruction {
+  public:
+    uint8_t getImageIndex() const;
+    uint8_t getMsgType() const;
+    Type getSrcType(void) const;
+    Type getDstType(void) const;
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
   typedef union _ImageInfoKey{
     _ImageInfoKey(uint8_t i, uint8_t t) : index(i), type(t) {};
+    _ImageInfoKey(int key) : data(key) {};
     struct {
      uint8_t index; /*! the allocated image index */
      uint8_t  type;  /*! the information type */
@@ -438,6 +467,28 @@ namespace ir {
     uint32_t getInfoType() const;
     /*! Return true if the given instruction is an instance of this class */
     static bool isClassOf(const Instruction &insn);
+  };
+
+  /*! calculate the exec time and store it. */
+  class CalcTimestampInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    /*! Get the point number of timestamp point */
+    uint32_t getPointNum(void) const;
+    /*! Get the timestamp type */
+    uint32_t getTimestamptType(void) const;
+  };
+
+  /*! store the profiling information. */
+  class StoreProfilingInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    /*! Get the profiling info type */
+    uint32_t getProfilingType(void) const;
+    /*! Get the BTI index*/
+    uint32_t getBTI(void) const;
   };
 
   /*! Branch instruction is the unified way to branch (with or without
@@ -547,6 +598,61 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
   };
 
+  /*! Indirect Move instruction */
+  class WaitInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+  
+  /*! Related to Work Group. */
+  class WorkGroupInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    Type getType(void) const;
+    WorkGroupOps getWorkGroupOpcode(void) const;
+    uint32_t getSlmAddr(void) const;
+  };
+
+  /*! Related to Sub Group. */
+  class SubGroupInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    Type getType(void) const;
+    WorkGroupOps getWorkGroupOpcode(void) const;
+  };
+
+  /*! Printf instruction. */
+  class PrintfInstruction : public Instruction {
+  public:
+    uint32_t getNum(void) const;
+    uint32_t getBti(void) const;
+    Type getType(const Function& fn, uint32_t ID) const;
+    Type getType(uint32_t ID) const { return this->getType(this->getFunction(), ID); };
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+  };
+
+  /*! Media Block Read.  */
+  class MediaBlockReadInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    uint8_t getImageIndex() const;
+    uint8_t getVectorSize() const;
+  };
+
+  /*! Media Block Write.  */
+  class MediaBlockWriteInstruction : public Instruction {
+  public:
+    /*! Return true if the given instruction is an instance of this class */
+    static bool isClassOf(const Instruction &insn);
+    uint8_t getImageIndex() const;
+    uint8_t getVectorSize() const;
+  };
+
   /*! Specialize the instruction. Also performs typechecking first based on the
    *  opcode. Crashes if it fails
    */
@@ -615,6 +721,8 @@ namespace ir {
   Instruction I64MADSAT(Type type, Register dst, Tuple src);
   /*! mad.type dst src */
   Instruction MAD(Type type, Register dst, Tuple src);
+  /*! lrp.type dst src */
+  Instruction LRP(Type type, Register dst, Tuple src);
   /*! upsample_short.type dst src */
   Instruction UPSAMPLE_SHORT(Type type, Register dst, Register src0, Register src1);
   /*! upsample_int.type dst src */
@@ -724,7 +832,8 @@ namespace ir {
   /*! F32TO16.{dstType <- srcType} dst src */
   Instruction F32TO16(Type dstType, Type srcType, Register dst, Register src);
   /*! atomic dst addr.space {src1 {src2}} */
-  Instruction ATOMIC(AtomicOps opcode, Register dst, AddressSpace space, Register bti, bool fixedBTI, Tuple src);
+  Instruction ATOMIC(AtomicOps opcode, Type, Register dst, AddressSpace space, Register ptr, Tuple payload, AddressMode, unsigned);
+  Instruction ATOMIC(AtomicOps opcode, Type, Register dst, AddressSpace space, Register ptr, Tuple src, AddressMode, Register);
   /*! bra labelIndex */
   Instruction BRA(LabelIndex labelIndex);
   /*! (pred) bra labelIndex */
@@ -739,10 +848,12 @@ namespace ir {
   Instruction WHILE(LabelIndex labelIndex, Register pred);
   /*! ret */
   Instruction RET(void);
-  /*! load.type.space {dst1,...,dst_valueNum} offset value */
-  Instruction LOAD(Type type, Tuple dst, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, bool fixedBTI, Register bti);
-  /*! store.type.space offset {src1,...,src_valueNum} value */
-  Instruction STORE(Type type, Tuple src, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, bool fixedBTI, Register bti);
+  /*! load.type.space {dst1,...,dst_valueNum} offset value, {bti} */
+  Instruction LOAD(Type type, Tuple dst, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, AddressMode, unsigned SurfaceIndex, bool isBlock = false);
+  Instruction LOAD(Type type, Tuple dst, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, AddressMode, Register bti);
+  /*! store.type.space offset {src1,...,src_valueNum} value {bti}*/
+  Instruction STORE(Type type, Tuple src, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, AddressMode, unsigned SurfaceIndex, bool isBlock = false);
+  Instruction STORE(Type type, Tuple src, Register offset, AddressSpace space, uint32_t valueNum, bool dwAligned, AddressMode, Register bti);
   /*! loadi.type dst value */
   Instruction LOADI(Type type, Register dst, ImmediateIndex value);
   /*! sync.params... (see Sync instruction) */
@@ -755,11 +866,29 @@ namespace ir {
   Instruction TYPED_WRITE(uint8_t imageIndex, Tuple src, uint8_t srcNum, Type srcType, Type coordType);
   /*! sample textures */
   Instruction SAMPLE(uint8_t imageIndex, Tuple dst, Tuple src, uint8_t srcNum, bool dstIsFloat, bool srcIsFloat, uint8_t sampler, uint8_t samplerOffset);
+  /*! video motion estimation */
+  Instruction VME(uint8_t imageIndex, Tuple dst, Tuple src, uint32_t dstNum, uint32_t srcNum, int msg_type, int vme_search_path_lut, int lut_sub);
   /*! get image information , such as width/height/depth/... */
   Instruction GET_IMAGE_INFO(int infoType, Register dst, uint8_t imageIndex, Register infoReg);
   /*! label labelIndex */
   Instruction LABEL(LabelIndex labelIndex);
+  /*! calculate the execute timestamp for profiling */
+  Instruction CALC_TIMESTAMP(uint32_t pointNum, uint32_t tsType);
+  /*! calculate the execute timestamp for profiling */
+  Instruction STORE_PROFILING(uint32_t bti, uint32_t Type);
+  /*! wait */
+  Instruction WAIT(void);
 
+  /*! work group */
+  Instruction WORKGROUP(WorkGroupOps opcode, uint32_t slmAddr, Register dst, Tuple srcTuple, uint8_t srcNum, Type type);
+  /*! sub group */
+  Instruction SUBGROUP(WorkGroupOps opcode, Register dst, Tuple srcTuple, uint8_t srcNum, Type type);
+  /*! printf */
+  Instruction PRINTF(Register dst, Tuple srcTuple, Tuple typeTuple, uint8_t srcNum, uint8_t bti, uint16_t num);
+  /*! media block read */
+  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum);
+  /*! media block write */
+  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size);
 } /* namespace ir */
 } /* namespace gbe */
 

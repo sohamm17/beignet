@@ -187,7 +187,10 @@ namespace gbe
            this->opcode == SEL_OP_ATOMIC       ||
            this->opcode == SEL_OP_BYTE_GATHER  ||
            this->opcode == SEL_OP_SAMPLE ||
-           this->opcode == SEL_OP_DWORD_GATHER;
+           this->opcode == SEL_OP_VME ||
+           this->opcode == SEL_OP_DWORD_GATHER ||
+           this->opcode == SEL_OP_OBREAD ||
+           this->opcode == SEL_OP_MBREAD;
   }
 
   bool SelectionInstruction::modAcc(void) const {
@@ -209,7 +212,9 @@ namespace gbe
            this->opcode == SEL_OP_WRITE64       ||
            this->opcode == SEL_OP_ATOMIC        ||
            this->opcode == SEL_OP_BYTE_SCATTER  ||
-           this->opcode == SEL_OP_TYPED_WRITE;
+           this->opcode == SEL_OP_TYPED_WRITE ||
+           this->opcode == SEL_OP_OBWRITE ||
+           this->opcode == SEL_OP_MBWRITE;
   }
 
   bool SelectionInstruction::isBranch(void) const {
@@ -278,7 +283,7 @@ namespace gbe
     /*! Instruction that needs to be matched */
     const ir::Instruction &insn;
     /*! When sources have been overwritten, a child insn cannot be merged */
-    uint32_t mergeable:ir::Instruction::MAX_SRC_NUM;
+    uint64_t mergeable:ir::Instruction::MAX_SRC_NUM;
     /*! Number of children we have in the pattern */
     uint32_t childNum:7;
     /*! A root must be generated, no matter what */
@@ -361,8 +366,10 @@ namespace gbe
     bool has32X32Mul() const { return bHas32X32Mul; }
     void setHas32X32Mul(bool b) { bHas32X32Mul = b; }
     bool hasLongType() const { return bHasLongType; }
+    bool hasDoubleType() const { return bHasDoubleType; }
     bool hasHalfType() const { return bHasHalfType; }
     void setHasLongType(bool b) { bHasLongType = b; }
+    void setHasDoubleType(bool b) { bHasDoubleType = b; }
     void setHasHalfType(bool b) { bHasHalfType = b; }
     bool hasLongRegRestrict() { return bLongRegRestrict; }
     void setLongRegRestrict(bool b) { bLongRegRestrict = b; }
@@ -401,6 +408,7 @@ namespace gbe
       return GenRegister::offset(reg, nr, subnr);
     }
 
+    GenRegister getLaneIDReg();
     /*! Implement public class */
     INLINE uint32_t getRegNum(void) const { return file.regNum(); }
     /*! Implements public interface */
@@ -454,6 +462,8 @@ namespace gbe
     bool hasQWord(const ir::Instruction &insn);
     /*! A root instruction needs to be generated */
     bool isRoot(const ir::Instruction &insn) const;
+    /*! Set debug infomation to Selection */
+    void setDBGInfo_SEL(DebugInfo in) { DBGInfo = in; }
 
     /*! To handle selection block allocation */
     DECL_POOL(SelectionBlock, blockPool);
@@ -491,8 +501,11 @@ namespace gbe
     uint32_t vectorNum;
     /*! If true, generate code backward */
     bool bwdCodeGeneration;
+    DebugInfo DBGInfo;
     /*! To make function prototypes more readable */
     typedef const GenRegister &Reg;
+    /*! If true, the thread map has already been stored */
+    bool storeThreadMap;
 
     /*! Check for destination register. Major purpose is to find
         out partially updated dst registers. These registers will
@@ -513,8 +526,6 @@ namespace gbe
   INLINE void OP(Reg dst, Reg src0, Reg src1, GenRegister tmp[6]) { I64Shift(SEL_OP_##OP, dst, src0, src1, tmp); }
     ALU1(MOV)
     ALU1(READ_ARF)
-    ALU1WithTemp(MOV_DF)
-    ALU1WithTemp(LOAD_DF_IMM)
     ALU1(LOAD_INT64_IMM)
     ALU1(RNDZ)
     ALU1(RNDE)
@@ -545,6 +556,7 @@ namespace gbe
     ALU2(MACH)
     ALU1(LZD)
     ALU3(MAD)
+    ALU3(LRP)
     ALU2WithTemp(MUL_HI)
     ALU1(FBH)
     ALU1(FBL)
@@ -617,21 +629,21 @@ namespace gbe
     /*! No-op */
     void NOP(void);
     /*! Wait instruction (used for the barrier) */
-    void WAIT(void);
+    void WAIT(uint32_t n = 0);
     /*! Atomic instruction */
-    void ATOMIC(Reg dst, uint32_t function, uint32_t srcNum, Reg src0, Reg src1, Reg src2, GenRegister bti, GenRegister *flagTemp);
+    void ATOMIC(Reg dst, uint32_t function, uint32_t srcNum, Reg src0, Reg src1, Reg src2, GenRegister bti, vector<GenRegister> temps);
     /*! Read 64 bits float/int array */
-    void READ64(Reg addr, const GenRegister *dst, const GenRegister *tmp, uint32_t elemNum, const GenRegister bti, bool native_long, GenRegister *flagTemp);
+    void READ64(Reg addr, const GenRegister *dst, const GenRegister *tmp, uint32_t elemNum, const GenRegister bti, bool native_long, vector<GenRegister> temps);
     /*! Write 64 bits float/int array */
-    void WRITE64(Reg addr, const GenRegister *src, const GenRegister *tmp, uint32_t srcNum, GenRegister bti, bool native_long, GenRegister *flagTemp);
+    void WRITE64(Reg addr, const GenRegister *src, const GenRegister *tmp, uint32_t srcNum, GenRegister bti, bool native_long, vector<GenRegister> temps);
     /*! Untyped read (up to 4 elements) */
-    void UNTYPED_READ(Reg addr, const GenRegister *dst, uint32_t elemNum, GenRegister bti, GenRegister *flagTemp);
+    void UNTYPED_READ(Reg addr, const GenRegister *dst, uint32_t elemNum, GenRegister bti, vector<GenRegister> temps);
     /*! Untyped write (up to 4 elements) */
-    void UNTYPED_WRITE(Reg addr, const GenRegister *src, uint32_t elemNum, GenRegister bti, GenRegister *flagTemp);
+    void UNTYPED_WRITE(Reg addr, const GenRegister *src, uint32_t elemNum, GenRegister bti, vector<GenRegister> temps);
     /*! Byte gather (for unaligned bytes, shorts and ints) */
-    void BYTE_GATHER(Reg dst, Reg addr, uint32_t elemSize, GenRegister bti, GenRegister *flagTemp);
+    void BYTE_GATHER(Reg dst, Reg addr, uint32_t elemSize, GenRegister bti, vector<GenRegister> temps);
     /*! Byte scatter (for unaligned bytes, shorts and ints) */
-    void BYTE_SCATTER(Reg addr, Reg src, uint32_t elemSize, GenRegister bti, GenRegister *flagTemp);
+    void BYTE_SCATTER(Reg addr, Reg src, uint32_t elemSize, GenRegister bti, vector <GenRegister> temps);
     /*! DWord scatter (for constant cache read) */
     void DWORD_GATHER(Reg dst, Reg addr, uint32_t bti);
     /*! Unpack the uint to charN */
@@ -658,16 +670,46 @@ namespace gbe
     void ALU3(SelectionOpcode opcode, Reg dst, Reg src0, Reg src1, Reg src2);
     /*! Encode sample instructions */
     void SAMPLE(GenRegister *dst, uint32_t dstNum, GenRegister *msgPayloads, uint32_t msgNum, uint32_t bti, uint32_t sampler, bool isLD, bool isUniform);
+    /*! Encode vme instructions */
+    void VME(uint32_t bti, GenRegister *dst, GenRegister *payloadVal, uint32_t dstNum, uint32_t srcNum, uint32_t msg_type, uint32_t vme_search_path_lut, uint32_t lut_sub);
     /*! Encode typed write instructions */
     void TYPED_WRITE(GenRegister *msgs, uint32_t msgNum, uint32_t bti, bool is3D);
     /*! Get image information */
     void GET_IMAGE_INFO(uint32_t type, GenRegister *dst, uint32_t dst_num, uint32_t bti);
+    /*! Calculate the timestamp */
+    void CALC_TIMESTAMP(GenRegister ts[5], int tsN, GenRegister tmp, uint32_t pointNum, uint32_t tsType);
+    /*! Store the profiling info */
+    void STORE_PROFILING(uint32_t profilingType, uint32_t bti, GenRegister tmp0, GenRegister tmp1, GenRegister ts[5], int tsNum);
+    /*! Printf */
+    void PRINTF(GenRegister dst, uint8_t bti, GenRegister tmp0, GenRegister tmp1, GenRegister src[8],
+                int srcNum, uint16_t num, bool isContinue, uint32_t totalSize);
     /*! Multiply 64-bit integers */
     void I64MUL(Reg dst, Reg src0, Reg src1, GenRegister *tmp, bool native_long);
     /*! 64-bit integer division */
     void I64DIV(Reg dst, Reg src0, Reg src1, GenRegister *tmp, int tmp_int);
     /*! 64-bit integer remainder of division */
     void I64REM(Reg dst, Reg src0, Reg src1, GenRegister *tmp, int tmp_int);
+    /*! double division */
+    void F64DIV(Reg dst, Reg src0, Reg src1, GenRegister* tmp, int tmpNum);
+    /*! Work Group Operations */
+    void WORKGROUP_OP(uint32_t wg_op, Reg dst, GenRegister src,
+                      GenRegister tmpData1,
+                      GenRegister localThreadID, GenRegister localThreadNUM,
+                      GenRegister tmpData2, GenRegister slmOff,
+                      vector<GenRegister> msg, uint32_t msgSizeReq,
+                      GenRegister localBarrier);
+    /*! Sub Group Operations */
+    void SUBGROUP_OP(uint32_t wg_op, Reg dst, GenRegister src,
+                      GenRegister tmpData1, GenRegister tmpData2);
+    /*! Oblock read */
+    void OBREAD(GenRegister* dsts, uint32_t vec_size, GenRegister addr, GenRegister header, uint32_t bti, GenRegister* tmp, uint32_t tmp_size);
+    /*! Oblock write */
+    void OBWRITE(GenRegister addr, GenRegister* values, uint32_t vec_size, GenRegister header, uint32_t bti, GenRegister* tmp, uint32_t tmp_size);
+    /*! Media block read */
+    void MBREAD(GenRegister* dsts, GenRegister coordx, GenRegister coordy, GenRegister header, GenRegister* tmp, uint32_t bti, uint32_t vec_size);
+    /*! Media block write */
+    void MBWRITE(GenRegister coordx, GenRegister coordy, GenRegister* values, GenRegister header, GenRegister* tmp, uint32_t bti, uint32_t vec_size);
+
     /* common functions for both binary instruction and sel_cmp and compare instruction.
        It will handle the IMM or normal register assignment, and will try to avoid LOADI
        as much as possible. */
@@ -735,6 +777,15 @@ namespace gbe
             GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
     }
 
+    INLINE vector<GenRegister> getBTITemps(const ir::BTI &bti) {
+      vector<GenRegister> temps;
+      if (!bti.isConst) {
+        temps.push_back(selReg(reg(ir::FAMILY_WORD, true), ir::TYPE_U16));
+        temps.push_back(selReg(reg(ir::FAMILY_DWORD, true), ir::TYPE_U32));
+      }
+      return temps;
+    }
+
     /*! Use custom allocators */
     GBE_CLASS(Opaque);
     friend class SelectionBlock;
@@ -744,6 +795,7 @@ namespace gbe
     uint32_t currAuxLabel;
     bool bHas32X32Mul;
     bool bHasLongType;
+    bool bHasDoubleType;
     bool bHasHalfType;
     bool bLongRegRestrict;
     uint32_t ldMsgOrder;
@@ -786,8 +838,9 @@ namespace gbe
     ctx(ctx), block(NULL),
     curr(ctx.getSimdWidth()), file(ctx.getFunction().getRegisterFile()),
     maxInsnNum(ctx.getFunction().getLargestBlockSize()), dagPool(maxInsnNum),
-    stateNum(0), vectorNum(0), bwdCodeGeneration(false), currAuxLabel(ctx.getFunction().labelNum()),
-    bHas32X32Mul(false), bHasLongType(false), bHasHalfType(false), bLongRegRestrict(false),
+    stateNum(0), vectorNum(0), bwdCodeGeneration(false), storeThreadMap(false),
+    currAuxLabel(ctx.getFunction().labelNum()), bHas32X32Mul(false), bHasLongType(false),
+    bHasDoubleType(false), bHasHalfType(false), bLongRegRestrict(false),
     ldMsgOrder(LD_MSG_ORDER_IVB), slowByteGather(false)
   {
     const ir::Function &fn = ctx.getFunction();
@@ -847,6 +900,7 @@ namespace gbe
     GBE_ASSERT(dstNum <= SelectionInstruction::MAX_DST_NUM && srcNum <= SelectionInstruction::MAX_SRC_NUM);
     GBE_ASSERT(this->block != NULL);
     SelectionInstruction *insn = this->create(opcode, dstNum, srcNum);
+    insn->setDBGInfo(DBGInfo);
     if (this->bwdCodeGeneration)
       this->bwdList.push_back(insn);
     else
@@ -1110,7 +1164,7 @@ namespace gbe
       case FAMILY_DWORD: SEL_REG(f16grf, f8grf, f1grf); break;
       case FAMILY_QWORD:
         if (!this->hasLongType()) {
-          SEL_REG(df16grf, df8grf, df1grf);
+          SEL_REG(ud16grf, ud8grf, ud1grf);
         } else {
           SEL_REG(ul16grf, ul8grf, ul1grf);
         }
@@ -1153,7 +1207,19 @@ namespace gbe
     SelectionInstruction *insn = this->appendInsn(SEL_OP_JMPI, 0, 1);
     insn->src(0) = src;
     insn->index = index.value();
-    insn->extra.longjmp = abs(index - origin) > 800;
+    ir::LabelIndex start, end;
+    if (origin.value() < index.value()) {
+    // Forward Jump, need to exclude the target BB. Because we
+    // need to jump to the beginning of it.
+      start = origin;
+      end = ir::LabelIndex(index.value() - 1);
+    } else {
+      start = index;
+      end = origin;
+    }
+    // FIXME, this longjmp check is too hacky. We need to support instruction
+    // insertion at code emission stage in the future.
+    insn->extra.longjmp = ctx.getFunction().getDistance(start, end) > 3000;
     return insn->extra.longjmp ? 2 : 1;
   }
 
@@ -1227,10 +1293,11 @@ namespace gbe
   }
 
   void Selection::Opaque::ATOMIC(Reg dst, uint32_t function,
-                                     uint32_t srcNum, Reg src0,
-                                     Reg src1, Reg src2, GenRegister bti, GenRegister *flagTemp) {
-    unsigned dstNum = flagTemp == NULL ? 1 : 2;
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_ATOMIC, dstNum, srcNum + 1);
+                                 uint32_t msgPayload, Reg src0,
+                                 Reg src1, Reg src2, GenRegister bti,
+                                 vector<GenRegister> temps) {
+    unsigned dstNum = 1 + temps.size();
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_ATOMIC, dstNum, msgPayload + 1);
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
       insn->state.flag = 0;
@@ -1238,17 +1305,21 @@ namespace gbe
     }
 
     insn->dst(0) = dst;
-    if(flagTemp) insn->dst(1) = *flagTemp;
+    if(temps.size()) {
+      insn->dst(1) = temps[0];
+      insn->dst(2) = temps[1];
+    }
 
     insn->src(0) = src0;
-    if(srcNum > 1) insn->src(1) = src1;
-    if(srcNum > 2) insn->src(2) = src2;
-    insn->src(srcNum) = bti;
+    if(msgPayload > 1) insn->src(1) = src1;
+    if(msgPayload > 2) insn->src(2) = src2;
+    insn->src(msgPayload) = bti;
+
     insn->extra.function = function;
-    insn->extra.elem = srcNum;
+    insn->extra.elem = msgPayload;
 
     SelectionVector *vector = this->appendVector();
-    vector->regNum = srcNum;
+    vector->regNum = msgPayload; //bti not included in SelectionVector
     vector->offsetID = 0;
     vector->reg = &insn->src(0);
     vector->isSrc = 1;
@@ -1256,7 +1327,11 @@ namespace gbe
 
   void Selection::Opaque::EOT(void) { this->appendInsn(SEL_OP_EOT, 0, 0); }
   void Selection::Opaque::NOP(void) { this->appendInsn(SEL_OP_NOP, 0, 0); }
-  void Selection::Opaque::WAIT(void) { this->appendInsn(SEL_OP_WAIT, 0, 0); }
+  void Selection::Opaque::WAIT(uint32_t n)
+  {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_WAIT, 0, 0);
+    insn->extra.waitType = n;
+  }
 
   void Selection::Opaque::READ64(Reg addr,
                                  const GenRegister *dst,
@@ -1264,14 +1339,14 @@ namespace gbe
                                  uint32_t elemNum,
                                  const GenRegister bti,
                                  bool native_long,
-                                 GenRegister *flagTemp)
+                                 vector<GenRegister> temps)
   {
     SelectionInstruction *insn = NULL;
     SelectionVector *srcVector = NULL;
     SelectionVector *dstVector = NULL;
 
     if (!native_long) {
-      unsigned dstNum = flagTemp == NULL ? elemNum : elemNum+1;
+      unsigned dstNum = elemNum + temps.size();
       insn = this->appendInsn(SEL_OP_READ64, dstNum, 2);
       srcVector = this->appendVector();
       dstVector = this->appendVector();
@@ -1280,10 +1355,12 @@ namespace gbe
         insn->dst(elemID) = dst[elemID];
 
       // flagTemp don't need to be put in SelectionVector
-      if (flagTemp)
-        insn->dst(elemNum) = *flagTemp;
+      if (temps.size()) {
+        insn->dst(elemNum) = temps[0];
+        insn->dst(elemNum + 1) = temps[1];
+      }
     } else {
-      unsigned dstNum = flagTemp == NULL ? elemNum*2 : elemNum*2+1;
+      unsigned dstNum = elemNum*2 + temps.size();
       insn = this->appendInsn(SEL_OP_READ64, dstNum, 2);
       srcVector = this->appendVector();
       dstVector = this->appendVector();
@@ -1295,8 +1372,10 @@ namespace gbe
         insn->dst(elemID + elemNum) = dst[elemID];
 
       // flagTemp don't need to be put in SelectionVector
-      if (flagTemp)
-        insn->dst(2*elemNum) = *flagTemp;
+      if (temps.size()) {
+        insn->dst(2*elemNum) = temps[0];
+        insn->dst(2*elemNum + 1) = temps[1];
+      }
     }
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
@@ -1324,9 +1403,9 @@ namespace gbe
                                        const GenRegister *dst,
                                        uint32_t elemNum,
                                        GenRegister bti,
-                                       GenRegister *flagTemp)
+                                       vector<GenRegister> temps)
   {
-    unsigned dstNum = flagTemp == NULL ? elemNum : elemNum+1;
+    unsigned dstNum = elemNum + temps.size();
     SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_READ, dstNum, 2);
     SelectionVector *srcVector = this->appendVector();
     SelectionVector *dstVector = this->appendVector();
@@ -1335,8 +1414,10 @@ namespace gbe
     // Regular instruction to encode
     for (uint32_t elemID = 0; elemID < elemNum; ++elemID)
       insn->dst(elemID) = dst[elemID];
-    if (flagTemp)
-      insn->dst(elemNum) = *flagTemp;
+    if (temps.size()) {
+      insn->dst(elemNum) = temps[0];
+      insn->dst(elemNum + 1) = temps[1];
+    }
 
     insn->src(0) = addr;
     insn->src(1) = bti;
@@ -1365,13 +1446,13 @@ namespace gbe
                                   uint32_t srcNum,
                                   GenRegister bti,
                                   bool native_long,
-                                  GenRegister *flagTemp)
+                                  vector<GenRegister> temps)
   {
     SelectionVector *vector = NULL;
     SelectionInstruction *insn = NULL;
 
     if (!native_long) {
-      unsigned dstNum = flagTemp == NULL ? 0 : 1;
+      unsigned dstNum = temps.size();
       insn = this->appendInsn(SEL_OP_WRITE64, dstNum, srcNum + 2);
       vector = this->appendVector();
       // Register layout:
@@ -1382,8 +1463,10 @@ namespace gbe
         insn->src(elemID + 1) = src[elemID];
 
       insn->src(srcNum+1) = bti;
-      if (flagTemp)
-        insn->dst(0) = *flagTemp;
+      if (temps.size()) {
+        insn->dst(0) = temps[0];
+        insn->dst(1) = temps[1];
+      }
       insn->extra.elem = srcNum;
 
       vector->regNum = srcNum + 1;
@@ -1391,7 +1474,7 @@ namespace gbe
       vector->reg = &insn->src(0);
       vector->isSrc = 1;
     } else { // handle the native long case
-      unsigned dstNum = flagTemp == NULL ? srcNum : srcNum+1;
+      unsigned dstNum = srcNum + temps.size();
       // Register layout:
       // dst: srcNum, (flagTemp)
       // src: srcNum, addr, srcNum, bti.
@@ -1411,8 +1494,10 @@ namespace gbe
       for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
         insn->dst(elemID) = tmp[0];
 
-      if (flagTemp)
-        insn->dst(srcNum) = *flagTemp;
+      if (temps.size()) {
+        insn->dst(srcNum) = temps[0];
+        insn->dst(srcNum + 1) = temps[1];
+      }
       insn->extra.elem = srcNum;
 
       vector->regNum = srcNum + 1;
@@ -1431,10 +1516,11 @@ namespace gbe
                                         const GenRegister *src,
                                         uint32_t elemNum,
                                         GenRegister bti,
-                                        GenRegister *flagTemp)
+                                        vector<GenRegister> temps)
   {
-    unsigned dstNum = flagTemp == NULL ? 0 : 1;
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_WRITE, dstNum, elemNum+2);
+    unsigned dstNum = temps.size();
+    unsigned srcNum = elemNum + 2 + temps.size();
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_WRITE, dstNum, srcNum);
     SelectionVector *vector = this->appendVector();
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
@@ -1442,14 +1528,17 @@ namespace gbe
       insn->state.subFlag = 1;
     }
 
-    if (flagTemp) insn->dst(0) = *flagTemp;
     // Regular instruction to encode
     insn->src(0) = addr;
     for (uint32_t elemID = 0; elemID < elemNum; ++elemID)
       insn->src(elemID+1) = src[elemID];
     insn->src(elemNum+1) = bti;
-    if (flagTemp)
-      insn->src(elemNum+2) = *flagTemp;
+    if (temps.size()) {
+      insn->dst(0) = temps[0];
+      insn->dst(1) = temps[1];
+      insn->src(elemNum + 2) = temps[0];
+      insn->src(elemNum + 3) = temps[1];
+    }
     insn->extra.elem = elemNum;
 
     // Sends require contiguous allocation for the sources
@@ -1459,8 +1548,11 @@ namespace gbe
     vector->isSrc = 1;
   }
 
-  void Selection::Opaque::BYTE_GATHER(Reg dst, Reg addr, uint32_t elemSize, GenRegister bti, GenRegister *flagTemp) {
-    unsigned dstNum = flagTemp == NULL ? 1 : 2;
+  void Selection::Opaque::BYTE_GATHER(Reg dst, Reg addr,
+                                      uint32_t elemSize,
+                                      GenRegister bti,
+                                      vector<GenRegister> temps) {
+    unsigned dstNum = 1 + temps.size();
     SelectionInstruction *insn = this->appendInsn(SEL_OP_BYTE_GATHER, dstNum, 2);
     SelectionVector *srcVector = this->appendVector();
     SelectionVector *dstVector = this->appendVector();
@@ -1476,8 +1568,10 @@ namespace gbe
     insn->src(0) = addr;
     insn->src(1) = bti;
     insn->dst(0) = dst;
-    if (flagTemp)
-      insn->dst(1) = *flagTemp;
+    if (temps.size()) {
+      insn->dst(1) = temps[0];
+      insn->dst(2) = temps[1];
+    }
 
     insn->extra.elem = elemSize;
 
@@ -1493,8 +1587,9 @@ namespace gbe
     srcVector->reg = &insn->src(0);
   }
 
-  void Selection::Opaque::BYTE_SCATTER(Reg addr, Reg src, uint32_t elemSize, GenRegister bti, GenRegister *flagTemp) {
-    unsigned dstNum = flagTemp == NULL ? 0 : 1;
+  void Selection::Opaque::BYTE_SCATTER(Reg addr, Reg src, uint32_t elemSize,
+                                       GenRegister bti, vector<GenRegister> temps) {
+    unsigned dstNum = temps.size();
     SelectionInstruction *insn = this->appendInsn(SEL_OP_BYTE_SCATTER, dstNum, 3);
     SelectionVector *vector = this->appendVector();
 
@@ -1503,8 +1598,10 @@ namespace gbe
       insn->state.subFlag = 1;
     }
 
-    if (flagTemp)
-      insn->dst(0) = *flagTemp;
+    if (temps.size()) {
+      insn->dst(0) = temps[0];
+      insn->dst(1) = temps[1];
+    }
     // Instruction to encode
     insn->src(0) = addr;
     insn->src(1) = src;
@@ -1617,6 +1714,15 @@ namespace gbe
       insn->dst(i + 1) = tmp[i];
   }
 
+  void Selection::Opaque::F64DIV(Reg dst, Reg src0, Reg src1, GenRegister* tmp, int tmpNum) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_F64DIV, tmpNum + 1, 2);
+    insn->dst(0) = dst;
+    insn->src(0) = src0;
+    insn->src(1) = src1;
+    for(int i = 0; i < tmpNum; i++)
+      insn->dst(i + 1) = tmp[i];
+  }
+
   void Selection::Opaque::ALU1(SelectionOpcode opcode, Reg dst, Reg src) {
     SelectionInstruction *insn = this->appendInsn(opcode, 1, 1);
     insn->dst(0) = dst;
@@ -1659,6 +1765,29 @@ namespace gbe
     insn->dst(0) = dst;
     insn->src(0) = src0;
     insn->src(1) = src1;
+  }
+
+  GenRegister Selection::Opaque::getLaneIDReg()
+  {
+    const GenRegister laneID = GenRegister::immv(0x76543210);
+    ir::Register r = reg(ir::RegisterFamily::FAMILY_WORD);
+    const GenRegister dst = selReg(r, ir::TYPE_U16);
+
+    uint32_t execWidth = curr.execWidth;
+    if (execWidth == 8)
+      MOV(dst, laneID);
+    else {
+      push();
+      curr.execWidth = 8;
+      curr.noMask = 1;
+      MOV(dst, laneID);
+      //Packed Unsigned Half-Byte Integer Vector does not work
+      //have to mock by adding 8 to the singed vector
+      const GenRegister eight = GenRegister::immuw(8);
+      ADD(GenRegister::offset(dst, 0, 16), dst, eight);
+      pop();
+    }
+    return dst;
   }
 
   void Selection::Opaque::I64CMP(uint32_t conditional, Reg src0, Reg src1, GenRegister tmp[3]) {
@@ -1750,6 +1879,268 @@ namespace gbe
       insn->dst(i + 1) = tmp[i];
   }
 
+  void Selection::Opaque::CALC_TIMESTAMP(GenRegister ts[5], int tsN, GenRegister tmp, uint32_t pointNum, uint32_t tsType) {
+    SelectionInstruction *insn = NULL;
+    if (!this->hasLongType()) {
+      insn = this->appendInsn(SEL_OP_CALC_TIMESTAMP, tsN + 1, tsN);
+    } else {// No need for tmp
+      insn = this->appendInsn(SEL_OP_CALC_TIMESTAMP, tsN, tsN);
+    }
+
+    for (int i = 0; i < tsN; i++) {
+      insn->src(i) = ts[i];
+      insn->dst(i) = ts[i];
+    }
+
+    if (!this->hasLongType())
+      insn->dst(tsN) = tmp;
+
+    insn->extra.pointNum = static_cast<uint16_t>(pointNum);
+    insn->extra.timestampType = static_cast<uint16_t>(tsType);
+  }
+
+  void Selection::Opaque::STORE_PROFILING(uint32_t profilingType, uint32_t bti,
+                GenRegister tmp0, GenRegister tmp1, GenRegister ts[5], int tsNum) {
+    if (tsNum == 3) { // SIMD16 mode
+      SelectionInstruction *insn = this->appendInsn(SEL_OP_STORE_PROFILING, 1, 3);
+      for (int i = 0; i < 3; i++)
+        insn->src(i) = ts[i];
+      insn->dst(0) = tmp0;
+
+      insn->extra.profilingType = static_cast<uint16_t>(profilingType);
+      insn->extra.profilingBTI = static_cast<uint16_t>(bti);
+    } else { // SIMD8 mode
+      GBE_ASSERT(tsNum == 5);
+      SelectionInstruction *insn = this->appendInsn(SEL_OP_STORE_PROFILING, 2, 5);
+      SelectionVector *dstVector = this->appendVector();
+      for (int i = 0; i < 5; i++)
+        insn->src(i) = ts[i];
+      insn->dst(0) = tmp0;
+      insn->dst(1) = tmp1;
+
+      dstVector->regNum = 2;
+      dstVector->isSrc = 0;
+      dstVector->offsetID = 0;
+      dstVector->reg = &insn->dst(0);
+
+      insn->extra.profilingType = static_cast<uint16_t>(profilingType);
+      insn->extra.profilingBTI = static_cast<uint16_t>(bti);
+    }
+  }
+
+  void Selection::Opaque::PRINTF(GenRegister dst, uint8_t bti, GenRegister tmp0, GenRegister tmp1,
+               GenRegister src[8], int srcNum, uint16_t num, bool isContinue, uint32_t totalSize) {
+    if (isContinue) {
+      SelectionInstruction *insn = this->appendInsn(SEL_OP_PRINTF, 3, srcNum + 1);
+      SelectionVector *vector = this->appendVector();
+
+      for (int i = 0; i < srcNum; i++)
+        insn->src(i) = src[i];
+
+      insn->src(srcNum) = tmp0;
+
+      insn->dst(0) = dst;
+      insn->dst(1) = tmp0;
+      insn->dst(2) = tmp1;
+
+      vector->regNum = 2;
+      vector->reg = &insn->dst(1);
+      vector->offsetID = 0;
+      vector->isSrc = 0;
+
+      insn->extra.printfSize = static_cast<uint16_t>(totalSize);
+      insn->extra.continueFlag = isContinue;
+      insn->extra.printfBTI = bti;
+      insn->extra.printfNum = num;
+    } else {
+      SelectionInstruction *insn = this->appendInsn(SEL_OP_PRINTF, 3, srcNum);
+      SelectionVector *vector = this->appendVector();
+
+      for (int i = 0; i < srcNum; i++)
+        insn->src(i) = src[i];
+
+      insn->dst(0) = dst;
+      insn->dst(1) = tmp0;
+      insn->dst(2) = tmp1;
+
+      vector->regNum = 2;
+      vector->reg = &insn->dst(1);
+      vector->offsetID = 0;
+      vector->isSrc = 0;
+
+      insn->extra.printfSize = static_cast<uint16_t>(totalSize);
+      insn->extra.continueFlag = isContinue;
+      insn->extra.printfBTI = bti;
+      insn->extra.printfNum = num;
+    }
+  }
+
+  void Selection::Opaque::WORKGROUP_OP(uint32_t wg_op,
+                                       Reg dst,
+                                       GenRegister src,
+                                       GenRegister tmpData1,
+                                       GenRegister localThreadID,
+                                       GenRegister localThreadNUM,
+                                       GenRegister tmpData2,
+                                       GenRegister slmOff,
+                                       vector<GenRegister> msg,
+                                       uint32_t msgSizeReq,
+                                       GenRegister localBarrier)
+  {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_WORKGROUP_OP, 2 + msg.size(), 6);
+    SelectionVector *vector = this->appendVector();
+
+    /* allocate continuous GRF registers for READ/WRITE to SLM */
+    GBE_ASSERT(msg.size() >= msgSizeReq);
+    vector->regNum = msg.size();
+    vector->offsetID = 0;
+    vector->reg = &insn->dst(2);
+    vector->isSrc = 0;
+    insn->extra.workgroupOp = wg_op;
+
+    insn->dst(0) = dst;
+    insn->dst(1) = tmpData1;
+    for(uint32_t i = 0; i < msg.size(); i++)
+      insn->dst(2 + i) = msg[i];
+
+    insn->src(0) = localThreadID;
+    insn->src(1) = localThreadNUM;
+    insn->src(2) = src;
+    insn->src(3) = tmpData2;
+    insn->src(4) = slmOff;
+    insn->src(5) = localBarrier;
+  }
+
+  void Selection::Opaque::SUBGROUP_OP(uint32_t wg_op,
+                                       Reg dst,
+                                       GenRegister src,
+                                       GenRegister tmpData1,
+                                       GenRegister tmpData2)
+  {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_SUBGROUP_OP, 2, 2);
+
+    insn->extra.workgroupOp = wg_op;
+
+    insn->dst(0) = dst;
+    insn->dst(1) = tmpData1;
+
+    insn->src(0) = src;
+    insn->src(1) = tmpData2;
+  }
+  void Selection::Opaque::OBREAD(GenRegister* dsts,
+                                 uint32_t vec_size,
+                                 GenRegister addr,
+                                 GenRegister header,
+                                 uint32_t bti,
+                                 GenRegister* tmp,
+                                 uint32_t tmp_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBREAD, 1 + vec_size + tmp_size, 1);
+    SelectionVector *vector = this->appendVector();
+    insn->dst(0) = header;
+    for (uint32_t i = 0; i < vec_size; ++i)
+      insn->dst(1 + i) = dsts[i];
+    for (uint32_t i = 0; i < tmp_size; ++i)
+      insn->dst(1 + i + vec_size) = tmp[i];
+    insn->src(0) = addr;
+    insn->setbti(bti);
+    insn->extra.elem = vec_size; // number of vector size
+
+    // tmp regs for OWORD read dst
+    vector->regNum = tmp_size;
+    vector->reg = &insn->dst(1 + vec_size);
+    vector->offsetID = 1 + vec_size;
+    vector->isSrc = 0;
+  }
+
+  void Selection::Opaque::OBWRITE(GenRegister addr,
+                                  GenRegister* values,
+                                  uint32_t vec_size,
+                                  GenRegister header,
+                                  uint32_t bti,
+                                  GenRegister* tmp,
+                                  uint32_t tmp_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBWRITE, tmp_size + 1, vec_size + 1);
+    SelectionVector *vector = this->appendVector();
+    insn->src(0) = addr;
+    for (uint32_t i = 0; i < vec_size; ++i)
+      insn->src(i + 1) = values[i];
+    insn->dst(0) = header;
+    for (uint32_t i = 0; i < tmp_size; ++i)
+      insn->dst(i + 1) = tmp[i];
+    insn->setbti(bti);
+    insn->extra.elem = vec_size; // number of vector_size
+
+    // tmp regs for OWORD read dst
+    vector->regNum = tmp_size + 1;
+    vector->reg = &insn->dst(0);
+    vector->offsetID = 0;
+    vector->isSrc = 0;
+  }
+
+  void Selection::Opaque::MBREAD(GenRegister* dsts,
+                                 GenRegister coordx,
+                                 GenRegister coordy,
+                                 GenRegister header,
+                                 GenRegister* tmp,
+                                 uint32_t bti,
+                                 uint32_t vec_size) {
+
+    uint32_t simdWidth = curr.execWidth;
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBREAD, vec_size * simdWidth / 8, 3);
+    SelectionVector *vector = this->appendVector();
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      insn->dst(i) = dsts[i];
+      if(simdWidth == 16)
+        insn->dst(i + vec_size) = tmp[i];
+    }
+    insn->src(0) = coordx;
+    insn->src(1) = coordy;
+    insn->src(2) = header;
+    insn->setbti(bti);
+    insn->extra.elem = vec_size; // vector size
+
+    vector->regNum = vec_size;
+    vector->reg = &insn->dst(0);
+    vector->offsetID = 0;
+    vector->isSrc = 0;
+
+    if(simdWidth == 16)
+    {
+      SelectionVector *vectortmp = this->appendVector();
+      vectortmp->regNum = vec_size;
+      vectortmp->reg = &insn->dst(vec_size);
+      vectortmp->offsetID = vec_size;
+      vectortmp->isSrc = 0;
+    }
+  }
+
+  void Selection::Opaque::MBWRITE(GenRegister coordx,
+                                  GenRegister coordy,
+                                  GenRegister* values,
+                                  GenRegister header,
+                                  GenRegister* tmp,
+                                  uint32_t bti,
+                                  uint32_t vec_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBWRITE, 1 + vec_size, 2 + vec_size);
+    SelectionVector *vector = this->appendVector();
+    insn->src(0) = coordx;
+    insn->src(1) = coordy;
+    for (uint32_t i = 0; i < vec_size; ++i)
+      insn->src(2 + i) = values[i];
+    insn->dst(0) = header;
+    for (uint32_t i = 0; i < vec_size; ++i)
+      insn->dst(1 + i) = tmp[i];
+    insn->state = this->curr;
+    insn->setbti(bti);
+    insn->extra.elem = vec_size; // vector size
+
+    // We need to put the header and the data together
+    vector->regNum = 1 + vec_size;
+    vector->reg = &insn->dst(0);
+    vector->offsetID = 0;
+    vector->isSrc = 0;
+  }
+
   // Boiler plate to initialize the selection library at c++ pre-main
   static SelectionLibrary *selLib = NULL;
   static void destroySelectionLibrary(void) { GBE_DELETE(selLib); }
@@ -1774,9 +2165,11 @@ namespace gbe
     const ir::BasicBlock *insnBlock = insn.getParent();
     const ir::Liveness &liveness = this->ctx.getLiveness();
     const ir::Liveness::LiveOut &liveOut = liveness.getLiveOut(insnBlock);
-    const ir::Register reg = insn.getDst(0);
-    if (liveOut.contains(reg))
-      return true;
+    for(uint32_t i = 0; i < insn.getDstNum(); i++) {
+      const ir::Register reg = insn.getDst(i);
+      if (liveOut.contains(reg))
+        return true;
+    }
 
     // The instruction is only used in the current basic block
     return false;
@@ -1918,6 +2311,11 @@ namespace gbe
     return insnNum;
   }
 
+extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
+#define SET_SEL_DBGINFO(I)  \
+	if(OCL_DEBUGINFO)	 \
+	  this->setDBGInfo_SEL(I.DBGInfo)
+
   void Selection::Opaque::matchBasicBlock(const ir::BasicBlock &bb, uint32_t insnNum)
   {
     // Bottom up code generation
@@ -1937,6 +2335,7 @@ namespace gbe
     for (int32_t insnID = insnNum-1; insnID >= 0; --insnID) {
       // Process all possible patterns for this instruction
       SelectionDAG &dag = *insnDAG[insnID];
+      SET_SEL_DBGINFO(dag.insn);
       if (dag.isRoot) {
         const ir::Instruction &insn = dag.insn;
         const ir::Opcode opcode = insn.getOpcode();
@@ -1988,6 +2387,7 @@ namespace gbe
       }
     }
   }
+#undef SET_SEL_DBGINFO
 
   void Selection::Opaque::select(void)
   {
@@ -2035,50 +2435,102 @@ namespace gbe
     insn->extra.isUniform = isUniform;
   }
 
+  void Selection::Opaque::VME(uint32_t bti, GenRegister *dst, GenRegister *payloadVal,
+                              uint32_t dstNum, uint32_t srcNum, uint32_t msg_type,
+                              uint32_t vme_search_path_lut, uint32_t lut_sub) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_VME, dstNum, srcNum);
+    SelectionVector *dstVector = this->appendVector();
+    SelectionVector *msgVector = this->appendVector();
+
+    for (uint32_t elemID = 0; elemID < dstNum; ++elemID)
+      insn->dst(elemID) = dst[elemID];
+    for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
+      insn->src(elemID) = payloadVal[elemID];
+
+    dstVector->regNum = dstNum;
+    dstVector->isSrc = 0;
+    dstVector->offsetID = 0;
+    dstVector->reg = &insn->dst(0);
+
+    msgVector->regNum = srcNum;
+    msgVector->isSrc = 1;
+    msgVector->offsetID = 0;
+    msgVector->reg = &insn->src(0);
+
+    insn->setbti(bti);
+    insn->extra.msg_type = msg_type;
+    insn->extra.vme_search_path_lut = vme_search_path_lut;
+    insn->extra.lut_sub = lut_sub;
+  }
+
   ///////////////////////////////////////////////////////////////////////////
   // Code selection public implementation
   ///////////////////////////////////////////////////////////////////////////
+  const GenContext& Selection::getCtx()
+  {
+    return this->opaque->ctx;
+  }
 
   Selection::Selection(GenContext &ctx) {
     this->blockList = NULL;
     this->opaque = GBE_NEW(Selection::Opaque, ctx);
     this->opaque->setSlowByteGather(true);
+    opt_features = 0;
   }
 
   Selection75::Selection75(GenContext &ctx) : Selection(ctx) {
     this->opaque->setSlowByteGather(false);
+    opt_features = 0;
   }
 
   Selection8::Selection8(GenContext &ctx) : Selection(ctx) {
     this->opaque->setHas32X32Mul(true);
     this->opaque->setHasLongType(true);
-    this->opaque->setSlowByteGather(true);
+    this->opaque->setHasDoubleType(true);
+    this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    opt_features = SIOF_LOGICAL_SRCMOD;
   }
 
   SelectionChv::SelectionChv(GenContext &ctx) : Selection(ctx) {
     this->opaque->setHas32X32Mul(true);
     this->opaque->setHasLongType(true);
+    this->opaque->setHasDoubleType(true);
     this->opaque->setLongRegRestrict(true);
-    this->opaque->setSlowByteGather(true);
+    this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    opt_features = SIOF_LOGICAL_SRCMOD | SIOF_OP_MOV_LONG_REG_RESTRICT;
   }
 
   Selection9::Selection9(GenContext &ctx) : Selection(ctx) {
     this->opaque->setHas32X32Mul(true);
     this->opaque->setHasLongType(true);
+    this->opaque->setHasDoubleType(true);
     this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
-    this->opaque->setSlowByteGather(true);
+    this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    opt_features = SIOF_LOGICAL_SRCMOD;
   }
 
   SelectionBxt::SelectionBxt(GenContext &ctx) : Selection(ctx) {
     this->opaque->setHas32X32Mul(true);
     this->opaque->setHasLongType(true);
     this->opaque->setLongRegRestrict(true);
+    this->opaque->setHasDoubleType(true);
     this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
-    this->opaque->setSlowByteGather(true);
+    this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    opt_features = SIOF_LOGICAL_SRCMOD | SIOF_OP_MOV_LONG_REG_RESTRICT;
+  }
+
+  SelectionKbl::SelectionKbl(GenContext &ctx) : Selection(ctx) {
+    this->opaque->setHas32X32Mul(true);
+    this->opaque->setHasLongType(true);
+    this->opaque->setHasDoubleType(true);
+    this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
+    this->opaque->setSlowByteGather(false);
+    this->opaque->setHasHalfType(true);
+    opt_features = SIOF_LOGICAL_SRCMOD;
   }
 
   void Selection::Opaque::TYPED_WRITE(GenRegister *msgs, uint32_t msgNum,
@@ -2314,8 +2766,8 @@ namespace gbe
           break;
         case ir::OP_SIMD_ID:
           {
-            const GenRegister selLaneID = sel.selReg(ir::ocl::laneid, ir::TYPE_U32);
-            sel.MOV(dst, selLaneID);
+            GenRegister laneID = sel.getLaneIDReg();
+            sel.MOV(dst, laneID);
           }
           break;
         default: NOT_SUPPORTED;
@@ -2364,10 +2816,7 @@ namespace gbe
             }
             break;
           case ir::OP_MOV:
-            if (dst.isdf()) {
-              ir::Register r = sel.reg(ir::RegisterFamily::FAMILY_QWORD);
-              sel.MOV_DF(dst, src, sel.selReg(r, ir::TYPE_U64));
-            } else {
+            {
               sel.push();
                 auto dag = sel.regDAG[insn.getDst(0)];
                 if (sel.getRegisterFamily(insn.getDst(0)) == ir::FAMILY_BOOL &&
@@ -2406,12 +2855,13 @@ namespace gbe
           case ir::OP_SIMD_ANY:
             {
               const GenRegister constZero = GenRegister::immuw(0);;
-              const GenRegister regOne = GenRegister::uw1grf(ir::ocl::one);
+              const GenRegister constOne = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_DWORD)), GEN_TYPE_UD);
               const GenRegister flag01 = GenRegister::flag(0, 1);
 
               sel.push();
                 int simdWidth = sel.curr.execWidth;
                 sel.curr.predicate = GEN_PREDICATE_NONE;
+                sel.MOV(constOne, GenRegister::immud(1));
                 sel.curr.execWidth = 1;
                 sel.curr.noMask = 1;
                 sel.MOV(flag01, constZero);
@@ -2428,19 +2878,21 @@ namespace gbe
                   sel.curr.predicate = GEN_PREDICATE_ALIGN1_ANY8H;
                 else
                   NOT_IMPLEMENTED;
-                sel.SEL(dst, regOne, constZero);
+                sel.SEL(dst, constOne, constZero);
               sel.pop();
             }
             break;
           case ir::OP_SIMD_ALL:
             {
               const GenRegister constZero = GenRegister::immuw(0);
+              const GenRegister constOne = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_DWORD)), GEN_TYPE_UD);
               const GenRegister regOne = GenRegister::uw1grf(ir::ocl::one);
               const GenRegister flag01 = GenRegister::flag(0, 1);
 
               sel.push();
                 int simdWidth = sel.curr.execWidth;
                 sel.curr.predicate = GEN_PREDICATE_NONE;
+                sel.MOV(constOne, GenRegister::immud(1));
                 sel.curr.execWidth = 1;
                 sel.curr.noMask = 1;
                 sel.MOV(flag01, regOne);
@@ -2458,7 +2910,7 @@ namespace gbe
                   sel.curr.predicate = GEN_PREDICATE_ALIGN1_ALL8H;
                 else
                   NOT_IMPLEMENTED;
-                sel.SEL(dst, regOne, constZero);
+                sel.SEL(dst, constOne, constZero);
               sel.pop();
             }
             break;
@@ -2565,6 +3017,39 @@ namespace gbe
           else
             sel.I64REM(dst, src0, src1, tmp, tmp_num);
         sel.pop();
+      } else if (type == TYPE_DOUBLE) {
+        if (!sel.hasDoubleType())
+          GBE_ASSERT(0);
+
+        GenRegister tmp[10];
+        int tmpNum = 7;
+        ir::RegisterFamily fm;
+        if (sel.ctx.getSimdWidth() == 16) {
+          fm = FAMILY_WORD;
+        } else {
+          fm = FAMILY_DWORD;
+        }
+
+        /* madm and invm need special accumutor support, which require us in align16
+           mode. If any src is uniform, we need another tmp register and MOV the
+           uniform one to it. Because the madm and invm will work in align16 mode,
+           the channel mask is different from the align1 mode. So we can not directly
+           write the result to the dst and need a tmp register to hold the result and
+           MOV it to dst later. */
+        tmpNum++; //For the dst.
+        if (src0.hstride == GEN_HORIZONTAL_STRIDE_0) tmpNum++;
+        if (src1.hstride == GEN_HORIZONTAL_STRIDE_0) tmpNum++;
+
+        for (int i = 0; i < tmpNum; i++)
+          tmp[i] = GenRegister::df8grf(sel.reg(fm));
+
+        sel.push();
+          sel.curr.flag = 0;
+          sel.curr.subFlag = 1;
+          sel.F64DIV(dst, src0, src1, tmp, tmpNum);
+        sel.pop();
+      } else {
+        GBE_ASSERT(0);
       }
       markAllChildren(dag);
       return true;
@@ -2863,7 +3348,7 @@ namespace gbe
 
       // XXX TODO: we need a clean support of FP_CONTRACT to remove below line 'return false'
       // if 'pragma FP_CONTRACT OFF' is used in cl kernel, we should not do mad optimization.
-      if (!sel.ctx.relaxMath || sel.ctx.getSimdWidth() == 16)
+      if (!sel.ctx.relaxMath)
         return false;
       // MAD tend to increase liveness of the sources (since there are three of
       // them). TODO refine this strategy. Well, we should be able at least to
@@ -2881,17 +3366,15 @@ namespace gbe
       const GenRegister dst = sel.selReg(insn.getDst(0), TYPE_FLOAT);
       if (child0 && child0->insn.getOpcode() == OP_MUL) {
         GBE_ASSERT(cast<ir::BinaryInstruction>(child0->insn).getType() == TYPE_FLOAT);
-        SelectionDAG *child00 = child0->child[0];
-        SelectionDAG *child01 = child0->child[1];
-        if ((child00 && child00->insn.getOpcode() == OP_LOADI) ||
-            (child01 && child01->insn.getOpcode() == OP_LOADI) ||
-            (child1 && child1->insn.getOpcode() == OP_LOADI))
-          return false;
         const GenRegister src0 = sel.selReg(child0->insn.getSrc(0), TYPE_FLOAT);
         const GenRegister src1 = sel.selReg(child0->insn.getSrc(1), TYPE_FLOAT);
         GenRegister src2 = sel.selReg(insn.getSrc(1), TYPE_FLOAT);
         if(insn.getOpcode() == ir::OP_SUB) src2 = GenRegister::negate(src2);
+        sel.push();
+        if (sel.isScalarReg(insn.getDst(0)))
+          sel.curr.execWidth = 1;
         sel.MAD(dst, src2, src0, src1); // order different on HW!
+        sel.pop();
         if (child0->child[0]) child0->child[0]->isRoot = 1;
         if (child0->child[1]) child0->child[1]->isRoot = 1;
         if (child1) child1->isRoot = 1;
@@ -2899,17 +3382,15 @@ namespace gbe
       }
       if (child1 && child1->insn.getOpcode() == OP_MUL) {
         GBE_ASSERT(cast<ir::BinaryInstruction>(child1->insn).getType() == TYPE_FLOAT);
-        SelectionDAG *child10 = child1->child[0];
-        SelectionDAG *child11 = child1->child[1];
-        if ((child10 && child10->insn.getOpcode() == OP_LOADI) ||
-            (child11 && child11->insn.getOpcode() == OP_LOADI) ||
-            (child0 && child0->insn.getOpcode() == OP_LOADI))
-          return false;
         GenRegister src0 = sel.selReg(child1->insn.getSrc(0), TYPE_FLOAT);
         const GenRegister src1 = sel.selReg(child1->insn.getSrc(1), TYPE_FLOAT);
         const GenRegister src2 = sel.selReg(insn.getSrc(0), TYPE_FLOAT);
         if(insn.getOpcode() == ir::OP_SUB) src0 = GenRegister::negate(src0);
+        sel.push();
+        if (sel.isScalarReg(insn.getDst(0)))
+          sel.curr.execWidth = 1;
         sel.MAD(dst, src2, src0, src1); // order different on HW!
+        sel.pop();
         if (child1->child[0]) child1->child[0]->isRoot = 1;
         if (child1->child[1]) child1->child[1]->isRoot = 1;
         if (child0) child0->isRoot = 1;
@@ -3230,12 +3711,12 @@ namespace gbe
           ir::half hf = imm.getHalfValue();
           sel.MOV(GenRegister::retype(dst, GEN_TYPE_HF), GenRegister::immh(hf.getVal()));
           break;
-	}
+        }
         case TYPE_U16: sel.MOV(dst, GenRegister::immuw(imm.getIntegerValue())); break;
         case TYPE_S16: sel.MOV(dst, GenRegister::immw(imm.getIntegerValue())); break;
         case TYPE_U8:  sel.MOV(dst, GenRegister::immuw(imm.getIntegerValue())); break;
         case TYPE_S8:  sel.MOV(dst, GenRegister::immw(imm.getIntegerValue())); break;
-        case TYPE_DOUBLE: sel.LOAD_DF_IMM(dst, GenRegister::immdf(imm.getDoubleValue()), sel.selReg(sel.reg(FAMILY_QWORD), TYPE_U64)); break;
+        case TYPE_DOUBLE: sel.MOV(dst, GenRegister::immdf(imm.getDoubleValue())); break;
         case TYPE_S64: sel.LOAD_INT64_IMM(dst, GenRegister::immint64(imm.getIntegerValue())); break;
         case TYPE_U64: sel.LOAD_INT64_IMM(dst, GenRegister::immuint64(imm.getIntegerValue())); break;
         default: NOT_SUPPORTED;
@@ -3262,6 +3743,25 @@ namespace gbe
     }
 
     DECL_CTOR(SyncInstruction, 1,1);
+  };
+
+  /*! Wait instruction */
+  DECL_PATTERN(WaitInstruction)
+  {
+    INLINE bool emitOne(Selection::Opaque &sel, const ir::WaitInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      // Debugwait will use reg 1, which is different from barrier
+      sel.push();
+        sel.curr.noMask = 1;
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.WAIT(1);
+      sel.pop();
+      return true;
+    }
+
+    DECL_CTOR(WaitInstruction, 1,1);
   };
 
   INLINE uint32_t getByteScatterGatherSize(Selection::Opaque &sel, ir::Type type) {
@@ -3303,11 +3803,8 @@ namespace gbe
                    uint32_t valueNum,
                    ir::BTI bti) const
     {
-        //GenRegister temp = getRelativeAddress(sel, addr, sel.selReg(bti.base, ir::TYPE_U32));
-
         GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-        GenRegister tmp = sel.selReg(sel.reg(ir::FAMILY_WORD, true), ir::TYPE_U16);
-        sel.UNTYPED_READ(addr, dst.data(), valueNum, b, bti.isConst ? NULL : &tmp);
+        sel.UNTYPED_READ(addr, dst.data(), valueNum, b, sel.getBTITemps(bti));
     }
 
     void emitUntypedRead(Selection::Opaque &sel,
@@ -3368,7 +3865,6 @@ namespace gbe
       GBE_ASSERT(bti.isConst == 1);
       vector<GenRegister> dst(valueNum);
       GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-      GenRegister tmpFlag = sel.selReg(sel.reg(ir::FAMILY_WORD, true), ir::TYPE_U16);
       for ( uint32_t dstID = 0; dstID < valueNum; ++dstID)
         dst[dstID] = sel.selReg(insn.getValue(dstID), ir::TYPE_U64);
 
@@ -3378,9 +3874,9 @@ namespace gbe
           tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
         }
 
-        sel.READ64(addr, dst.data(), tmp.data(), valueNum, b, true, bti.isConst ? NULL : &tmpFlag);
+        sel.READ64(addr, dst.data(), tmp.data(), valueNum, b, true, sel.getBTITemps(bti));
       } else {
-        sel.READ64(addr, dst.data(), NULL, valueNum, b, false, bti.isConst ? NULL : &tmpFlag);
+        sel.READ64(addr, dst.data(), NULL, valueNum, b, false, sel.getBTITemps(bti));
       }
     }
 
@@ -3397,7 +3893,6 @@ namespace gbe
         GenRegister tmpData = sel.selReg(tmpReg, ir::TYPE_U32);
 
         GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-        GenRegister tmpFlag = sel.selReg(sel.reg(ir::FAMILY_WORD, true), ir::TYPE_U16);
 
         // Get dword aligned addr
         sel.push();
@@ -3410,7 +3905,7 @@ namespace gbe
         sel.push();
           if (isUniform)
             sel.curr.noMask = 1;
-          sel.UNTYPED_READ(tmpAddr, &tmpData, 1, b, bti.isConst ? NULL : &tmpFlag);
+          sel.UNTYPED_READ(tmpAddr, &tmpData, 1, b, sel.getBTITemps(bti));
 
           if (isUniform)
             sel.curr.execWidth = 1;
@@ -3522,53 +4017,96 @@ namespace gbe
 
       if(valueNum > 1) {
         GBE_ASSERT(!isUniform && "vector load should not be uniform. Something went wrong.");
-        vector<GenRegister> dst(valueNum);
-        const uint32_t typeSize = getFamilySize(family);
+        //need to investigate the case of GEN_BYTE_SCATTER_WORD later
+        //for GEN_BYTE_SCATTER_BYTE, if the pointer is not aligned to 4, using byte gather,
+        //                           on BDW, vec8 and vec16 are worse. on SKL/BXT, vec16 is worse.
+        if(sel.getSlowByteGather() || elemSize == GEN_BYTE_SCATTER_WORD
+            || (elemSize == GEN_BYTE_SCATTER_BYTE && (valueNum == 16 || valueNum == 8))) {
+          vector<GenRegister> dst(valueNum);
+          const uint32_t typeSize = getFamilySize(family);
 
-        for(uint32_t i = 0; i < valueNum; i++)
-          dst[i] = sel.selReg(insn.getValue(i), getType(family));
+          for(uint32_t i = 0; i < valueNum; i++)
+            dst[i] = sel.selReg(insn.getValue(i), getType(family));
 
-        uint32_t effectDataNum = (typeSize*valueNum + 3) / 4;
-        vector<GenRegister> tmp(effectDataNum + 1);
-        vector<GenRegister> tmp2(effectDataNum + 1);
-        vector<GenRegister> effectData(effectDataNum);
-        for(uint32_t i = 0; i < effectDataNum + 1; i++)
-          tmp2[i] = tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+          uint32_t effectDataNum = (typeSize*valueNum + 3) / 4;
+          vector<GenRegister> tmp(effectDataNum + 1);
+          vector<GenRegister> tmp2(effectDataNum + 1);
+          vector<GenRegister> effectData(effectDataNum);
+          for(uint32_t i = 0; i < effectDataNum + 1; i++)
+            tmp2[i] = tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
-        GenRegister alignedAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
-        sel.push();
-          if (isUniform)
-            sel.curr.noMask = 1;
-          sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(~0x3));
-        sel.pop();
+          GenRegister alignedAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+          sel.push();
+            if (isUniform)
+              sel.curr.noMask = 1;
+            sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(~0x3));
+          sel.pop();
 
-        uint32_t remainedReg = effectDataNum + 1;
-        uint32_t pos = 0;
-        do {
-          uint32_t width = remainedReg > 4 ? 4 : remainedReg;
-          vector<GenRegister> t1(tmp.begin() + pos, tmp.begin() + pos + width);
-          vector<GenRegister> t2(tmp2.begin() + pos, tmp2.begin() + pos + width);
-          if (pos != 0) {
-            sel.push();
-              if (isUniform)
-                sel.curr.noMask = 1;
-              sel.ADD(alignedAddr, alignedAddr, GenRegister::immud(pos * 4));
-            sel.pop();
+          uint32_t remainedReg = effectDataNum + 1;
+          uint32_t pos = 0;
+          do {
+            uint32_t width = remainedReg > 4 ? 4 : remainedReg;
+            vector<GenRegister> t1(tmp.begin() + pos, tmp.begin() + pos + width);
+            vector<GenRegister> t2(tmp2.begin() + pos, tmp2.begin() + pos + width);
+            if (pos != 0) {
+              sel.push();
+                if (isUniform)
+                  sel.curr.noMask = 1;
+                sel.ADD(alignedAddr, alignedAddr, GenRegister::immud(pos * 4));
+              sel.pop();
+            }
+            readDWord(sel, t1, alignedAddr, width, bti);
+            remainedReg -= width;
+            pos += width;
+          } while(remainedReg);
+
+          for(uint32_t i = 0; i < effectDataNum; i++)
+            effectData[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+
+          getEffectByteData(sel, effectData, tmp, effectDataNum, address, isUniform);
+
+          for(uint32_t i = 0; i < effectDataNum; i++) {
+            unsigned int elemNum = (valueNum - i * (4 / typeSize)) > 4/typeSize ?
+                                   4/typeSize : (valueNum - i * (4 / typeSize));
+            sel.UNPACK_BYTE(dst.data() + i * 4/typeSize, effectData[i], typeSize, elemNum);
           }
-          readDWord(sel, t1, alignedAddr, width, bti);
-          remainedReg -= width;
-          pos += width;
-        } while(remainedReg);
+        } else {
+          GBE_ASSERT(elemSize == GEN_BYTE_SCATTER_BYTE);
+          GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
+          vector<GenRegister> dst(valueNum);
+          for(uint32_t i = 0; i < valueNum; i++)
+            dst[i] = sel.selReg(insn.getValue(i), getType(family));
 
-        for(uint32_t i = 0; i < effectDataNum; i++)
-          effectData[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+          GenRegister readDst = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
+          uint32_t valueIndex = 0;
+          uint32_t loopCount = (valueNum + 3) / 4;
+          GenRegister addressForLoop = address;
 
-        getEffectByteData(sel, effectData, tmp, effectDataNum, address, isUniform);
+          sel.push();
+          if (loopCount > 1) {
+            addressForLoop = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
+            sel.MOV(addressForLoop, address);
+          }
 
-        for(uint32_t i = 0; i < effectDataNum; i++) {
-          unsigned int elemNum = (valueNum - i * (4 / typeSize)) > 4/typeSize ?
-                                 4/typeSize : (valueNum - i * (4 / typeSize));
-          sel.UNPACK_BYTE(dst.data() + i * 4/typeSize, effectData[i], typeSize, elemNum);
+          for (uint32_t i = 0; i < loopCount; ++i) {
+            uint32_t valueLeft = valueNum - valueIndex;
+            GBE_ASSERT(valueLeft > 1);
+            uint32_t dataSize = 0;
+            if (valueLeft == 2)
+              dataSize = GEN_BYTE_SCATTER_WORD;
+            else
+              dataSize = GEN_BYTE_SCATTER_DWORD;
+            sel.BYTE_GATHER(readDst, addressForLoop, dataSize, b, sel.getBTITemps(bti));
+
+            // only 4 bytes is gathered even if valueLeft >= 4
+            sel.UNPACK_BYTE(dst.data(), readDst, getFamilySize(FAMILY_BYTE), (valueLeft < 4 ? valueLeft : 4));
+            valueIndex += 4;
+
+            //calculate the new address to read
+            if (valueIndex < valueNum)
+              sel.ADD(addressForLoop, addressForLoop, GenRegister::immud(4));
+          }
+          sel.pop();
         }
       } else {
         GBE_ASSERT(insn.getValueNum() == 1);
@@ -3578,14 +4116,13 @@ namespace gbe
           readByteAsDWord(sel, elemSize, address, value, isUniform, bti);
         else {
           GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-          GenRegister tmpFlag = sel.selReg(sel.reg(ir::FAMILY_WORD, true), ir::TYPE_U16);
 
           // We need a temporary register if we read bytes or words
           Register dst = sel.reg(FAMILY_DWORD, isUniform);
           sel.push();
             if (isUniform)
               sel.curr.noMask = 1;
-            sel.BYTE_GATHER(sel.selReg(dst, ir::TYPE_U32), address, elemSize, b, bti.isConst ? NULL : & tmpFlag);
+            sel.BYTE_GATHER(sel.selReg(dst, ir::TYPE_U32), address, elemSize, b, sel.getBTITemps(bti));
           sel.pop();
 
           sel.push();
@@ -3602,6 +4139,27 @@ namespace gbe
       }
     }
 
+    void emitOWordRead(Selection::Opaque &sel,
+                       const ir::LoadInstruction &insn,
+                       GenRegister address,
+                       ir::BTI bti) const
+    {
+      using namespace ir;
+      const uint32_t vec_size = insn.getValueNum();
+      const uint32_t simdWidth = sel.ctx.getSimdWidth();
+      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
+      vector<GenRegister> valuesVec;
+      for(uint32_t i = 0; i < vec_size; i++)
+        valuesVec.push_back(sel.selReg(insn.getValue(i), TYPE_U32));
+      // check tmp_size for OWORD read need, max 8 OWROD thus 4 regs
+      uint32_t tmp_size = simdWidth * vec_size / 8;
+      tmp_size = tmp_size > 4 ? 4 : tmp_size;
+      vector<GenRegister> tmpVec;
+      for(uint32_t i = 0; i < tmp_size; i++)
+        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
+      sel.OBREAD(&valuesVec[0], vec_size, address, header, bti.imm, &tmpVec[0], tmp_size);
+    }
+
     // check whether all binded table index point to constant memory
     INLINE bool isAllConstant(const ir::BTI &bti) const {
       if (bti.isConst && bti.imm == BTI_CONSTANT)
@@ -3609,28 +4167,12 @@ namespace gbe
       return false;
     }
 
-    INLINE ir::BTI getBTI(SelectionDAG &dag, const ir::LoadInstruction &insn) const {
-      using namespace ir;
-      SelectionDAG *child0 = dag.child[0];
-      ir::BTI b;
-      if (insn.isFixedBTI()) {
-        const auto &immInsn = cast<LoadImmInstruction>(child0->insn);
-        const auto imm = immInsn.getImmediate();
-        b.isConst = 1;
-        b.imm = imm.getIntegerValue();
-      } else {
-        b.isConst = 0;
-        b.reg = insn.getBTI();
-      }
-      return b;
-    }
-
     /*! Implements base class */
     virtual bool emit(Selection::Opaque  &sel, SelectionDAG &dag) const
     {
       using namespace ir;
       const ir::LoadInstruction &insn = cast<ir::LoadInstruction>(dag.insn);
-      GenRegister address = sel.selReg(insn.getAddress(), ir::TYPE_U32);
+      GenRegister address = sel.selReg(insn.getAddressRegister(), ir::TYPE_U32);
       GBE_ASSERT(insn.getAddressSpace() == MEM_GLOBAL ||
                  insn.getAddressSpace() == MEM_CONSTANT ||
                  insn.getAddressSpace() == MEM_PRIVATE ||
@@ -3638,13 +4180,24 @@ namespace gbe
                  insn.getAddressSpace() == MEM_MIXED);
       //GBE_ASSERT(sel.isScalarReg(insn.getValue(0)) == false);
 
-      BTI bti = getBTI(dag, insn);
-
+      BTI bti;
+      AddressMode am = insn.getAddressMode();
+      if (am == AM_StaticBti) {
+        bti.isConst = 1;
+        bti.imm = insn.getSurfaceIndex();
+      } else if (am == AM_DynamicBti) {
+        bti.isConst = 0;
+        bti.reg = insn.getBtiReg();
+      } else {
+        assert(0 && "stateless not supported yet");
+      }
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(sel, type);
       bool allConstant = isAllConstant(bti);
 
-      if (allConstant) {
+      if (insn.isBlock())
+        this->emitOWordRead(sel, insn, address, bti);
+      else if (allConstant) {
         // XXX TODO read 64bit constant through constant cache
         // Per HW Spec, constant cache messages can read at least DWORD data.
         // So, byte/short data type, we have to read through data cache.
@@ -3667,15 +4220,11 @@ namespace gbe
           this->emitUnalignedByteGather(sel, insn, elemSize, address, bti);
       }
 
-
-      // for fixed bti, don't generate the useless loadi
-      if (insn.isFixedBTI())
-        dag.child[0] = NULL;
       markAllChildren(dag);
-
       return true;
     }
   };
+
   class StoreInstructionPattern : public SelectionPattern
   {
   public:
@@ -3690,13 +4239,12 @@ namespace gbe
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
-      vector<GenRegister> value(valueNum);
+      vector<GenRegister> value(valueNum), tmps;
       GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
 
       for (uint32_t valueID = 0; valueID < valueNum; ++valueID)
         value[valueID] = GenRegister::retype(sel.selReg(insn.getValue(valueID)), GEN_TYPE_UD);
-      GenRegister tmp = sel.selReg(sel.reg(FAMILY_WORD, true), ir::TYPE_U16);
-      sel.UNTYPED_WRITE(address, value.data(), valueNum, b, bti.isConst? NULL : &tmp);
+      sel.UNTYPED_WRITE(address, value.data(), valueNum, b, sel.getBTITemps(bti));
     }
 
     void emitWrite64(Selection::Opaque &sel,
@@ -3714,16 +4262,14 @@ namespace gbe
       for (uint32_t valueID = 0; valueID < valueNum; ++valueID)
         src[valueID] = sel.selReg(insn.getValue(valueID), ir::TYPE_U64);
 
-      GenRegister tmpFlag = sel.selReg(sel.reg(FAMILY_WORD, true), ir::TYPE_U16);
-
       if (sel.hasLongType()) {
         vector<GenRegister> tmp(valueNum);
         for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
           tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
         }
-        sel.WRITE64(address, src.data(), tmp.data(), valueNum, b, true, bti.isConst? NULL : &tmpFlag);
+        sel.WRITE64(address, src.data(), tmp.data(), valueNum, b, true, sel.getBTITemps(bti));
       } else {
-        sel.WRITE64(address, src.data(), NULL, valueNum, b, false, bti.isConst? NULL : &tmpFlag);
+        sel.WRITE64(address, src.data(), NULL, valueNum, b, false, sel.getBTITemps(bti));
       }
     }
 
@@ -3738,7 +4284,6 @@ namespace gbe
       uint32_t valueNum = insn.getValueNum();
 
       GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-      GenRegister tmpFlag = sel.selReg(sel.reg(FAMILY_WORD, true), ir::TYPE_U16);
       if(valueNum > 1) {
         const uint32_t typeSize = getFamilySize(getFamily(insn.getValueType()));
         vector<GenRegister> value(valueNum);
@@ -3758,7 +4303,7 @@ namespace gbe
           sel.PACK_BYTE(tmp[i], value.data() + i * 4/typeSize, typeSize, 4/typeSize);
         }
 
-        sel.UNTYPED_WRITE(address, tmp.data(), tmpRegNum, b, bti.isConst ? NULL : &tmpFlag);
+        sel.UNTYPED_WRITE(address, tmp.data(), tmpRegNum, b, sel.getBTITemps(bti));
       } else {
         const GenRegister value = sel.selReg(insn.getValue(0));
         GBE_ASSERT(insn.getValueNum() == 1);
@@ -3775,38 +4320,55 @@ namespace gbe
           else if (elemSize == GEN_BYTE_SCATTER_BYTE)
             sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UB));
         sel.pop();
-        sel.BYTE_SCATTER(address, tmp, elemSize, b, bti.isConst ? NULL : &tmpFlag);
+        sel.BYTE_SCATTER(address, tmp, elemSize, b, sel.getBTITemps(bti));
       }
     }
 
-
-    INLINE ir::BTI getBTI(SelectionDAG &dag, const ir::StoreInstruction &insn) const {
+    void emitOWordWrite(Selection::Opaque &sel,
+                        const ir::StoreInstruction &insn,
+                        GenRegister address,
+                        ir::BTI bti) const
+    {
       using namespace ir;
-      SelectionDAG *child0 = dag.child[0];
-      ir::BTI b;
-      if (insn.isFixedBTI()) {
-        const auto &immInsn = cast<LoadImmInstruction>(child0->insn);
-        const auto imm = immInsn.getImmediate();
-        b.isConst = 1;
-        b.imm = imm.getIntegerValue();
-      } else {
-        b.isConst = 0;
-        b.reg = insn.getBTI();
-      }
-      return b;
+      const uint32_t vec_size = insn.getValueNum();
+      const uint32_t simdWidth = sel.ctx.getSimdWidth();
+      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
+      vector<GenRegister> valuesVec;
+      for(uint32_t i = 0; i < vec_size; i++)
+        valuesVec.push_back(sel.selReg(insn.getValue(i), TYPE_U32));
+      // check tmp_size for OWORD write need, max 8 OWROD thus 4 regs
+      uint32_t tmp_size = simdWidth * vec_size / 8;
+      tmp_size = tmp_size > 4 ? 4 : tmp_size;
+      vector<GenRegister> tmpVec;
+      for(uint32_t i = 0; i < tmp_size; i++)
+        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
+      sel.OBWRITE(address, &valuesVec[0], vec_size, header, bti.imm, &tmpVec[0], tmp_size);
     }
+
     virtual bool emit(Selection::Opaque  &sel, SelectionDAG &dag) const
     {
       using namespace ir;
       const ir::StoreInstruction &insn = cast<ir::StoreInstruction>(dag.insn);
-      GenRegister address = sel.selReg(insn.getAddress(), ir::TYPE_U32);
+      GenRegister address = sel.selReg(insn.getAddressRegister(), ir::TYPE_U32);
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(sel, type);
 
-      const bool isUniform = sel.isScalarReg(insn.getAddress()) && sel.isScalarReg(insn.getValue(0));
-      BTI bti = getBTI(dag, insn);
+      const bool isUniform = sel.isScalarReg(insn.getAddressRegister()) && sel.isScalarReg(insn.getValue(0));
+      BTI bti;
+      AddressMode am = insn.getAddressMode();
+      if (am == AM_StaticBti) {
+        bti.isConst = 1;
+        bti.imm = insn.getSurfaceIndex();
+      } else if (am == AM_DynamicBti) {
+        bti.isConst = 0;
+        bti.reg = insn.getBtiReg();
+      } else {
+        assert(0 && "stateless not supported yet");
+      }
 
-      if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
+      if (insn.isBlock())
+        this->emitOWordWrite(sel, insn, address, bti);
+      else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
         this->emitWrite64(sel, insn, address, bti);
       else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
         this->emitUntypedWrite(sel, insn, address,  bti);
@@ -3814,11 +4376,7 @@ namespace gbe
         this->emitByteScatter(sel, insn, elemSize, address, bti, isUniform);
       }
 
-      // for fixed bti, don't generate the useless loadi
-      if (insn.isFixedBTI())
-        dag.child[0] = NULL;
       markAllChildren(dag);
-
       return true;
     }
   };
@@ -4109,6 +4667,693 @@ namespace gbe
       return false;
     }
 
+    INLINE void convertBetweenHalfFloat(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      const Opcode opcode = insn.getOpcode();
+
+      if (opcode == OP_F16TO32) {
+        sel.F16TO32(dst, src);
+      } else if (opcode == OP_F32TO16) {
+        // We need two instructions to make the conversion
+        GenRegister unpacked;
+        unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.F32TO16(unpacked, src);
+        sel.pop();
+        sel.MOV(dst, unpacked);
+      } else {
+        GBE_ASSERT("Not conversion between float and half\n");
+      }
+    }
+
+    INLINE void convert32bitsToSmall(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      GenRegister unpacked;
+      const RegisterFamily dstFamily = getFamily(dstType);
+
+      if (dstFamily == FAMILY_WORD) {
+        uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
+
+        /* The special case, when dst is half, float->word->half will lose accuracy. */
+        if (dstType == TYPE_HALF) {
+          GBE_ASSERT(sel.hasHalfType());
+          type = GEN_TYPE_HF;
+        }
+
+        if (!sel.isScalarReg(dst.reg())) {
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, type);
+        } else
+          unpacked = GenRegister::retype(sel.unpacked_uw(dst.reg()), type);
+      } else {
+        const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
+        if (!sel.isScalarReg(dst.reg())) {
+          unpacked = sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, type);
+        } else
+          unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
+      }
+
+      sel.push();
+      if (sel.isScalarReg(insn.getSrc(0))) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
+      sel.MOV(unpacked, src);
+      sel.pop();
+
+      if (unpacked.reg() != dst.reg())
+        sel.MOV(dst, unpacked);
+    }
+
+    INLINE void convertI64To16bits(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      if (dstType == TYPE_HALF) {
+        /* There is no MOV for Long <---> Half. So Long-->Float-->half. */
+        GBE_ASSERT(sel.hasLongType());
+        GBE_ASSERT(sel.hasHalfType());
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        GenRegister funpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        funpacked = GenRegister::retype(funpacked, GEN_TYPE_F);
+        sel.MOV(funpacked, src);
+        GenRegister ftmp = sel.selReg(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+        ftmp = GenRegister::retype(ftmp, GEN_TYPE_F);
+        sel.MOV(ftmp, funpacked);
+        GenRegister unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpacked = GenRegister::retype(unpacked, GEN_TYPE_HF);
+        sel.MOV(unpacked, ftmp);
+        sel.pop();
+        sel.MOV(dst, unpacked);
+      } else {
+        uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
+
+        GenRegister unpacked;
+        if (!sel.isScalarReg(dst.reg())) {
+          if (sel.hasLongType()) {
+            unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          } else {
+            unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+          }
+          unpacked = GenRegister::retype(unpacked, type);
+        } else {
+          unpacked = GenRegister::retype(sel.unpacked_uw(dst.reg()), type);
+        }
+
+        if(!sel.hasLongType()) {
+          GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD));
+          tmp.type = GEN_TYPE_D;
+          sel.CONVI64_TO_I(tmp, src);
+          sel.MOV(unpacked, tmp);
+        } else {
+          sel.push();
+          if (sel.isScalarReg(insn.getSrc(0))) {
+            sel.curr.execWidth = 1;
+            sel.curr.predicate = GEN_PREDICATE_NONE;
+            sel.curr.noMask = 1;
+          }
+          sel.MOV(unpacked, src);
+          sel.pop();
+        }
+
+        if (unpacked.reg() != dst.reg()) {
+          sel.MOV(dst, unpacked);
+        }
+      }
+    }
+
+    INLINE void convertI64ToI8(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      GenRegister unpacked;
+      const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
+
+      if (sel.hasLongType()) { // handle the native long logic.
+        if (!sel.isScalarReg(dst.reg())) {
+          /* When convert i64 to i8, the hstride should be 8, but the hstride do not
+             support more than 4, so we need to split it to 2 steps. */
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, dstType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+        } else {
+          unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
+        }
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(unpacked, src);
+        sel.pop();
+
+        if (unpacked.reg() != dst.reg()) {
+          sel.MOV(dst, unpacked);
+        }
+      } else { // Do not have native long
+        if (!sel.isScalarReg(dst.reg())) {
+          unpacked = sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, type);
+        } else {
+          unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
+        }
+
+        GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD));
+        tmp.type = GEN_TYPE_D;
+        sel.CONVI64_TO_I(tmp, src);
+        sel.MOV(unpacked, tmp);
+
+        if (unpacked.reg() != dst.reg()) {
+          sel.MOV(dst, unpacked);
+        }
+      }
+    }
+
+    INLINE void convertI64ToI32(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      if (sel.hasLongType()) {
+        GenRegister unpacked;
+        const uint32_t type = dstType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D;
+        if (!sel.isScalarReg(dst.reg())) {
+          unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, dstType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
+        } else {
+          unpacked = GenRegister::retype(sel.unpacked_ud(dst.reg()), type);
+        }
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(unpacked, src);
+        sel.pop();
+
+        if (unpacked.reg() != dst.reg()) {
+          sel.MOV(dst, unpacked);
+        }
+      } else {
+        sel.CONVI64_TO_I(dst, src);
+      }
+    }
+
+    INLINE void convertI64ToFloat(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      auto dag = sel.regDAG[src.reg()];
+
+      // FIXME, in the future, we need to do a common I64 lower to I32 analysis
+      // at llvm IR layer which could cover more cases then just this one.
+      SelectionDAG *dag0, *dag1;
+      if (dag && dag->child[0] && dag->child[1]) {
+        if (dag->child[0]->insn.getOpcode() == OP_LOADI) {
+          dag0 = dag->child[1];
+          dag1 = dag->child[0];
+        } else {
+          dag0 = dag->child[0];
+          dag1 = dag->child[1];
+        }
+        GBE_ASSERT(!(dag->child[0]->insn.getOpcode() == OP_LOADI &&
+              dag->child[1]->insn.getOpcode() == OP_LOADI));
+        if (dag->insn.getOpcode() == OP_AND ||
+            dag->insn.getOpcode() == OP_OR  ||
+            dag->insn.getOpcode() == OP_XOR) {
+          GenRegister src0;
+          GenRegister src1;
+          if (lowerI64Reg(sel, dag0, src0, GEN_TYPE_UD) &&
+              lowerI64Reg(sel, dag1, src1, GEN_TYPE_UD)) {
+            switch (dag->insn.getOpcode()) {
+              default:
+              case OP_AND: sel.AND(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
+              case OP_OR:  sel.OR(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
+              case OP_XOR: sel.XOR(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
+            }
+            sel.MOV(dst, GenRegister::retype(dst, GEN_TYPE_UD));
+            markChildren = false;
+            return;
+          }
+        }
+      }
+
+      if (!sel.hasLongType()) {
+        GenRegister tmp[6];
+        for(int i=0; i<6; i++) {
+          tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+        }
+        sel.push();
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
+        sel.CONVI64_TO_F(dst, src, tmp);
+        sel.pop();
+      } else {
+        GenRegister unpacked;
+        const uint32_t type = GEN_TYPE_F;
+        unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpacked = GenRegister::retype(unpacked, type);
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(unpacked, src);
+        sel.pop();
+
+        if (unpacked.reg() != dst.reg()) {
+          sel.MOV(dst, unpacked);
+        }
+      }
+    }
+
+    INLINE void convertSmallIntsToI64(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      const RegisterFamily srcFamily = getFamily(srcType);
+
+      if (sel.hasLongType() && sel.hasLongRegRestrict()) {
+        // Convert i32/i16/i8 to i64 if hasLongRegRestrict(src and dst hstride must be aligned to the same qword).
+        GenRegister unpacked;
+        GenRegister unpacked_src = src;
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        if(srcFamily == FAMILY_DWORD) {
+          unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
+        } else if(srcFamily == FAMILY_WORD) {
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W);
+        } else if(srcFamily == FAMILY_BYTE) {
+          GenRegister tmp = sel.selReg(sel.reg(FAMILY_WORD, sel.isScalarReg(insn.getSrc(0))));
+          tmp = GenRegister::retype(tmp, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+          sel.MOV(tmp, src);
+          unpacked_src = tmp;
+        } else
+          GBE_ASSERT(0);
+
+        sel.MOV(unpacked, unpacked_src);
+        sel.pop();
+        sel.MOV(dst, unpacked);
+      } else if (sel.hasLongType()) {
+        sel.MOV(dst, src);
+      } else {
+        sel.CONVI_TO_I64(dst, src, sel.selReg(sel.reg(FAMILY_DWORD)));
+      }
+    }
+
+    INLINE void convertFToI64(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      if (sel.hasLongType() && sel.hasLongRegRestrict() && srcType == ir::TYPE_FLOAT) { // typical bsw float->long case
+        // Convert float to i64 if hasLongRegRestrict(src and dst hstride must be aligned to the same qword).
+        GenRegister unpacked;
+        GenRegister unpacked_src = src;
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpacked = GenRegister::retype(unpacked, GEN_TYPE_F);
+        sel.MOV(unpacked, unpacked_src);
+        sel.pop();
+        sel.MOV(dst, unpacked);
+      } else if (srcType == ir::TYPE_FLOAT) {
+        if (sel.hasLongType()) { // typical bdw float->long case
+          sel.MOV(dst, src);
+        } else { // typical old platform float->long case
+          GenRegister tmp[2];
+          tmp[0] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+          tmp[1] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_FLOAT);
+          sel.push();
+          sel.curr.flag = 0;
+          sel.curr.subFlag = 1;
+          sel.CONVF_TO_I64(dst, src, tmp);
+          sel.pop();
+        }
+      } else if (srcType == ir::TYPE_HALF) {
+        /* No need to consider old platform. if we support half, we must have native long. */
+        GBE_ASSERT(sel.hasLongType());
+        GBE_ASSERT(sel.hasHalfType());
+        uint32_t type = dstType == TYPE_U64 ? GEN_TYPE_UD : GEN_TYPE_D;
+        GenRegister tmp = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))), TYPE_U32), type);
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        sel.MOV(tmp, src);
+
+        if (sel.hasLongRegRestrict()) { // special for BSW case.
+          GenRegister unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, type);
+          sel.MOV(unpacked, tmp);
+          sel.pop();
+          sel.MOV(dst, unpacked);
+        } else {
+          sel.pop();
+          sel.MOV(dst, tmp);
+        }
+      } else if (src.type == GEN_TYPE_DF) {
+        GBE_ASSERT(sel.hasDoubleType());
+        GBE_ASSERT(sel.hasLongType()); //So far, if we support double, we support native long.
+
+        // Just Mov
+        sel.MOV(dst, src);
+      } else {
+        /* Invalid case. */
+        GBE_ASSERT(0);
+      }
+    }
+
+    INLINE void convertBetweenFloatDouble(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      GBE_ASSERT(sel.hasDoubleType());
+
+      if (sel.isScalarReg(insn.getDst(0))) {
+        // dst is scalar, just MOV and nothing more.
+        GBE_ASSERT(sel.isScalarReg(insn.getSrc(0)));
+        sel.MOV(dst, src);
+      } else if (srcType == ir::TYPE_DOUBLE) {
+        // double to float
+        GBE_ASSERT(dstType == ir::TYPE_FLOAT);
+        GenRegister unpacked;
+        unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpacked = GenRegister::retype(unpacked, GEN_TYPE_F);
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(unpacked, src);
+        sel.pop();
+
+        sel.MOV(dst, unpacked);
+      } else {
+        // float to double, just mov
+        sel.MOV(dst, src);
+      }
+
+      return;
+    }
+
+    INLINE void convertBetweenHalfDouble(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      GBE_ASSERT(sel.hasDoubleType());
+      GBE_ASSERT(sel.hasHalfType()); //So far, if we support double, we support half.
+
+      if (sel.isScalarReg(insn.getDst(0))) { // uniform case.
+        GBE_ASSERT(sel.isScalarReg(insn.getSrc(0)));
+        GBE_ASSERT(sel.curr.execWidth == 1);
+        GenRegister tmpFloat = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_F);
+        sel.MOV(tmpFloat, src);
+        sel.MOV(dst, tmpFloat);
+        return;
+      }
+
+      if (dstType == ir::TYPE_DOUBLE) {
+        // half to double. There is no direct double to half MOV, need tmp float.
+        GBE_ASSERT(srcType == ir::TYPE_HALF);
+        GenRegister tmpFloat = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_F);
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(tmpFloat, src);
+        sel.pop();
+
+        sel.MOV(dst, tmpFloat);
+      } else {
+        // double to half. No direct MOV from double to half, so double->float->half
+        GBE_ASSERT(srcType == ir::TYPE_DOUBLE);
+        GBE_ASSERT(dstType == ir::TYPE_HALF);
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        // double to float
+        GenRegister unpackedFloat = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpackedFloat = GenRegister::retype(unpackedFloat, GEN_TYPE_F);
+        sel.MOV(unpackedFloat, src);
+
+        // float to half
+        GenRegister unpackedHalf = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+        unpackedHalf = GenRegister::retype(unpackedHalf, GEN_TYPE_HF);
+        sel.MOV(unpackedHalf, unpackedFloat);
+        sel.pop();
+
+        sel.MOV(dst, unpackedHalf);
+      }
+    }
+
+    INLINE void convertHalfToSmallInts(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      const RegisterFamily dstFamily = getFamily(dstType);
+
+      // Special case, half -> char/short.
+      /* [DevBDW+]:	Format conversion to or from HF (Half Float) must be DWord-aligned and
+         strided by a DWord on the destination. */
+      GBE_ASSERT(sel.hasHalfType());
+      GenRegister tmp;
+      sel.push();
+      if (sel.isScalarReg(insn.getSrc(0))) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
+      if (dstFamily == FAMILY_BYTE) {
+        const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
+        tmp = GenRegister::retype(sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), type);
+        sel.MOV(tmp, src);
+      } else {
+        const uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
+        tmp = GenRegister::retype(sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), type);
+        sel.MOV(tmp, src);
+      }
+      sel.pop();
+      sel.MOV(dst, tmp);
+    }
+
+    INLINE void convertSmallIntsToHalf(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      // Special case, char/uchar -> half
+      /* [DevBDW+]:  Format conversion to or from HF (Half Float) must be DWord-aligned and
+         strided by a DWord on the destination. */
+      GBE_ASSERT(sel.hasHalfType());
+      GenRegister tmp = GenRegister::retype(sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), GEN_TYPE_HF);
+      sel.push();
+      if (sel.isScalarReg(insn.getSrc(0))) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
+      sel.MOV(tmp, src);
+      sel.pop();
+      sel.MOV(dst, tmp);
+    }
+
+    INLINE void convertDoubleToSmallInts(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      const RegisterFamily dstFamily = getFamily(dstType);
+
+      GBE_ASSERT(sel.hasDoubleType());
+      GBE_ASSERT(sel.hasHalfType()); //So far, if we support double, we support half.
+      if (sel.isScalarReg(insn.getDst(0))) {
+        // dst is scalar, just MOV and nothing more.
+        GBE_ASSERT(sel.isScalarReg(insn.getSrc(0)));
+        sel.MOV(dst, src);
+      } else {
+        GenRegister unpacked;
+        if (dstFamily == FAMILY_DWORD) {
+          // double to int
+          unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, dstType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
+        } else if (dstFamily == FAMILY_WORD) {
+          // double to short
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W);
+        } else {
+          GBE_ASSERT(dstFamily == FAMILY_BYTE);
+          // double to char
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, dstType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+        }
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(unpacked, src);
+        sel.pop();
+
+        sel.MOV(dst, unpacked);
+      }
+    }
+
+    INLINE void convertI64ToDouble(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+
+      GBE_ASSERT(sel.hasDoubleType());
+      GBE_ASSERT(sel.hasLongType()); //So far, if we support double, we support native long.
+      // Just Mov
+      sel.MOV(dst, src);
+    }
+
+    INLINE void convertSmallIntsToDouble(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const Type dstType = insn.getDstType();
+      const Type srcType = insn.getSrcType();
+      const GenRegister dst = sel.selReg(insn.getDst(0), dstType);
+      const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
+      const RegisterFamily srcFamily = getFamily(srcType);
+
+      GBE_ASSERT(sel.hasDoubleType());
+      GBE_ASSERT(sel.hasLongType()); //So far, if we support double, we support native long.
+
+      if (sel.hasLongType() && sel.hasLongRegRestrict()) {
+        // Convert i32/i16/i8 to i64 if hasLongRegRestrict(src and dst hstride must be aligned to the same qword).
+        GenRegister unpacked;
+        GenRegister unpacked_src = src;
+
+        sel.push();
+        if (sel.isScalarReg(insn.getSrc(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+
+        if(srcFamily == FAMILY_DWORD) {
+          unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
+        } else if(srcFamily == FAMILY_WORD) {
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W);
+        } else if(srcFamily == FAMILY_BYTE) {
+          GenRegister tmp = sel.selReg(sel.reg(FAMILY_WORD, sel.isScalarReg(insn.getSrc(0))));
+          tmp = GenRegister::retype(tmp, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+          unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
+          unpacked = GenRegister::retype(unpacked, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
+          sel.MOV(tmp, src);
+          unpacked_src = tmp;
+        } else
+          GBE_ASSERT(0);
+
+        sel.MOV(unpacked, unpacked_src);
+        sel.pop();
+        sel.MOV(dst, unpacked);
+      } else if (sel.hasLongType()) {
+        sel.MOV(dst, src);
+      }
+    }
+
     INLINE bool emitOne(Selection::Opaque &sel, const ir::ConvertInstruction &insn, bool &markChildren) const
     {
       using namespace ir;
@@ -4120,382 +5365,72 @@ namespace gbe
       const GenRegister src = sel.selReg(insn.getSrc(0), srcType);
       const Opcode opcode = insn.getOpcode();
       sel.push();
-        if (sel.isScalarReg(insn.getDst(0)) == true) {
-          sel.curr.execWidth = 1;
-          sel.curr.predicate = GEN_PREDICATE_NONE;
-          sel.curr.noMask = 1;
-        }
+      if (sel.isScalarReg(insn.getDst(0)) == true) {
+        sel.curr.execWidth = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+      }
       if(opcode == ir::OP_SAT_CVT)
         sel.curr.saturate = 1;
 
-      // We need two instructions to make the conversion
-      if (opcode == OP_F16TO32) {
-        sel.F16TO32(dst, src);
-      } else if (opcode == OP_F32TO16) {
-        GenRegister unpacked;
-        unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-        sel.push();
-          if (sel.isScalarReg(insn.getSrc(0))) {
-            sel.curr.execWidth = 1;
-            sel.curr.predicate = GEN_PREDICATE_NONE;
-            sel.curr.noMask = 1;
-          }
-          sel.F32TO16(unpacked, src);
-        sel.pop();
-        sel.MOV(dst, unpacked);
-      } else if (dstFamily != FAMILY_DWORD && dstFamily != FAMILY_QWORD && srcFamily == FAMILY_DWORD) {//convert i32 to small int and half
-        GenRegister unpacked;
-        if (dstFamily == FAMILY_WORD) {
-          uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
-
-	  /* The special case, when dst is half, float->word->half will lose accuracy. */
-	  if (dstType == TYPE_HALF) {
-            GBE_ASSERT(sel.hasHalfType());
-            type = GEN_TYPE_HF;
-          }
-
-          if (!sel.isScalarReg(dst.reg())) {
-            unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, type);
-          } else
-            unpacked = GenRegister::retype(sel.unpacked_uw(dst.reg()), type);
-        } else {
-          const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
-          if (!sel.isScalarReg(dst.reg())) {
-            unpacked = sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, type);
-          } else
-            unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
-        }
-
-        sel.push();
-          if (sel.isScalarReg(insn.getSrc(0))) {
-            sel.curr.execWidth = 1;
-            sel.curr.predicate = GEN_PREDICATE_NONE;
-            sel.curr.noMask = 1;
-          }
-          sel.MOV(unpacked, src);
-        sel.pop();
-
-        if (unpacked.reg() != dst.reg())
-          sel.MOV(dst, unpacked);
-      } else if (dstFamily == FAMILY_WORD && srcFamily == FAMILY_QWORD) { //convert i64 to i16 and half.
-        if (dstType == TYPE_HALF) {
-          /* There is no MOV for Long <---> Half. So Long-->Float-->half. */
-          GBE_ASSERT(sel.hasLongType());
-          GBE_ASSERT(sel.hasHalfType());
-          sel.push();
-          if (sel.isScalarReg(insn.getSrc(0))) {
-            sel.curr.execWidth = 1;
-            sel.curr.predicate = GEN_PREDICATE_NONE;
-            sel.curr.noMask = 1;
-          }
-
-          GenRegister funpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-          funpacked = GenRegister::retype(funpacked, GEN_TYPE_F);
-          sel.MOV(funpacked, src);
-          GenRegister ftmp = sel.selReg(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-          ftmp = GenRegister::retype(ftmp, GEN_TYPE_F);
-          sel.MOV(ftmp, funpacked);
-          GenRegister unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-          unpacked = GenRegister::retype(unpacked, GEN_TYPE_HF);
-          sel.MOV(unpacked, ftmp);
-          sel.pop();
-          sel.MOV(dst, unpacked);
-        } else {
-          uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
-
-          GenRegister unpacked;
-          if (!sel.isScalarReg(dst.reg())) {
-            if (sel.hasLongType()) {
-              unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            } else {
-              unpacked = sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-            }
-            unpacked = GenRegister::retype(unpacked, type);
-          } else {
-            unpacked = GenRegister::retype(sel.unpacked_uw(dst.reg()), type);
-          }
-
-          if(!sel.hasLongType()) {
-           GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD));
-            tmp.type = GEN_TYPE_D;
-            sel.CONVI64_TO_I(tmp, src);
-            sel.MOV(unpacked, tmp);
-          } else {
-            sel.push();
-              if (sel.isScalarReg(insn.getSrc(0))) {
-                sel.curr.execWidth = 1;
-                sel.curr.predicate = GEN_PREDICATE_NONE;
-                sel.curr.noMask = 1;
-              }
-              sel.MOV(unpacked, src);
-            sel.pop();
-          }
-
-          if (unpacked.reg() != dst.reg()) {
-            sel.MOV(dst, unpacked);
-          }
-        }
-      } else if (dstFamily == FAMILY_BYTE && srcFamily == FAMILY_QWORD) { //convert i64 to i8
-        GenRegister unpacked;
-        const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
-
-        if (sel.hasLongType()) { // handle the native long logic.
-          if (!sel.isScalarReg(dst.reg())) {
-            /* When convert i64 to i8, the hstride should be 8, but the hstride do not
-               support more than 4, so we need to split it to 2 steps. */
-            unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, dstType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
-          } else {
-            unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
-          }
-
-          sel.push();
-          if (sel.isScalarReg(insn.getSrc(0))) {
-            sel.curr.execWidth = 1;
-            sel.curr.predicate = GEN_PREDICATE_NONE;
-            sel.curr.noMask = 1;
-          }
-          sel.MOV(unpacked, src);
-          sel.pop();
-
-          if (unpacked.reg() != dst.reg()) {
-            sel.MOV(dst, unpacked);
-          }
-        } else { // Do not have native long
-          if (!sel.isScalarReg(dst.reg())) {
-            unpacked = sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, type);
-          } else {
-            unpacked = GenRegister::retype(sel.unpacked_ub(dst.reg()), type);
-          }
-
-          GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD));
-          tmp.type = GEN_TYPE_D;
-          sel.CONVI64_TO_I(tmp, src);
-          sel.MOV(unpacked, tmp);
-
-          if (unpacked.reg() != dst.reg()) {
-            sel.MOV(dst, unpacked);
-          }
-        }
+      if (opcode == OP_F16TO32 || opcode == OP_F32TO16) {
+        /* Conversion between float and half. */
+        convertBetweenHalfFloat(sel, insn, markChildren);
+      } else if (dstFamily != FAMILY_DWORD && dstFamily != FAMILY_QWORD && srcFamily == FAMILY_DWORD) {
+        //convert i32/float to small int/half
+        convert32bitsToSmall(sel, insn, markChildren);
+      } else if (dstFamily == FAMILY_WORD && srcFamily == FAMILY_QWORD && srcType != ir::TYPE_DOUBLE) {
+        //convert i64 to i16 and half.
+        convertI64To16bits(sel, insn, markChildren);
+      } else if (dstFamily == FAMILY_BYTE && srcFamily == FAMILY_QWORD && srcType != ir::TYPE_DOUBLE) {
+        //convert i64 to i8
+        convertI64ToI8(sel, insn, markChildren);
       } else if ((dstType == ir::TYPE_S32 || dstType == ir::TYPE_U32) &&
-                 (srcType == ir::TYPE_U64 || srcType == ir::TYPE_S64)) {// Convert i64 to i32
-        if (sel.hasLongType()) {
-          GenRegister unpacked;
-          const uint32_t type = dstType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D;
-          if (!sel.isScalarReg(dst.reg())) {
-            unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, dstType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
-          } else {
-            unpacked = GenRegister::retype(sel.unpacked_ud(dst.reg()), type);
-          }
-
-          sel.push();
-            if (sel.isScalarReg(insn.getSrc(0))) {
-              sel.curr.execWidth = 1;
-              sel.curr.predicate = GEN_PREDICATE_NONE;
-              sel.curr.noMask = 1;
-            }
-            sel.MOV(unpacked, src);
-          sel.pop();
-
-          if (unpacked.reg() != dst.reg()) {
-            sel.MOV(dst, unpacked);
-          }
-        } else {
-          sel.CONVI64_TO_I(dst, src);
-        }
-      } else if (dstType == ir::TYPE_FLOAT && (srcType == ir::TYPE_U64 || srcType == ir::TYPE_S64)) { //i64 to float
-        auto dag = sel.regDAG[src.reg()];
-        // FIXME, in the future, we need to do a common I64 lower to I32 analysis
-        // at llvm IR layer which could cover more cases then just this one.
-        SelectionDAG *dag0, *dag1;
-        if (dag && dag->child[0] && dag->child[1]) {
-          if (dag->child[0]->insn.getOpcode() == OP_LOADI) {
-            dag0 = dag->child[1];
-            dag1 = dag->child[0];
-          } else {
-            dag0 = dag->child[0];
-            dag1 = dag->child[1];
-          }
-          GBE_ASSERT(!(dag->child[0]->insn.getOpcode() == OP_LOADI &&
-                       dag->child[1]->insn.getOpcode() == OP_LOADI));
-          if (dag->insn.getOpcode() == OP_AND ||
-              dag->insn.getOpcode() == OP_OR  ||
-              dag->insn.getOpcode() == OP_XOR) {
-            GenRegister src0;
-            GenRegister src1;
-            if (lowerI64Reg(sel, dag0, src0, GEN_TYPE_UD) &&
-                lowerI64Reg(sel, dag1, src1, GEN_TYPE_UD)) {
-              switch (dag->insn.getOpcode()) {
-                default:
-                case OP_AND: sel.AND(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
-                case OP_OR:  sel.OR(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
-                case OP_XOR: sel.XOR(GenRegister::retype(dst, GEN_TYPE_UD), src0, src1); break;
-              }
-              sel.MOV(dst, GenRegister::retype(dst, GEN_TYPE_UD));
-              markChildren = false;
-              return true;
-            }
-          }
-        }
-
-        if (!sel.hasLongType()) {
-          GenRegister tmp[6];
-          for(int i=0; i<6; i++) {
-            tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-          }
-          sel.push();
-            sel.curr.flag = 0;
-            sel.curr.subFlag = 1;
-            sel.CONVI64_TO_F(dst, src, tmp);
-          sel.pop();
-        } else {
-          GenRegister unpacked;
-          const uint32_t type = GEN_TYPE_F;
-          unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-          unpacked = GenRegister::retype(unpacked, type);
-
-          sel.push();
-            if (sel.isScalarReg(insn.getSrc(0))) {
-              sel.curr.execWidth = 1;
-              sel.curr.predicate = GEN_PREDICATE_NONE;
-              sel.curr.noMask = 1;
-            }
-            sel.MOV(unpacked, src);
-          sel.pop();
-
-          if (unpacked.reg() != dst.reg()) {
-            sel.MOV(dst, unpacked);
-          }
-        }
-      }   else if (sel.hasLongType() && sel.hasLongRegRestrict() && dstFamily == FAMILY_QWORD && srcFamily != FAMILY_QWORD) {
-        // Convert i32/i16/i8/float to i64/double if hasLongRegRestrict(src and dst hstride must be aligned to the same qword).
-        GenRegister unpacked;
-        GenRegister unpacked_src = src;
-
-        sel.push();
-          if (sel.isScalarReg(insn.getSrc(0))) {
-            sel.curr.execWidth = 1;
-            sel.curr.predicate = GEN_PREDICATE_NONE;
-            sel.curr.noMask = 1;
-          }
-
-          if (srcType == ir::TYPE_FLOAT) {
-            unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, GEN_TYPE_F);
-          } else if(srcFamily == FAMILY_DWORD) {
-            unpacked = sel.unpacked_ud(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, srcType == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_D);
-          } else if(srcFamily == FAMILY_WORD) {
-            unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, srcType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W);
-          } else if(srcFamily == FAMILY_BYTE) {
-            GenRegister tmp = sel.selReg(sel.reg(FAMILY_WORD, sel.isScalarReg(insn.getSrc(0))));
-            tmp = GenRegister::retype(tmp, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
-            unpacked = sel.unpacked_uw(sel.reg(FAMILY_QWORD, sel.isScalarReg(insn.getSrc(0))));
-            unpacked = GenRegister::retype(unpacked, srcType == TYPE_U8 ? GEN_TYPE_UW : GEN_TYPE_W);
-            sel.MOV(tmp, src);
-            unpacked_src = tmp;
-          } else
-            GBE_ASSERT(0);
-
-          sel.MOV(unpacked, unpacked_src);
-        sel.pop();
-        sel.MOV(dst, unpacked);
-      }else if ((dst.isdf() && srcType == ir::TYPE_FLOAT) ||
-                 (src.isdf() && dstType == ir::TYPE_FLOAT)) { // float and double conversion
-        ir::Register r = sel.reg(ir::RegisterFamily::FAMILY_QWORD);
-        sel.MOV_DF(dst, src, sel.selReg(r, TYPE_U64));
-      } else if (dst.isint64()) { // promote to i64
-        switch(src.type) {
-          case GEN_TYPE_F:
-            {
-              if (!sel.hasLongType()) {
-                GenRegister tmp[2];
-                tmp[0] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-                tmp[1] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_FLOAT);
-                sel.push();
-                  sel.curr.flag = 0;
-                  sel.curr.subFlag = 1;
-                  sel.CONVF_TO_I64(dst, src, tmp);
-                sel.pop();
-              } else {
-                sel.MOV(dst, src);
-              }
-              break;
-            }
-          case GEN_TYPE_HF:
-            {
-              GBE_ASSERT(sel.hasLongType());
-              GBE_ASSERT(sel.hasHalfType());
-              uint32_t type = dstType == TYPE_U64 ? GEN_TYPE_UD : GEN_TYPE_D;
-              GenRegister tmp = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0))), TYPE_U32), type);
-              sel.push();
-              if (sel.isScalarReg(insn.getSrc(0))) {
-                sel.curr.execWidth = 1;
-                sel.curr.predicate = GEN_PREDICATE_NONE;
-                sel.curr.noMask = 1;
-              }
-              sel.MOV(tmp, src);
-              sel.pop();
-              sel.MOV(dst, tmp);
-              break;
-            }
-          case GEN_TYPE_DF:
-            NOT_IMPLEMENTED;
-          default:
-            if (sel.hasLongType()) {
-              sel.MOV(dst, src);
-            } else {
-              sel.CONVI_TO_I64(dst, src, sel.selReg(sel.reg(FAMILY_DWORD)));
-            }
-        }
+          (srcType == ir::TYPE_U64 || srcType == ir::TYPE_S64)) {
+        // Convert i64 to i32
+        convertI64ToI32(sel, insn, markChildren);
+      } else if (dstType == ir::TYPE_FLOAT && (srcType == ir::TYPE_U64 || srcType == ir::TYPE_S64)) {
+        // long -> float
+        convertI64ToFloat(sel, insn, markChildren);
+      } else if (dstType == ir::TYPE_DOUBLE && (srcType == ir::TYPE_U64 || srcType == ir::TYPE_S64)) {
+        // long -> double
+        convertI64ToDouble(sel, insn, markChildren);
+      } else if ((dstType == ir::TYPE_U64 || dstType == ir::TYPE_S64)
+          && (srcFamily != FAMILY_QWORD && srcType != ir::TYPE_FLOAT && srcType != ir::TYPE_HALF)) {
+        // int/short/char to long
+        convertSmallIntsToI64(sel, insn, markChildren);
+      } else if ((dstType == ir::TYPE_DOUBLE)
+          && (srcFamily != FAMILY_QWORD && srcType != ir::TYPE_FLOAT && srcType != ir::TYPE_HALF)) {
+        // int/short/char to double
+        convertSmallIntsToDouble(sel, insn, markChildren);
+      } else if ((dstType == ir::TYPE_U64 || dstType == ir::TYPE_S64)
+          && (srcType == ir::TYPE_FLOAT || srcType == ir::TYPE_HALF || srcType == ir::TYPE_DOUBLE)) {
+        // All float type to long
+        convertFToI64(sel, insn, markChildren);
+      } else if ((srcType == ir::TYPE_FLOAT && dstType == ir::TYPE_DOUBLE) ||
+            (dstType == ir::TYPE_FLOAT && srcType == ir::TYPE_DOUBLE)) {
+        // float and double conversion
+        convertBetweenFloatDouble(sel, insn, markChildren);
+      } else if ((srcType == ir::TYPE_HALF && dstType == ir::TYPE_DOUBLE) ||
+            (dstType == ir::TYPE_HALF && srcType == ir::TYPE_DOUBLE)) {
+        // float and half conversion
+        convertBetweenHalfDouble(sel, insn, markChildren);
+      } else if (srcType == ir::TYPE_DOUBLE && dstType != ir::TYPE_FLOAT
+             && dstType != ir::TYPE_HALF && dstFamily != FAMILY_QWORD) {
+        // double to int/short/char
+        convertDoubleToSmallInts(sel, insn, markChildren);
       } else if (srcType == ir::TYPE_HALF && (dstFamily == FAMILY_BYTE || dstFamily == FAMILY_WORD)) {
-      // Special case, half -> char/short.
-      /* [DevBDW+]:  Format conversion to or from HF (Half Float) must be DWord-aligned and
-         strided by a DWord on the destination. */
-        GBE_ASSERT(sel.hasHalfType());
-        GenRegister tmp;
-        sel.push();
-        if (sel.isScalarReg(insn.getSrc(0))) {
-          sel.curr.execWidth = 1;
-          sel.curr.predicate = GEN_PREDICATE_NONE;
-          sel.curr.noMask = 1;
-        }
-        if (dstFamily == FAMILY_BYTE) {
-          const uint32_t type = dstType == TYPE_U8 ? GEN_TYPE_UB : GEN_TYPE_B;
-          tmp = GenRegister::retype(sel.unpacked_ub(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), type);
-          sel.MOV(tmp, src);
-        } else {
-          const uint32_t type = dstType == TYPE_U16 ? GEN_TYPE_UW : GEN_TYPE_W;
-          tmp = GenRegister::retype(sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), type);
-          sel.MOV(tmp, src);
-        }
-        sel.pop();
-        sel.MOV(dst, tmp);
+        // Convert half to small int
+        convertHalfToSmallInts(sel, insn, markChildren);
       } else if (dstType == ir::TYPE_HALF && (srcFamily == FAMILY_BYTE || srcFamily == FAMILY_WORD)) {
-        // Special case, char/uchar -> half
-        /* [DevBDW+]:  Format conversion to or from HF (Half Float) must be DWord-aligned and
-           strided by a DWord on the destination. */
-        GBE_ASSERT(sel.hasHalfType());
-        GenRegister tmp = GenRegister::retype(sel.unpacked_uw(sel.reg(FAMILY_DWORD, sel.isScalarReg(insn.getSrc(0)))), GEN_TYPE_HF);
-        sel.push();
-        if (sel.isScalarReg(insn.getSrc(0))) {
-          sel.curr.execWidth = 1;
-          sel.curr.predicate = GEN_PREDICATE_NONE;
-          sel.curr.noMask = 1;
-        }
-        sel.MOV(tmp, src);
-        sel.pop();
-        sel.MOV(dst, tmp);
-      } else
+        // Convert small int to half
+        convertSmallIntsToHalf(sel, insn, markChildren);
+      } else {
+        /* All special cases has been handled, just MOV. */
         sel.MOV(dst, src);
+      }
 
       sel.pop();
-
       return true;
     }
     DECL_CTOR(ConvertInstruction, 1, 1);
@@ -4511,49 +5446,36 @@ namespace gbe
           this->opcodes.push_back(ir::Opcode(op));
     }
 
-    INLINE ir::BTI getBTI(SelectionDAG &dag, const ir::AtomicInstruction &insn) const {
-      using namespace ir;
-      SelectionDAG *child0 = dag.child[0];
-      ir::BTI b;
-      if (insn.isFixedBTI()) {
-        const auto &immInsn = cast<LoadImmInstruction>(child0->insn);
-        const auto imm = immInsn.getImmediate();
-        b.isConst = 1;
-        b.imm = imm.getIntegerValue();
-      } else {
-        b.isConst = 0;
-        b.reg = insn.getBTI();
-      }
-      return b;
-    }
-
     INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const {
       using namespace ir;
       const ir::AtomicInstruction &insn = cast<ir::AtomicInstruction>(dag.insn);
 
-      ir::BTI b = getBTI(dag, insn);
+      ir::BTI b;
       const AtomicOps atomicOp = insn.getAtomicOpcode();
       unsigned srcNum = insn.getSrcNum();
-      unsigned opNum = srcNum - 1;
+      unsigned msgPayload;
+
+      AddressMode AM = insn.getAddressMode();
+      if (AM == AM_DynamicBti) {
+        b.reg = insn.getBtiReg();
+        msgPayload = srcNum - 1;
+      } else {
+        b.imm = insn.getSurfaceIndex();
+        b.isConst = 1;
+        msgPayload = srcNum;
+      }
 
       GenRegister dst  = sel.selReg(insn.getDst(0), TYPE_U32);
       GenRegister bti =  b.isConst ? GenRegister::immud(b.imm) : sel.selReg(b.reg, ir::TYPE_U32);
-      GenRegister src0 = sel.selReg(insn.getSrc(1), TYPE_U32);   //address
+      GenRegister src0 = sel.selReg(insn.getAddressRegister(), TYPE_U32);
       GenRegister src1 = src0, src2 = src0;
-      if(srcNum > 2) src1 = sel.selReg(insn.getSrc(2), TYPE_U32);
-      if(srcNum > 3) src2 = sel.selReg(insn.getSrc(3), TYPE_U32);
-
-      GenRegister flagTemp = sel.selReg(sel.reg(FAMILY_WORD, true), TYPE_U16);
+      if(msgPayload > 1) src1 = sel.selReg(insn.getSrc(1), TYPE_U32);
+      if(msgPayload > 2) src2 = sel.selReg(insn.getSrc(2), TYPE_U32);
 
       GenAtomicOpCode genAtomicOp = (GenAtomicOpCode)atomicOp;
+      sel.ATOMIC(dst, genAtomicOp, msgPayload, src0, src1, src2, bti, sel.getBTITemps(b));
 
-      sel.ATOMIC(dst, genAtomicOp, opNum, src0, src1, src2, bti, b.isConst ? NULL : &flagTemp);
-
-      // for fixed bti, don't generate the useless loadi
-      if (insn.isFixedBTI())
-        dag.child[0] = NULL;
       markAllChildren(dag);
-
       return true;
     }
   };
@@ -4654,7 +5576,16 @@ namespace gbe
          }
         case OP_MAD:
          {
+          sel.push();
+          if (sel.isScalarReg(insn.getDst(0)))
+            sel.curr.execWidth = 1;
           sel.MAD(dst, src2, src0, src1);
+          sel.pop();
+          break;
+         }
+        case OP_LRP:
+         {
+          sel.LRP(dst, src0, src1, src2);
           break;
          }
         default:
@@ -4844,6 +5775,47 @@ namespace gbe
     DECL_CTOR(SampleInstruction, 1, 1);
   };
 
+  DECL_PATTERN(VmeInstruction)
+  {
+    INLINE bool emitOne(Selection::Opaque &sel, const ir::VmeInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      uint32_t msg_type, vme_search_path_lut, lut_sub;
+      msg_type = insn.getMsgType();
+      vme_search_path_lut = 0;
+      lut_sub = 0;
+      GBE_ASSERT(msg_type == 1);
+      uint32_t payloadLen = 0;
+      //We allocate 5 virtual payload grfs to selection dst register.
+      if(msg_type == 1){
+        payloadLen = 5;
+      }
+      uint32_t selDstNum = insn.getDstNum() + payloadLen;
+      uint32_t srcNum = insn.getSrcNum();
+      vector<GenRegister> dst(selDstNum);
+      vector<GenRegister> payloadVal(srcNum);
+      uint32_t valueID = 0;
+      for (valueID = 0; valueID < insn.getDstNum(); ++valueID)
+        dst[valueID] = sel.selReg(insn.getDst(valueID), insn.getDstType());
+      for (valueID = insn.getDstNum(); valueID < selDstNum; ++valueID)
+        dst[valueID] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+
+      for (valueID = 0; valueID < srcNum; ++valueID)
+        payloadVal[valueID] = sel.selReg(insn.getSrc(valueID), insn.getSrcType());
+
+      uint32_t bti = insn.getImageIndex();
+      if (bti > BTI_MAX_ID) {
+        std::cerr << "Too large bti " << bti;
+        return false;
+      }
+
+      sel.VME(bti, dst.data(), payloadVal.data(), selDstNum, srcNum, msg_type, vme_search_path_lut, lut_sub);
+
+      return true;
+    }
+    DECL_CTOR(VmeInstruction, 1, 1);
+  };
+
   /*! Typed write instruction pattern. */
   DECL_PATTERN(TypedWriteInstruction)
   {
@@ -5013,17 +5985,28 @@ namespace gbe
       }
 
       sel.push();
-      if (sel.isScalarReg(insn.getDst(0))) {
-        sel.curr.execWidth = 1;
-        sel.curr.predicate = GEN_PREDICATE_NONE;
-        sel.curr.noMask = 1;
-      }
-      if (src1.file == GEN_IMMEDIATE_VALUE)
-        sel.SIMD_SHUFFLE(dst, src0, src1);
-      else {
-        GenRegister shiftL = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-        sel.SHL(shiftL, src1, GenRegister::immud(0x2));
-        sel.SIMD_SHUFFLE(dst, src0, shiftL);
+      if (sel.isScalarReg(insn.getSrc(0))) {
+        if (sel.isScalarReg(insn.getDst(0))) {
+          sel.curr.execWidth = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+        }
+        sel.MOV(dst, src0);     //no matter what src1 is
+      } else {
+        if (src1.file == GEN_IMMEDIATE_VALUE) {
+          uint32_t offset = src1.value.ud % sel.curr.execWidth;
+          GenRegister reg = GenRegister::subphysicaloffset(src0, offset);
+          reg.vstride = GEN_VERTICAL_STRIDE_0;
+          reg.hstride = GEN_HORIZONTAL_STRIDE_0;
+          reg.width = GEN_WIDTH_1;
+          sel.MOV(dst, reg);
+        }
+        else {
+          GenRegister shiftL = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+          uint32_t SHLimm = typeSize(getGenType(type)) == 2 ? 1 : (typeSize(getGenType(type)) == 4 ? 2 : 3);
+          sel.SHL(shiftL, src1, GenRegister::immud(SHLimm));
+          sel.SIMD_SHUFFLE(dst, src0, shiftL);
+        }
       }
       sel.pop();
       return true;
@@ -5074,6 +6057,156 @@ namespace gbe
       GenRegister tmp = sel.selReg(sel.reg(FAMILY_WORD), TYPE_U16);
 
       sel.INDIRECT_MOVE(dst, tmp, src0, src1, offset);
+      markAllChildren(dag);
+      return true;
+    }
+  };
+
+  class CalcTimestampInstructionPattern : public SelectionPattern
+  {
+  public:
+    CalcTimestampInstructionPattern(void) : SelectionPattern(1,1) {
+      this->opcodes.push_back(ir::OP_CALC_TIMESTAMP);
+    }
+    INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const {
+      using namespace ir;
+      const ir::CalcTimestampInstruction &insn = cast<ir::CalcTimestampInstruction>(dag.insn);
+      uint32_t pointNum = insn.getPointNum();
+      uint32_t tsType = insn.getTimestamptType();
+      GBE_ASSERT(sel.ctx.getSimdWidth() == 16 || sel.ctx.getSimdWidth() == 8);
+      GenRegister tmp;
+      GenRegister ts[5];
+      int tsNum;
+      if (sel.ctx.getSimdWidth() == 16) {
+        if (!sel.hasLongType())
+          tmp = GenRegister::retype(sel.selReg(sel.reg(FAMILY_WORD)), GEN_TYPE_UD);
+        ts[0] = GenRegister::retype(sel.selReg(ir::ocl::profilingts0, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[1] = GenRegister::retype(sel.selReg(ir::ocl::profilingts1, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[2] = GenRegister::retype(sel.selReg(ir::ocl::profilingts2, ir::TYPE_U32), GEN_TYPE_UW);
+        tsNum = 3;
+      } else {
+        if (!sel.hasLongType())
+          tmp = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+        ts[0] = GenRegister::retype(sel.selReg(ir::ocl::profilingts0, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[1] = GenRegister::retype(sel.selReg(ir::ocl::profilingts1, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[2] = GenRegister::retype(sel.selReg(ir::ocl::profilingts2, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[3] = GenRegister::retype(sel.selReg(ir::ocl::profilingts3, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[4] = GenRegister::retype(sel.selReg(ir::ocl::profilingts4, ir::TYPE_U32), GEN_TYPE_UD);
+        tsNum = 5;
+      }
+
+      sel.push(); {
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
+        sel.CALC_TIMESTAMP(ts, tsNum, tmp, pointNum, tsType);
+      } sel.pop();
+      markAllChildren(dag);
+      return true;
+    }
+  };
+
+  class StoreProfilingInstructionPattern : public SelectionPattern
+  {
+  public:
+    StoreProfilingInstructionPattern(void) : SelectionPattern(1,1) {
+      this->opcodes.push_back(ir::OP_STORE_PROFILING);
+    }
+    INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const {
+      using namespace ir;
+      const ir::StoreProfilingInstruction &insn = cast<ir::StoreProfilingInstruction>(dag.insn);
+      uint32_t profilingType = insn.getProfilingType();
+      uint32_t BTI = insn.getBTI();
+      GBE_ASSERT(sel.ctx.getSimdWidth() == 16 || sel.ctx.getSimdWidth() == 8);
+      GenRegister tmp0;
+      GenRegister tmp1;
+      GenRegister ts[5];
+      int tsNum;
+      if (sel.ctx.getSimdWidth() == 16) {
+        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+        ts[0] = GenRegister::retype(sel.selReg(ir::ocl::profilingts0, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[1] = GenRegister::retype(sel.selReg(ir::ocl::profilingts1, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[2] = GenRegister::retype(sel.selReg(ir::ocl::profilingts2, ir::TYPE_U32), GEN_TYPE_UW);
+        tsNum = 3;
+      } else {
+        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+        tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+        ts[0] = GenRegister::retype(sel.selReg(ir::ocl::profilingts0, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[1] = GenRegister::retype(sel.selReg(ir::ocl::profilingts1, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[2] = GenRegister::retype(sel.selReg(ir::ocl::profilingts2, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[3] = GenRegister::retype(sel.selReg(ir::ocl::profilingts3, ir::TYPE_U32), GEN_TYPE_UD);
+        ts[4] = GenRegister::retype(sel.selReg(ir::ocl::profilingts4, ir::TYPE_U32), GEN_TYPE_UD);
+        tsNum = 5;
+      }
+      sel.push(); {
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
+        sel.STORE_PROFILING(profilingType, BTI, tmp0, tmp1, ts, tsNum);
+      } sel.pop();
+      markAllChildren(dag);
+      return true;
+    }
+  };
+
+  class PrintfInstructionPattern : public SelectionPattern
+  {
+  public:
+    PrintfInstructionPattern(void) : SelectionPattern(1,1) {
+      this->opcodes.push_back(ir::OP_PRINTF);
+    }
+    INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const {
+      using namespace ir;
+      const ir::PrintfInstruction &insn = cast<ir::PrintfInstruction>(dag.insn);
+      uint16_t num = insn.getNum();
+      uint8_t BTI = insn.getBti();
+      GenRegister tmp0, tmp1;
+      uint32_t srcNum = insn.getSrcNum();
+      GenRegister dst = sel.selReg(insn.getDst(0), TYPE_S32);
+      //GBE_ASSERT(srcNum);
+      uint32_t i = 0;
+      uint32_t totalSize = 0;
+      bool isContinue = false;
+      GBE_ASSERT(sel.ctx.getSimdWidth() == 16 || sel.ctx.getSimdWidth() == 8);
+      if (sel.ctx.getSimdWidth() == 16) {
+        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+        tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+      } else {
+        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), GEN_TYPE_UD);
+        tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), GEN_TYPE_UD);
+      }
+
+      /* Get the total size for one printf statement. */
+      for (i = 0; i < srcNum; i++) {
+        Type type = insn.getType(i);
+        if (type == TYPE_DOUBLE || type == TYPE_S64 || type == TYPE_U64) {
+          totalSize += 8;
+        } else {
+          totalSize += 4; // Make sure always align to 4.
+        }
+      }
+
+      i = 0;
+      GenRegister regs[8];
+      if (srcNum == 0) {
+          sel.PRINTF(dst, BTI, tmp0, tmp1, regs, srcNum, num, isContinue, totalSize);
+      } else {
+        do {
+          uint32_t s = srcNum < 8 ? srcNum : 8;
+          for (uint32_t j = 0; j < s; j++) {
+            regs[j] = sel.selReg(insn.getSrc(i + j), insn.getType(i + j));
+          }
+          sel.PRINTF(dst, BTI, tmp0, tmp1, regs, s, num, isContinue, totalSize);
+
+          if (srcNum > 8) {
+            srcNum -= 8;
+            i += 8;
+          } else {
+            srcNum = 0;
+          }
+
+          isContinue = true;
+        } while(srcNum);
+      }
+
       markAllChildren(dag);
       return true;
     }
@@ -5135,7 +6268,8 @@ namespace gbe
           sel.curr.execWidth = 1;
           sel.curr.noMask = 1;
           sel.curr.predicate = GEN_PREDICATE_NONE;
-          sel.block->endifOffset -= sel.JMPI(GenRegister::immd(0), jip, curr->getLabelIndex());
+          // Actually, the origin of this JMPI should be the beginning of next BB.
+          sel.block->endifOffset -= sel.JMPI(GenRegister::immd(0), jip, ir::LabelIndex(curr->getLabelIndex().value() + 1));
         sel.pop();
       }
     }
@@ -5274,6 +6408,349 @@ namespace gbe
 
   };
 
+  /*! WorkGroup instruction pattern */
+  DECL_PATTERN(WorkGroupInstruction)
+  {
+    /* WORKGROUP OP: ALL, ANY, REDUCE, SCAN INCLUSIVE, SCAN EXCLUSIVE
+     * Shared local memory bassed communication between threads,
+     * prepare for the workgroup op in gen context
+     * Algorithm logic is in gen context,  */
+    INLINE bool emitWGReduce(Selection::Opaque &sel, const ir::WorkGroupInstruction &insn) const
+    {
+      using namespace ir;
+
+      GBE_ASSERT(insn.getSrcNum() == 3);
+      GBE_ASSERT(insn.getSrc(0) == ocl::threadn);
+      GBE_ASSERT(insn.getSrc(1) == ocl::threadid);
+
+      const WorkGroupOps workGroupOp = insn.getWorkGroupOpcode();
+      const Type type = insn.getType();
+      GenRegister dst = sel.selReg(insn.getDst(0), type);
+      GenRegister src = sel.selReg(insn.getSrc(2), type);
+      GenRegister tmpData1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), type);
+      GenRegister tmpData2 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), type);
+      GenRegister slmOff = sel.selReg(sel.reg(FAMILY_QWORD), TYPE_U32);
+      GenRegister localThreadID = sel.selReg(ocl::threadid, TYPE_U32);
+      GenRegister localThreadNUM = sel.selReg(ocl::threadn, TYPE_U32);
+      GenRegister localBarrier = GenRegister::ud8grf(sel.reg(FAMILY_DWORD));
+
+      /* Allocate registers for message sending
+       * (read/write to shared local memory) */
+      vector<GenRegister> msg;
+      for(uint32_t i = 0; i < 6; i++)
+        msg.push_back(sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32));
+
+      /* Insert a barrier to make sure all the var we are interested in
+         have been assigned the final value. */
+      sel.BARRIER(GenRegister::ud8grf(sel.reg(FAMILY_DWORD)),
+                  sel.selReg(sel.reg(FAMILY_DWORD)), syncLocalBarrier);
+
+      /* Pass the shared local memory offset  */
+      sel.MOV(slmOff, GenRegister::immud(insn.getSlmAddr()));
+
+      /* Perform workgroup op */
+      sel.WORKGROUP_OP(workGroupOp, dst, src, tmpData1,
+                       localThreadID, localThreadNUM, tmpData2, slmOff, msg, 6,
+                       localBarrier);
+
+      return true;
+    }
+
+    /* WORKGROUP OP: BROADCAST
+     * 1. BARRIER    Ensure all the threads have set the correct value for the var which will be broadcasted.
+       2. CMP IDs    Compare the local IDs with the specified ones in the function call.
+       3. STORE      Use flag to control the store of the var. Only the specified item will execute the store.
+       4. BARRIER    Ensure the specified value has been stored.
+       5. LOAD       Load the stored value to all the dst value, the dst of all the items will have same value,
+       so broadcasted. */
+    INLINE bool emitWGBroadcast(Selection::Opaque &sel, const ir::WorkGroupInstruction &insn) const
+    {
+      using namespace ir;
+
+      const uint32_t srcNum = insn.getSrcNum();
+      GBE_ASSERT(srcNum >= 2);
+
+      const Type type = insn.getType();
+      const GenRegister src = sel.selReg(insn.getSrc(0), type);
+      const GenRegister dst = sel.selReg(insn.getDst(0), type);
+      const uint32_t slmAddr = insn.getSlmAddr();
+      GenRegister addr = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+      vector<GenRegister> fakeTemps;
+      fakeTemps.push_back(sel.selReg(sel.reg(FAMILY_DWORD), type));
+      fakeTemps.push_back(sel.selReg(sel.reg(FAMILY_DWORD), type));
+
+      GenRegister coords[3];
+      for (uint32_t i = 1; i < srcNum; i++)
+        coords[i - 1] = GenRegister::toUniform(sel.selReg(insn.getSrc(i), TYPE_U32), GEN_TYPE_UD);
+
+      sel.push(); {
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        sel.MOV(addr, GenRegister::immud(slmAddr));
+      } sel.pop();
+
+      /* insert a barrier to make sure all the var we are interested in
+         have been assigned the final value. */
+      sel.BARRIER(GenRegister::ud8grf(sel.reg(FAMILY_DWORD)),
+                  sel.selReg(sel.reg(FAMILY_DWORD)), syncLocalBarrier);
+
+      sel.push(); {
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        GenRegister lid0, lid1, lid2;
+        uint32_t dim = srcNum - 1;
+        lid0 = GenRegister::retype(sel.selReg(ocl::lid0, TYPE_U32), GEN_TYPE_UD);
+        lid1 = GenRegister::retype(sel.selReg(ocl::lid1, TYPE_U32), GEN_TYPE_UD);
+        lid2 = GenRegister::retype(sel.selReg(ocl::lid2, TYPE_U32), GEN_TYPE_UD);
+
+        sel.CMP(GEN_CONDITIONAL_EQ, coords[0], lid0,
+                GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+        sel.curr.predicate = GEN_PREDICATE_NORMAL;
+        if (dim >= 2)
+          sel.CMP(GEN_CONDITIONAL_EQ, coords[1], lid1,
+                  GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+        if (dim >= 3)
+          sel.CMP(GEN_CONDITIONAL_EQ, coords[2], lid2,
+                  GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+
+        /* write to shared local memory for BYTE/WORD/DWORD types */
+        if (typeSize(src.type) <= 4) {
+          GenRegister _addr = GenRegister::retype(addr, GEN_TYPE_UD);
+          GenRegister _src = GenRegister::retype(src, GEN_TYPE_UD);
+          sel.UNTYPED_WRITE(_addr, &_src, 1, GenRegister::immw(0xfe), fakeTemps);
+        }
+        /* write to shared local memory for QWORD types */
+        else if (typeSize(src.type) == 8) {
+          sel.push(); {
+          /* arrange data in QWORD */
+          GenRegister _addr = GenRegister::retype(addr, GEN_TYPE_UD);
+          GenRegister srcQW = sel.selReg(sel.reg(FAMILY_QWORD), ir::TYPE_U64);
+          GenRegister srcQW_p1 = src.retype(srcQW, GEN_TYPE_UD);
+          GenRegister srcQW_p2 = src.retype(src.offset(srcQW, 2, 0), GEN_TYPE_UD);
+          vector<GenRegister> srcVec;
+          srcVec.push_back(srcQW_p1);
+          srcVec.push_back(srcQW_p2);
+
+          /* unpack into 2 DWORD */
+          sel.UNPACK_LONG(srcQW, src);
+
+          /* emit write through SEND */
+          sel.UNTYPED_WRITE(_addr, srcVec.data(), 2,
+                            GenRegister::immw(0xfe), fakeTemps);
+          }sel.pop();
+        }
+        else
+          GBE_ASSERT(0);
+
+      } sel.pop();
+      /* make sure the slm var have the valid value now */
+      sel.BARRIER(GenRegister::ud8grf(sel.reg(FAMILY_DWORD)),
+                  sel.selReg(sel.reg(FAMILY_DWORD)), syncLocalBarrier);
+
+      /* read from shared local memory for BYTE/WORD/DWORD types */
+      if (typeSize(src.type) <= 4) {
+        GenRegister _addr = GenRegister::retype(addr, GEN_TYPE_UD);
+        GenRegister _dst = GenRegister::retype(dst, GEN_TYPE_UD);
+        sel.UNTYPED_READ(_addr, &_dst, 1, GenRegister::immw(0xfe), fakeTemps);
+      }
+      /* read from shared local memory for QWORD types */
+      else if (typeSize(src.type) == 8) {
+        GenRegister _addr = GenRegister::retype(addr, GEN_TYPE_UD);
+        vector<GenRegister> _dst;
+        _dst.push_back(sel.selReg(sel.reg(FAMILY_WORD), ir::TYPE_U32));
+        _dst.push_back(sel.selReg(sel.reg(FAMILY_WORD), ir::TYPE_U32));
+        GenRegister _dstQ = dst.toUniform(_dst[0], GEN_TYPE_UL);
+
+        sel.push(); {
+        /* emit read through SEND */
+        sel.curr.execWidth = 8;
+        sel.UNTYPED_READ(_addr, _dst.data(), 2, GenRegister::immw(0xfe), fakeTemps);
+
+        /* reconstruct QWORD type */
+        _dst[0] = dst.toUniform(dst.offset(_dst[0], 0, 4), GEN_TYPE_UD);
+        _dst[1] = dst.toUniform(_dst[1], GEN_TYPE_UD);
+        sel.curr.execWidth = 1;
+        sel.MOV(_dst[0], _dst[1]);
+        } sel.pop();
+
+        /* set all elements assigned to thread */
+        sel.MOV(dst, _dstQ);
+      }
+      else
+        GBE_ASSERT(0);
+
+      return true;
+    }
+
+
+    INLINE bool emitOne(Selection::Opaque &sel, const ir::WorkGroupInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      const WorkGroupOps workGroupOp = insn.getWorkGroupOpcode();
+
+      if (workGroupOp == WORKGROUP_OP_BROADCAST){
+        return emitWGBroadcast(sel, insn);
+      }
+      else if (workGroupOp >= WORKGROUP_OP_ANY && workGroupOp <= WORKGROUP_OP_EXCLUSIVE_MAX){
+        return emitWGReduce(sel, insn);
+      }
+      else
+        GBE_ASSERT(0);
+
+      return true;
+    }
+    DECL_CTOR(WorkGroupInstruction, 1, 1);
+  };
+
+  /*! SubGroup instruction pattern */
+  class SubGroupInstructionPattern : public SelectionPattern
+  {
+  public:
+    SubGroupInstructionPattern(void) : SelectionPattern(1,1) {
+      for (uint32_t op = 0; op < ir::OP_INVALID; ++op)
+        if (ir::isOpcodeFrom<ir::SubGroupInstruction>(ir::Opcode(op)) == true)
+          this->opcodes.push_back(ir::Opcode(op));
+    }
+
+    /* SUBGROUP OP: ALL, ANY, REDUCE, SCAN INCLUSIVE, SCAN EXCLUSIVE
+     * Shared algorithm with workgroup inthread */
+    INLINE bool emitSGReduce(Selection::Opaque &sel, const ir::SubGroupInstruction &insn) const
+    {
+      using namespace ir;
+
+      GBE_ASSERT(insn.getSrcNum() == 1);
+
+      const WorkGroupOps workGroupOp = insn.getWorkGroupOpcode();
+      const Type type = insn.getType();
+      GenRegister dst = sel.selReg(insn.getDst(0), type);
+      GenRegister src = sel.selReg(insn.getSrc(0), type);
+      GenRegister tmpData1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), type);
+      GenRegister tmpData2 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), type);
+
+      /* Perform workgroup op */
+      sel.SUBGROUP_OP(workGroupOp, dst, src, tmpData1, tmpData2);
+
+      return true;
+    }
+
+    /* SUBROUP OP: BROADCAST
+     * Shared algorithm with simd shuffle */
+    INLINE bool emitSGBroadcast(Selection::Opaque &sel, const ir::SubGroupInstruction &insn, SelectionDAG &dag) const
+    {
+      using namespace ir;
+
+      GBE_ASSERT(insn.getSrcNum() == 2);
+
+      const Type type = insn.getType();
+      const GenRegister src0 = sel.selReg(insn.getSrc(0), type);
+      const GenRegister dst = sel.selReg(insn.getDst(0), type);
+      GenRegister src1;
+
+      SelectionDAG *dag0 = dag.child[0];
+      SelectionDAG *dag1 = dag.child[1];
+      if (dag1 != NULL && dag1->insn.getOpcode() == OP_LOADI && canGetRegisterFromImmediate(dag1->insn)) {
+        const auto &childInsn = cast<LoadImmInstruction>(dag1->insn);
+        src1 = getRegisterFromImmediate(childInsn.getImmediate(), TYPE_U32);
+        if (dag0) dag0->isRoot = 1;
+      } else {
+        markAllChildren(dag);
+        src1 = sel.selReg(insn.getSrc(1), TYPE_U32);
+      }
+
+      sel.push(); {
+      if (src1.file == GEN_IMMEDIATE_VALUE) {
+          uint32_t offset = src1.value.ud % sel.curr.execWidth;
+          GenRegister reg = GenRegister::subphysicaloffset(src0, offset);
+          reg.vstride = GEN_VERTICAL_STRIDE_0;
+          reg.hstride = GEN_HORIZONTAL_STRIDE_0;
+          reg.width = GEN_WIDTH_1;
+          sel.MOV(dst, reg);
+      } else {
+        GenRegister shiftL = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+        uint32_t SHLimm = typeSize(getGenType(type)) == 2 ? 1 : (typeSize(getGenType(type)) == 4 ? 2 : 3);
+        sel.SHL(shiftL, src1, GenRegister::immud(SHLimm));
+        sel.SIMD_SHUFFLE(dst, src0, shiftL);
+      }
+      } sel.pop();
+
+      return true;
+    }
+
+    INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const
+    {
+      using namespace ir;
+      const ir::SubGroupInstruction &insn = cast<SubGroupInstruction>(dag.insn);
+      const WorkGroupOps workGroupOp = insn.getWorkGroupOpcode();
+
+      if (workGroupOp == WORKGROUP_OP_BROADCAST){
+        return emitSGBroadcast(sel, insn, dag);
+      }
+      else if (workGroupOp >= WORKGROUP_OP_ANY && workGroupOp <= WORKGROUP_OP_EXCLUSIVE_MAX){
+        if(emitSGReduce(sel, insn))
+          markAllChildren(dag);
+        else
+          return false;
+      }
+      else
+        GBE_ASSERT(0);
+
+      return true;
+    }
+  };
+
+  /*! Media Block Read pattern */
+  DECL_PATTERN(MediaBlockReadInstruction)
+  {
+    bool emitOne(Selection::Opaque &sel, const ir::MediaBlockReadInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      uint32_t vec_size = insn.getVectorSize();
+      uint32_t simdWidth = sel.curr.execWidth;
+      vector<GenRegister> valuesVec;
+      vector<GenRegister> tmpVec;
+      for (uint32_t i = 0; i < vec_size; ++i) {
+        valuesVec.push_back(sel.selReg(insn.getDst(i), TYPE_U32));
+        if(simdWidth == 16)
+          tmpVec.push_back(sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32));
+      }
+      const GenRegister coordx = sel.selReg(insn.getSrc(0), TYPE_U32);
+      const GenRegister coordy = sel.selReg(insn.getSrc(1), TYPE_U32);
+      const GenRegister header = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+      GenRegister *tmp = NULL;
+      if(simdWidth == 16)
+        tmp = &tmpVec[0];
+      sel.MBREAD(&valuesVec[0], coordx, coordy, header, tmp, insn.getImageIndex(), insn.getVectorSize());
+      return true;
+    }
+    DECL_CTOR(MediaBlockReadInstruction, 1, 1);
+  };
+
+  /*! Media Block Write pattern */
+  DECL_PATTERN(MediaBlockWriteInstruction)
+  {
+    bool emitOne(Selection::Opaque &sel, const ir::MediaBlockWriteInstruction &insn, bool &markChildren) const
+    {
+      using namespace ir;
+      uint32_t vec_size = insn.getVectorSize();
+      const GenRegister coordx = sel.selReg(insn.getSrc(0), TYPE_U32);
+      const GenRegister coordy = sel.selReg(insn.getSrc(1), TYPE_U32);
+      vector<GenRegister> valuesVec;
+      vector<GenRegister> tmpVec;
+      for(uint32_t i = 0; i < vec_size; i++)
+      {
+        valuesVec.push_back(sel.selReg(insn.getSrc(2 + i), TYPE_U32));
+        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
+      }
+      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
+      sel.MBWRITE(coordx, coordy, &valuesVec[0], header, &tmpVec[0], insn.getImageIndex(), vec_size);
+      return true;
+    }
+    DECL_CTOR(MediaBlockWriteInstruction, 1, 1);
+  };
+
+
   /*! Sort patterns */
   INLINE bool cmp(const SelectionPattern *p0, const SelectionPattern *p1) {
     if (p0->insnNum != p1->insnNum)
@@ -5302,12 +6779,21 @@ namespace gbe
     this->insert<MulAddInstructionPattern>();
     this->insert<SelectModifierInstructionPattern>();
     this->insert<SampleInstructionPattern>();
+    this->insert<VmeInstructionPattern>();
     this->insert<GetImageInfoInstructionPattern>();
     this->insert<ReadARFInstructionPattern>();
     this->insert<RegionInstructionPattern>();
     this->insert<SimdShuffleInstructionPattern>();
     this->insert<IndirectMovInstructionPattern>();
+    this->insert<CalcTimestampInstructionPattern>();
+    this->insert<StoreProfilingInstructionPattern>();
+    this->insert<WorkGroupInstructionPattern>();
+    this->insert<SubGroupInstructionPattern>();
     this->insert<NullaryInstructionPattern>();
+    this->insert<WaitInstructionPattern>();
+    this->insert<PrintfInstructionPattern>();
+    this->insert<MediaBlockReadInstructionPattern>();
+    this->insert<MediaBlockWriteInstructionPattern>();
 
     // Sort all the patterns with the number of instructions they output
     for (uint32_t op = 0; op < ir::OP_INVALID; ++op)

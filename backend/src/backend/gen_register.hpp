@@ -274,6 +274,15 @@ namespace gbe
       return r;
     }
 
+    static INLINE GenRegister toUniform(GenRegister reg, uint32_t type) {
+      GenRegister r = reg;
+      r.type = type;
+      r.hstride = GEN_HORIZONTAL_STRIDE_0;
+      r.vstride = GEN_VERTICAL_STRIDE_0;
+      r.width = GEN_WIDTH_1;
+      return r;
+    }
+
     static INLINE uint32_t grfOffset(GenRegister reg) {
       return reg.nr * GEN_REG_SIZE + reg.subnr;
     }
@@ -458,11 +467,11 @@ namespace gbe
     }
 
     static INLINE GenRegister df16(uint32_t file, ir::Register reg) {
-      return retype(vec16(file, reg), GEN_TYPE_DF);
+      return retype(vec4(file, reg), GEN_TYPE_DF);
     }
 
     static INLINE GenRegister df8(uint32_t file, ir::Register reg) {
-      return retype(vec8(file, reg), GEN_TYPE_DF);
+      return retype(vec4(file, reg), GEN_TYPE_DF);
     }
 
     static INLINE GenRegister df1(uint32_t file, ir::Register reg) {
@@ -608,7 +617,7 @@ namespace gbe
     }
 
     static INLINE GenRegister immdf(double df) {
-      GenRegister immediate = imm(GEN_TYPE_DF);
+      GenRegister immediate = imm(GEN_TYPE_DF_IMM);
       immediate.value.df = df;
       return immediate;
     }
@@ -789,6 +798,16 @@ namespace gbe
       return reg;
     }
 
+    static INLINE GenRegister tm0(void) {
+      return GenRegister(GEN_ARCHITECTURE_REGISTER_FILE,
+                         0xc0,
+                         0,
+                         GEN_TYPE_UW,
+                         GEN_VERTICAL_STRIDE_4,
+                         GEN_WIDTH_4,
+                         GEN_HORIZONTAL_STRIDE_1);
+    }
+
     static INLINE GenRegister acc(void) {
       return GenRegister(GEN_ARCHITECTURE_REGISTER_FILE,
                          GEN_ARF_ACCUMULATOR,
@@ -809,10 +828,20 @@ namespace gbe
                          GEN_HORIZONTAL_STRIDE_0);
     }
 
-    static INLINE GenRegister notification1(void) {
+    static INLINE GenRegister sr(uint32_t nr, uint32_t subnr = 0) {
+      return GenRegister(GEN_ARCHITECTURE_REGISTER_FILE,
+                         GEN_ARF_STATE | nr,
+                         subnr,
+                         GEN_TYPE_UD,
+                         GEN_VERTICAL_STRIDE_8,
+                         GEN_WIDTH_8,
+                         GEN_HORIZONTAL_STRIDE_1);
+    }
+
+    static INLINE GenRegister notification0(uint32_t subnr) {
       return GenRegister(GEN_ARCHITECTURE_REGISTER_FILE,
                          GEN_ARF_NOTIFICATION_COUNT,
-                         0,
+                         subnr,
                          GEN_TYPE_UD,
                          GEN_VERTICAL_STRIDE_0,
                          GEN_WIDTH_1,
@@ -927,6 +956,16 @@ namespace gbe
                     GEN_HORIZONTAL_STRIDE_0);
     }
 
+    static INLINE uint32_t hstrideFromSize(int size) {
+      switch (size) {
+        case 0: return GEN_HORIZONTAL_STRIDE_0;
+        case 1: return GEN_HORIZONTAL_STRIDE_1;
+        case 2: return GEN_HORIZONTAL_STRIDE_2;
+        case 4: return GEN_HORIZONTAL_STRIDE_4;
+        default: NOT_IMPLEMENTED; return GEN_HORIZONTAL_STRIDE_0;
+      }
+    }
+
     static INLINE int hstride_size(GenRegister reg) {
       switch (reg.hstride) {
         case GEN_HORIZONTAL_STRIDE_0: return 0;
@@ -937,11 +976,47 @@ namespace gbe
       }
     }
 
+    static INLINE int vstride_size(GenRegister reg) {
+      switch (reg.vstride) {
+        case GEN_VERTICAL_STRIDE_0: return 0;
+        case GEN_VERTICAL_STRIDE_1: return 1;
+        case GEN_VERTICAL_STRIDE_2: return 2;
+        case GEN_VERTICAL_STRIDE_4: return 4;
+        case GEN_VERTICAL_STRIDE_8: return 8;
+        case GEN_VERTICAL_STRIDE_16: return 16;
+        case GEN_VERTICAL_STRIDE_32: return 32;
+        case GEN_VERTICAL_STRIDE_64: return 64;
+        case GEN_VERTICAL_STRIDE_128: return 128;
+        case GEN_VERTICAL_STRIDE_256: return 256;
+        default: NOT_IMPLEMENTED; return 0;
+      }
+    }
+
+    static INLINE int width_size(GenRegister reg) {
+      switch (reg.width) {
+        case GEN_WIDTH_1: return 1;
+        case GEN_WIDTH_2: return 2;
+        case GEN_WIDTH_4: return 4;
+        case GEN_WIDTH_8: return 8;
+        case GEN_WIDTH_16: return 16;
+        case GEN_WIDTH_32: return 32;
+        default: NOT_IMPLEMENTED; return 0;
+      }
+    }
+
     static INLINE GenRegister suboffset(GenRegister reg, uint32_t delta) {
       if (reg.hstride != GEN_HORIZONTAL_STRIDE_0) {
         reg.subnr += delta * typeSize(reg.type) * hstride_size(reg);
         reg.nr += reg.subnr / 32;
         reg.subnr %= 32;
+      }
+      return reg;
+    }
+
+    static INLINE GenRegister subphysicaloffset(GenRegister reg, uint32_t delta) {
+      if (reg.hstride != GEN_HORIZONTAL_STRIDE_0) {
+        reg.subnr += delta * typeSize(reg.type) * hstride_size(reg);
+        reg.subphysical = 1;
       }
       return reg;
     }
@@ -1128,6 +1203,22 @@ namespace gbe
                          GEN_HORIZONTAL_STRIDE_2);
     }
 
+    static INLINE GenRegister unpacked_uw(const GenRegister& reg) {
+      uint32_t nr = reg.nr;
+      uint32_t subnr = reg.subnr / typeSize(GEN_TYPE_UW);
+      uint32_t width = reg.width;
+      int hstrideSize = GenRegister::hstride_size(reg) * typeSize(reg.type) / typeSize(GEN_TYPE_UW);
+      uint32_t hstride = GenRegister::hstrideFromSize(hstrideSize);
+
+      return GenRegister(GEN_GENERAL_REGISTER_FILE,
+                         nr,
+                         subnr,
+                         GEN_TYPE_UW,
+                         GEN_VERTICAL_STRIDE_16,
+                         width,
+                         hstride);
+    }
+
     static INLINE GenRegister packed_ud(uint32_t nr, uint32_t subnr) {
       return GenRegister(GEN_GENERAL_REGISTER_FILE,
                          nr,
@@ -1186,6 +1277,27 @@ namespace gbe
       reg.absolute = 1;
       reg.negation = 0;
       return reg;
+    }
+
+    static INLINE void propagateRegister(GenRegister& dst, const GenRegister& src)
+    {
+      dst.type = src.type;
+      dst.file = src.file;
+      dst.physical = src.physical;
+      dst.subphysical = src.subphysical;
+      dst.value.reg = src.value.reg;
+      dst.vstride = src.vstride;
+      dst.width = src.width;
+      dst.hstride = src.hstride;
+      dst.quarter = src.quarter;
+      dst.nr = src.nr;
+      dst.subnr = src.subnr;
+      dst.address_mode = src.address_mode;
+      dst.a0_subnr = src.a0_subnr;
+      dst.addr_imm = src.addr_imm;
+
+      dst.negation = dst.negation ^ src.negation;
+      dst.absolute = dst.absolute | src.absolute;
     }
 
     /*! Generate register encoding with run-time simdWidth */

@@ -95,6 +95,9 @@ typedef  struct _cl_mem {
   cl_mem_dstr_cb *dstr_cb;  /* The destroy callback. */
   uint8_t is_userptr;       /* CL_MEM_USE_HOST_PTR is enabled*/
   size_t offset;            /* offset of host_ptr to the page beginning, only for CL_MEM_USE_HOST_PTR*/
+
+  uint8_t cmrt_mem_type;    /* CmBuffer, CmSurface2D, ... */
+  void* cmrt_mem;
 } _cl_mem;
 
 struct _cl_mem_image {
@@ -110,6 +113,7 @@ struct _cl_mem_image {
   size_t tile_x, tile_y;          /* tile offset, used for mipmap images.  */
   size_t offset;                  /* offset for dri_bo, used when it's reloc. */
   cl_mem buffer_1d;               /* if the image is created from buffer, it point to the buffer.*/
+  uint8_t is_image_from_buffer;       /* IMAGE from Buffer*/
 };
 
 struct _cl_mem_gl_image {
@@ -271,6 +275,7 @@ cl_mem_allocate(enum cl_mem_type type,
                 size_t sz,
                 cl_int is_tiled,
                 void *host_ptr,
+                cl_mem buffer,
                 cl_int *errcode);
 
 void
@@ -293,8 +298,21 @@ extern cl_mem cl_mem_new_libva_image(cl_context ctx,
                                      cl_image_format fmt,
                                      size_t row_pitch,
                                      cl_int *errcode);
+
 extern cl_int cl_mem_get_fd(cl_mem mem, int* fd);
 
+extern cl_mem cl_mem_new_buffer_from_fd(cl_context ctx,
+                                        int fd,
+                                        int buffer_sz,
+                                        cl_int* errcode);
+
+extern cl_mem cl_mem_new_image_from_fd(cl_context ctx,
+                                       int fd, int image_sz,
+                                       size_t offset,
+                                       size_t width, size_t height,
+                                       cl_image_format fmt,
+                                       size_t row_pitch,
+                                       cl_int *errcode);
 
 #endif /* __CL_MEM_H__ */
 

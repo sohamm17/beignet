@@ -5,7 +5,7 @@
 #define udebug 0
 
 #define FLT_MAX 0x1.fffffep127f
-#define FLT_MIN 0x1.0p-126f
+#define FLT_MIN ldexpf(1.0,-126)
 #define FLT_ULP  (1.0e-6f)
 
 #define printf_c(...) \
@@ -15,7 +15,9 @@
   printf("\033[0m");\
 }
 
-const float input_data[] = {FLT_MAX, -FLT_MAX, FLT_MIN, -FLT_MIN, 80, -80, 3.14, -3.14, -0.5, 0.5, 1, -1, 0.0 };
+namespace{
+
+float input_data[] = {FLT_MAX, -FLT_MAX, FLT_MIN, -FLT_MIN, 80, -80, 3.14, -3.14, -0.5, 0.5, 1, -1, 0.0 };
 const int count_input = sizeof(input_data) / sizeof(input_data[0]);
 const int max_function = 5;
 
@@ -51,7 +53,8 @@ static void builtin_exp(void)
   locals[0] = 1;
 
   clEnqueueWriteBuffer( queue, buf[1], CL_TRUE, 0, count_input * sizeof(float), input_data, 0, NULL, NULL);
-  clEnqueueWriteBuffer( queue, buf[2], CL_TRUE, 0, sizeof(int), &max_function , 0, NULL, NULL);
+  int maxfunc = max_function;
+  clEnqueueWriteBuffer( queue, buf[2], CL_TRUE, 0, sizeof(int), &maxfunc, 0, NULL, NULL);
 
    // Run the kernel
   OCL_NDRANGE( 1 );
@@ -71,10 +74,10 @@ static void builtin_exp(void)
          diff/gpu_data[index_cur], 3 * FLT_ULP);
 
 #if udebug
-      if (isinf(cpu_data[index_cur]) && isinf(gpu_data[index_cur])){
+      if (std::isinf(cpu_data[index_cur]) && std::isinf(gpu_data[index_cur])){
         printf(log);
       }
-      else if (isnan(cpu_data[index_cur]) && isnan(gpu_data[index_cur])){
+      else if (std::isnan(cpu_data[index_cur]) && std::isnan(gpu_data[index_cur])){
         printf(log);
       }
       else if( diff / cpu_data[index_cur] < 3 * FLT_ULP \
@@ -86,10 +89,10 @@ static void builtin_exp(void)
       else
         printf_c(log);
 #else
-      if (isinf(cpu_data[index_cur]))
-        OCL_ASSERTM(isinf(gpu_data[index_cur]), log);
-      else if (isnan(cpu_data[index_cur]))
-        OCL_ASSERTM(isnan(gpu_data[index_cur]), log);
+      if (std::isinf(cpu_data[index_cur]))
+        OCL_ASSERTM(std::isinf(gpu_data[index_cur]), log);
+      else if (std::isnan(cpu_data[index_cur]))
+        OCL_ASSERTM(std::isnan(gpu_data[index_cur]), log);
       else if ( gpu_data[index_cur] > FLT_ULP || cpu_data[index_cur] > FLT_ULP)
         OCL_ASSERTM(fabs( diff / cpu_data[index_cur]) < 3 * FLT_ULP, log);
       else
@@ -100,3 +103,4 @@ static void builtin_exp(void)
 }
 
 MAKE_UTEST_FROM_FUNCTION(builtin_exp)
+}

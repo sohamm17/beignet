@@ -28,6 +28,7 @@
 #include <cstring>
 #include <cassert>
 #include <cmath>
+#include <algorithm>
 
 #define FATAL(...) \
 do { \
@@ -46,14 +47,15 @@ do { \
 cl_platform_id platform = NULL;
 cl_device_id device = NULL;
 cl_context ctx = NULL;
-cl_program program = NULL;
-cl_kernel kernel = NULL;
+__thread cl_program program = NULL;
+__thread cl_kernel kernel = NULL;
 cl_command_queue queue = NULL;
-cl_mem buf[MAX_BUFFER_N] = {};
-void *buf_data[MAX_BUFFER_N] = {};
-size_t globals[3] = {};
-size_t locals[3] = {};
+__thread cl_mem buf[MAX_BUFFER_N] = {};
+__thread void *buf_data[MAX_BUFFER_N] = {};
+__thread size_t globals[3] = {};
+__thread size_t locals[3] = {};
 float ULPSIZE_FAST_MATH = 10000.;
+__attribute__ ((visibility ("internal"))) clGetKernelSubGroupInfoKHR_cb* utestclGetKernelSubGroupInfoKHR = NULL;
 
 #ifdef HAS_EGL
 Display    *xDisplay;
@@ -209,19 +211,12 @@ clpanic(const char *msg, int rval)
 char*
 cl_do_kiss_path(const char *file, cl_device_id device)
 {
-  cl_int ver;
   const char *sub_path = NULL;
   char *ker_path = NULL;
   const char *kiss_path = getenv("OCL_KERNEL_PATH");
   size_t sz = strlen(file);
 
-  if (device == NULL)
-    sub_path = "";
-  else {
-    if (clGetGenVersionIntel(device, &ver) != CL_SUCCESS)
-      clpanic("Unable to get Gen version", -1);
-    sub_path = "";
-  }
+  sub_path = "";
 
   if (kiss_path == NULL)
     clpanic("set OCL_KERNEL_PATH. This is where the kiss kernels are", -1);
@@ -244,10 +239,14 @@ cl_kernel_init(const char *file_name, const char *kernel_name, int format, const
   if (!program || (program && (!prevFileName || strcmp(prevFileName, file_name)))) {
     if (program) clReleaseProgram(program);
     ker_path = cl_do_kiss_path(file_name, device);
-    if (format == LLVM)
-      program = clCreateProgramWithLLVMIntel(ctx, 1, &device, ker_path, &status);
-    else if (format == SOURCE) {
+    if (format == LLVM) {
+      assert(0);
+    } else if (format == SOURCE) {
       cl_file_map_t *fm = cl_file_map_new();
+      if(!fm) {
+        fprintf(stderr, "run out of memory\n");
+        goto error;
+      }
       FATAL_IF (cl_file_map_open(fm, ker_path) != CL_FILE_MAP_SUCCESS,
                 "Failed to open file \"%s\" with kernel \"%s\". Did you properly set OCL_KERNEL_PATH variable?",
                 file_name, kernel_name);
@@ -285,6 +284,122 @@ error:
   prevFileName = NULL;
   goto exit;
 }
+
+int
+cl_kernel_compile(const char *file_name, const char *kernel_name, const char * compile_opt)
+{
+  cl_file_map_t *fm = NULL;
+  char *ker_path = NULL;
+  cl_int status = CL_SUCCESS;
+  static const char *prevFileName = NULL;
+
+  /* Load the program and build it */
+  if (!program || (program && (!prevFileName || strcmp(prevFileName, file_name)))) {
+    if (program) clReleaseProgram(program);
+    ker_path = cl_do_kiss_path(file_name, device);
+    cl_file_map_t *fm = cl_file_map_new();
+    if(!fm) {
+      fprintf(stderr, "run out of memory\n");
+      goto error;
+    }
+    FATAL_IF (cl_file_map_open(fm, ker_path) != CL_FILE_MAP_SUCCESS,
+                "Failed to open file \"%s\" with kernel \"%s\". Did you properly set OCL_KERNEL_PATH variable?",
+                file_name, kernel_name);
+    const char *src = cl_file_map_begin(fm);
+    const size_t sz = cl_file_map_size(fm);
+    program = clCreateProgramWithSource(ctx, 1, &src, &sz, &status);
+    cl_file_map_delete(fm);
+    
+    if (status != CL_SUCCESS) {
+      fprintf(stderr, "error calling clCreateProgramWithSource\n");
+      goto error;
+    }
+    prevFileName = file_name;
+
+    OCL_CALL (clCompileProgram, program,
+                                1, &device, // num_devices & device_list
+                                compile_opt, // compile_options
+                                0, // num_input_headers
+                                NULL,
+                                NULL,
+                                NULL, NULL);
+   OCL_ASSERT(status == CL_SUCCESS);
+
+  }
+
+exit:
+  free(ker_path);
+  cl_file_map_delete(fm);
+  return status;
+error:
+  prevFileName = NULL;
+  goto exit;
+}
+
+int
+cl_kernel_link(const char *file_name, const char *kernel_name, const char * link_opt)
+{
+  cl_file_map_t *fm = NULL;
+  char *ker_path = NULL;
+  cl_int status = CL_SUCCESS;
+  static const char *prevFileName = NULL;
+
+  /* Load the program and build it */
+  if (!program || (program && (!prevFileName || strcmp(prevFileName, file_name)))) {
+    if (program) clReleaseProgram(program);
+    ker_path = cl_do_kiss_path(file_name, device);
+    cl_file_map_t *fm = cl_file_map_new();
+    if(!fm) {
+      fprintf(stderr, "run out of memory\n");
+      goto error;
+    }
+    FATAL_IF (cl_file_map_open(fm, ker_path) != CL_FILE_MAP_SUCCESS,
+                "Failed to open file \"%s\" with kernel \"%s\". Did you properly set OCL_KERNEL_PATH variable?",
+                file_name, kernel_name);
+    const char *src = cl_file_map_begin(fm);
+    const size_t sz = cl_file_map_size(fm);
+    program = clCreateProgramWithSource(ctx, 1, &src, &sz, &status);
+    cl_file_map_delete(fm);
+    
+    if (status != CL_SUCCESS) {
+      fprintf(stderr, "error calling clCreateProgramWithSource\n");
+      goto error;
+    }
+    prevFileName = file_name;
+
+    OCL_CALL (clCompileProgram, program,
+                                1, &device, // num_devices & device_list
+                                NULL, // compile_options
+                                0, // num_input_headers
+                                NULL,
+                                NULL,
+                                NULL, NULL);
+    OCL_ASSERT(status==CL_SUCCESS);
+    cl_program input_programs[1] = {program};
+    program = clLinkProgram(ctx, 1, &device, link_opt, 1, input_programs, NULL, NULL, &status);
+    OCL_ASSERT(program != NULL);
+    OCL_ASSERT(status == CL_SUCCESS);
+    clReleaseProgram(input_programs[0]);
+  }
+  
+  /* Create a kernel from the program */
+  if (kernel)
+    clReleaseKernel(kernel);
+  kernel = clCreateKernel(program, kernel_name, &status);
+  if (status != CL_SUCCESS) {
+    fprintf(stderr, "error calling clCreateKernel\n");
+    goto error;
+  }
+
+exit:
+  free(ker_path);
+  cl_file_map_delete(fm);
+  return status;
+error:
+  prevFileName = NULL;
+  goto exit;
+}
+
 
 #define GET_PLATFORM_STR_INFO(LOWER_NAME, NAME) \
   { \
@@ -454,8 +569,6 @@ cl_test_destroy(void)
 {
   cl_kernel_destroy();
   cl_ocl_destroy();
-  printf("%i memory leaks\n", clReportUnfreedIntel());
-  assert(clReportUnfreedIntel() == 0);
 }
 
 void
@@ -464,7 +577,7 @@ cl_buffer_destroy(void)
   int i;
   for (i = 0; i < MAX_BUFFER_N; ++i) {
     if (buf_data[i] != NULL) {
-      clUnmapBufferIntel(buf[i]);
+      clEnqueueUnmapMemObject(queue, buf[i], buf_data[i], 0, NULL, NULL);
       buf_data[i] = NULL;
     }
     if (buf[i] != NULL) {
@@ -482,7 +595,7 @@ cl_report_perf_counters(cl_mem perf)
   uint32_t i;
   if (perf == NULL)
     return;
-  start = (uint32_t*) clMapBufferIntel(perf, &status);
+  start = (uint32_t*)clEnqueueMapBuffer(queue, perf, CL_TRUE, CL_MAP_READ, 0,  128 * sizeof(uint32_t)/*size*/, 0, NULL, NULL, &status);
   assert(status == CL_SUCCESS && start != NULL);
   end = start + 128;
 
@@ -507,7 +620,7 @@ cl_report_perf_counters(cl_mem perf)
   }
   printf("\n\n");
 
-  clUnmapBufferIntel(perf);
+  clEnqueueUnmapMemObject(queue, perf, start, 0, NULL, NULL);
 }
 
 struct bmphdr {
@@ -586,7 +699,15 @@ void cl_write_bmp(const int *data, int width, int height, const char *filename)
 {
   int x, y;
 
-  FILE *fp = fopen(filename, "wb");
+  FILE *fp = NULL;
+#if defined(__ANDROID__)
+  char dst_img[256];
+  snprintf(dst_img, sizeof(dst_img), "/sdcard/ocl/%s", filename);
+  fp = fopen(dst_img, "wb");
+  if(fp == NULL) return;
+#else
+  fp = fopen(filename, "wb");
+#endif
   assert(fp);
 
   char *raw = (char *) malloc(width * height * sizeof(int));	// at most
@@ -713,4 +834,225 @@ float select_ulpsize(float ULPSIZE_FAST_MATH, float ULPSIZE_NO_FAST_MATH)
         ULPSIZE_FACTOR = ULPSIZE_FAST_MATH;
 
   return ULPSIZE_FACTOR;
+}
+
+int cl_check_double(void)
+{
+  std::string extStr;
+  size_t param_value_size;
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, 0, 0, &param_value_size);
+  std::vector<char> param_value(param_value_size);
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, param_value_size,
+           param_value.empty() ? NULL : &param_value.front(), &param_value_size);
+  if (!param_value.empty())
+    extStr = std::string(&param_value.front(), param_value_size-1);
+
+  if (std::strstr(extStr.c_str(), "cl_khr_fp64") == NULL) {
+    printf("No cl_khr_fp64, Skip!");
+    return 0;
+  }
+
+  return 1;
+}
+
+int cl_check_beignet(void)
+{
+  size_t param_value_size;
+  size_t ret_sz;
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_VERSION, 0, 0, &param_value_size);
+  if(param_value_size == 0) {
+    return 0;
+  }
+  char* device_version_str = (char* )malloc(param_value_size * sizeof(char) );
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_VERSION, param_value_size, (void*)device_version_str, &ret_sz);
+  OCL_ASSERT(ret_sz == param_value_size);
+
+  if(!strstr(device_version_str, "beignet")) {
+    free(device_version_str);
+    return 0;
+  }
+  free(device_version_str);
+  return 1;
+}
+
+int cl_check_subgroups(void)
+{
+  std::string extStr;
+  size_t param_value_size;
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, 0, 0, &param_value_size);
+  std::vector<char> param_value(param_value_size);
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, param_value_size,
+           param_value.empty() ? NULL : &param_value.front(), &param_value_size);
+  if (!param_value.empty())
+    extStr = std::string(&param_value.front(), param_value_size-1);
+
+  if (std::strstr(extStr.c_str(), "cl_intel_subgroups") == NULL) {
+    printf("No cl_intel_subgroups, Skip!");
+    return 0;
+  }
+  if(utestclGetKernelSubGroupInfoKHR == NULL)
+    utestclGetKernelSubGroupInfoKHR  = (clGetKernelSubGroupInfoKHR_cb*) clGetExtensionFunctionAddress("clGetKernelSubGroupInfoKHR");
+  return 1;
+}
+
+int cl_check_ocl20(void)
+{
+  size_t param_value_size;
+  size_t ret_sz;
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_value_size);
+  if(param_value_size == 0) {
+    printf("Not OpenCL 2.0 device, ");
+    if(cl_check_beignet()) {
+      printf("Beignet extension test!");
+      return 1;
+    } else {
+      printf("Not beignet device , Skip!");
+      return 0;
+    }
+  }
+  char* device_version_str = (char* )malloc(param_value_size * sizeof(char) );
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_OPENCL_C_VERSION, param_value_size, (void*)device_version_str, &ret_sz);
+  OCL_ASSERT(ret_sz == param_value_size);
+
+  if(!strstr(device_version_str, "2.0")) {
+    free(device_version_str);
+    printf("Not OpenCL 2.0 device, ");
+    if(cl_check_beignet()) {
+      printf("Beignet extension test!");
+      return 1;
+    } else {
+      printf("Not beignet device , Skip!");
+      return 0;
+    }
+  }
+  free(device_version_str);
+  return 1;
+}
+
+int cl_check_half(void)
+{
+  std::string extStr;
+  size_t param_value_size;
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, 0, 0, &param_value_size);
+  std::vector<char> param_value(param_value_size);
+  OCL_CALL(clGetDeviceInfo, device, CL_DEVICE_EXTENSIONS, param_value_size,
+           param_value.empty() ? NULL : &param_value.front(), &param_value_size);
+  if (!param_value.empty())
+    extStr = std::string(&param_value.front(), param_value_size-1);
+
+  if (std::strstr(extStr.c_str(), "cl_khr_fp16") == NULL) {
+    printf("No cl_khr_fp16, Skip!");
+    return 0;
+  }
+
+  return 1;
+}
+
+uint32_t __half_to_float(uint16_t h, bool* isInf, bool* infSign)
+{
+  struct __FP32 {
+    uint32_t mantissa:23;
+    uint32_t exponent:8;
+    uint32_t sign:1;
+  };
+  struct __FP16 {
+    uint32_t mantissa:10;
+    uint32_t exponent:5;
+    uint32_t sign:1;
+  };
+  uint32_t f;
+  __FP32 o;
+  memset(&o, 0, sizeof(o));
+  __FP16 i;
+  memcpy(&i, &h, sizeof(uint16_t));
+
+  if (isInf)
+    *isInf = false;
+  if (infSign)
+    *infSign = false;
+
+  if (i.exponent == 0 && i.mantissa == 0) // (Signed) zero
+    o.sign = i.sign;
+  else {
+    if (i.exponent == 0) { // Denormal (converts to normalized)
+      // Adjust mantissa so it's normalized (and keep
+      // track of exponent adjustment)
+      int e = -1;
+      uint m = i.mantissa;
+      do {
+        e++;
+        m <<= 1;
+      } while ((m & 0x400) == 0);
+
+      o.mantissa = (m & 0x3ff) << 13;
+      o.exponent = 127 - 15 - e;
+      o.sign = i.sign;
+    } else if (i.exponent == 0x1f) { // Inf/NaN
+      // NOTE: Both can be handled with same code path
+      // since we just pass through mantissa bits.
+      o.mantissa = i.mantissa << 13;
+      o.exponent = 255;
+      o.sign = i.sign;
+
+      if (isInf) {
+        *isInf = (i.mantissa == 0);
+        if (infSign)
+          *infSign = !i.sign;
+      }
+    } else { // Normalized number
+      o.mantissa = i.mantissa << 13;
+      o.exponent = 127 - 15 + i.exponent;
+      o.sign = i.sign;
+    }
+  }
+
+  memcpy(&f, &o, sizeof(uint32_t));
+  return f;
+}
+
+
+uint16_t __float_to_half(uint32_t x)
+{
+  uint16_t bits = (x >> 16) & 0x8000; /* Get the sign */
+  uint16_t m = (x >> 12) & 0x07ff; /* Keep one extra bit for rounding */
+  unsigned int e = (x >> 23) & 0xff; /* Using int is faster here */
+
+  /* If zero, or denormal, or exponent underflows too much for a denormal
+   * half, return signed zero. */
+  if (e < 103)
+    return bits;
+
+  /* If NaN, return NaN. If Inf or exponent overflow, return Inf. */
+  if (e > 142) {
+    bits |= 0x7c00u;
+    /* If exponent was 0xff and one mantissa bit was set, it means NaN,
+     * not Inf, so make sure we set one mantissa bit too. */
+    bits |= e == 255 && (x & 0x007fffffu);
+    return bits;
+  }
+
+  /* If exponent underflows but not too much, return a denormal */
+  if (e < 113) {
+    m |= 0x0800u;
+    /* Extra rounding may overflow and set mantissa to 0 and exponent
+     * to 1, which is OK. */
+    bits |= (m >> (114 - e)) + ((m >> (113 - e)) & 1);
+    return bits;
+  }
+
+  bits |= ((e - 112) << 10) | (m >> 1);
+  /* Extra rounding. An overflow will set mantissa to 0 and increment
+   * the exponent, which is OK. */
+  bits += m & 1;
+  return bits;
+}
+uint32_t as_uint(float f) {
+  union uint32_cast _tmp;
+  _tmp._float = f;
+  return _tmp._uint;
+}
+float as_float(uint32_t i) {
+  union uint32_cast _tmp;
+  _tmp._uint = i;
+  return _tmp._float;
 }

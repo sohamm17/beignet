@@ -52,6 +52,13 @@ namespace ir {
     const LabelIndex index = this->label();
     this->LABEL(index);
     const BasicBlock *lastBlock = this->bb;
+
+    /* Append the STORE_PROFILING just before return. */
+    if (unit.getInProfilingMode() == true) {
+      this->STORE_PROFILING(this->getUnit().getProfilingInfo()->getBTI(),
+                            this->getUnit().getProfilingInfo()->getProfilingType());
+    }
+
     this->RET();
 
     // Now traverse all instructions and replace all returns by GOTO index
@@ -163,6 +170,8 @@ namespace ir {
 
     if (opcode == OP_LOAD) {
       LoadInstruction *load = cast<LoadInstruction>(insn);
+      if(!load)
+        return false;
       if (load->getAddressSpace() != MEM_PRIVATE)
         return false;
       loadAddImm.load = insn;
@@ -243,6 +252,7 @@ namespace ir {
     set<PushLocation> inserted;
     for (const auto &loadAddImm : seq) {
       LoadInstruction *load = cast<LoadInstruction>(loadAddImm.load);
+      if(!load) continue;
       const uint32_t valueNum = load->getValueNum();
       bool replaced = false;
       Instruction *ins_after = load; // the instruction to insert after.
@@ -316,11 +326,13 @@ namespace ir {
           derivedRegs.push_back(dst);
         } else if(opcode == OP_LOAD) {
           LoadInstruction *load = cast<LoadInstruction>(insn);
+          if(!load)
+            continue;
           if (load->getAddressSpace() != MEM_PRIVATE)
             continue;
 
           IndirectLoad indirectLoad;
-          Register addr = load->getAddress();
+          Register addr = load->getAddressRegister();
           indirectLoad.argID = argID;
           indirectLoad.load = insn;
 
@@ -357,7 +369,7 @@ namespace ir {
       const Register arg = fn->getArg(indirectLoad.argID).reg;
       if(dead.contains(indirectLoad.load)) continue;  //repetitive load in the indirectSeq, skip.
       LoadInstruction *load = cast<LoadInstruction>(indirectLoad.load);
-      const uint32_t valueNum = load->getValueNum();
+      const uint32_t valueNum = load ? load->getValueNum() : 0;
       bool replaced = false;
       Instruction *ins_after = load; // the instruction to insert after.
       for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
@@ -368,7 +380,7 @@ namespace ir {
 
         const Register reg = load->getValue(valueID);
 
-        Instruction mov = ir::INDIRECT_MOV(type, reg, arg, load->getAddress(), offset);
+        Instruction mov = ir::INDIRECT_MOV(type, reg, arg, load->getAddressRegister(), offset);
         mov.insert(ins_after, &ins_after);
         replaced = true;
       }
@@ -381,7 +393,7 @@ namespace ir {
       vector<Instruction *> adds = indirectLoad.adds;
       for (uint32_t i=0; i<adds.size(); i++) {
         BinaryInstruction *add = cast<BinaryInstruction>(adds[i]);
-        if (!dead.contains(add)) {
+        if (add && !dead.contains(add)) {
           Register dst = add->getDst();
           const Register src0 = add->getSrc(0);
           const Register src1 = add->getSrc(1);
@@ -444,6 +456,7 @@ namespace ir {
       // add.ptr_type dst ptr other
       if (opcode != OP_ADD) return false;
       BinaryInstruction *add = cast<BinaryInstruction>(insn);
+      if(!add) return false;
       const Type addType = add->getType();
       const RegisterFamily family = getFamily(addType);
       if (family != unit.getPointerFamily()) return false;
@@ -460,6 +473,7 @@ namespace ir {
       Instruction *otherInsn = const_cast<Instruction*>(otherDef->getInstruction());
       if (otherInsn->getOpcode() != OP_LOADI) return false;
       LoadImmInstruction *loadImm = cast<LoadImmInstruction>(otherInsn);
+      if(!loadImm) return false;
       const Immediate imm = loadImm->getImmediate();
       const uint64_t offset = getOffsetFromImm(imm);
 

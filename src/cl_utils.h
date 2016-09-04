@@ -31,6 +31,22 @@
 #define JOIN(X, Y) _DO_JOIN(X, Y)
 #define _DO_JOIN(X, Y) _DO_JOIN2(X, Y)
 #define _DO_JOIN2(X, Y) X##Y
+enum DEBUGP_LEVEL
+{
+    DL_INFO,
+    DL_WARNING,
+    DL_ERROR
+};
+#ifdef NDEBUG
+  #define DEBUGP(...)
+#else
+  //TODO: decide print or not with the value of level from environment
+  #define DEBUGP(level, fmt, ...)                       \
+  do {                                                  \
+    fprintf(stderr, "Beignet: "#fmt, ##__VA_ARGS__);    \
+    fprintf(stderr, "\n");                              \
+  } while (0)
+#endif
 
 /* Check compile time errors */
 #define STATIC_ASSERT(value)                                        \
@@ -153,6 +169,11 @@ IMAGE = cl_mem_image(MEM);                                  \
 const size_t *REGION;                                       \
 size_t REGION ##_REC[3];                                    \
 do {                                                        \
+  if (PREGION == NULL)                                      \
+  {                                                         \
+    err = CL_INVALID_VALUE;                                 \
+    goto error;                                             \
+  }                                                         \
   if (IMAGE->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) {   \
     REGION ##_REC[0] = PREGION[0];                          \
     REGION ##_REC[1] = 1;                                   \
@@ -161,12 +182,22 @@ do {                                                        \
   } else {                                                  \
     REGION = PREGION;                                       \
   }                                                         \
+  if((REGION[0] == 0)||(REGION[1] == 0)||(REGION[2] == 0))  \
+  {                                                         \
+    err = CL_INVALID_VALUE;                                 \
+    goto error;                                             \
+  }                                                         \
 } while(0)
 
 #define FIXUP_IMAGE_ORIGIN(IMAGE, PREGION, REGION)          \
 const size_t *REGION;                                       \
 size_t REGION ##_REC[3];                                    \
 do {                                                        \
+  if (PREGION == NULL)                                      \
+  {                                                         \
+    err = CL_INVALID_VALUE;                                 \
+    goto error;                                             \
+  }                                                         \
   if (IMAGE->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) {   \
     REGION ##_REC[0] = PREGION[0];                          \
     REGION ##_REC[1] = 0;                                   \
@@ -200,6 +231,18 @@ do {                                                        \
     err = CL_INVALID_SAMPLER;                               \
     goto error;                                             \
   }                                                         \
+} while (0)
+
+#define CHECK_ACCELERATOR_INTEL(ACCELERATOR_INTEL)                              \
+do {                                                                            \
+  if (UNLIKELY(ACCELERATOR_INTEL == NULL)) {                                    \
+    err = CL_INVALID_ACCELERATOR_INTEL;                                         \
+    goto error;                                                                 \
+  }                                                                             \
+  if (UNLIKELY(ACCELERATOR_INTEL->magic != CL_MAGIC_ACCELERATOR_INTEL_HEADER)) {\
+    err = CL_INVALID_ACCELERATOR_INTEL;                                         \
+    goto error;                                                                 \
+  }                                                                             \
 } while (0)
 
 #define CHECK_KERNEL(KERNEL)                                \

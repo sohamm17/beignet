@@ -26,6 +26,8 @@
 
 #include "llvm/llvm_gen_backend.hpp"
 #include "llvm/llvm_to_gen.hpp"
+#include <llvm/IR/DiagnosticInfo.h>
+#include <llvm/IR/DiagnosticPrinter.h>
 #include "sys/cvar.hpp"
 #include "sys/platform.hpp"
 #include "ir/unit.hpp"
@@ -45,7 +47,6 @@ namespace gbe
   using namespace llvm;
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
-  using namespace llvm::legacy;
   #define TARGETLIBRARY  TargetLibraryInfoImpl
 #else
   #define TARGETLIBRARY  TargetLibraryInfo
@@ -53,7 +54,11 @@ namespace gbe
 
   void runFuntionPass(Module &mod, TARGETLIBRARY *libraryInfo, const DataLayout &DL)
   {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+    legacy::FunctionPassManager FPM(&mod);
+#else
     FunctionPassManager FPM(&mod);
+#endif
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
 #elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
@@ -74,8 +79,13 @@ namespace gbe
 #else
     FPM.add(new TargetLibraryInfo(*libraryInfo));
 #endif
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+    FPM.add(createTypeBasedAAWrapperPass());
+    FPM.add(createBasicAAWrapperPass());
+#else
     FPM.add(createTypeBasedAliasAnalysisPass());
     FPM.add(createBasicAliasAnalysisPass());
+#endif
     FPM.add(createCFGSimplificationPass());
     FPM.add(createSROAPass());
     FPM.add(createEarlyCSEPass());
@@ -91,7 +101,11 @@ namespace gbe
 
   void runModulePass(Module &mod, TARGETLIBRARY *libraryInfo, const DataLayout &DL, int optLevel, bool strictMath)
   {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+    legacy::PassManager MPM;
+#else
     PassManager MPM;
+#endif
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
 #elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
@@ -107,8 +121,13 @@ namespace gbe
 #else
     MPM.add(new TargetLibraryInfo(*libraryInfo));
 #endif
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+    MPM.add(createTypeBasedAAWrapperPass());
+    MPM.add(createBasicAAWrapperPass());
+#else
     MPM.add(createTypeBasedAliasAnalysisPass());
     MPM.add(createBasicAliasAnalysisPass());
+#endif
     MPM.add(createIntrinsicLoweringPass());
     MPM.add(createStripAttributesPass());     // Strip unsupported attributes and calling conventions.
     MPM.add(createSamplerFixPass());
@@ -123,11 +142,19 @@ namespace gbe
     MPM.add(createBarrierNodupPass(false));   // remove noduplicate fnAttr before inlining.
     MPM.add(createFunctionInliningPass(20000));
     MPM.add(createBarrierNodupPass(true));    // restore noduplicate fnAttr after inlining.
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+    MPM.add(createPostOrderFunctionAttrsPass());       // Set readonly/readnone attrs
+#else
     MPM.add(createFunctionAttrsPass());       // Set readonly/readnone attrs
+#endif
 
     //MPM.add(createScalarReplAggregatesPass(64, true, -1, -1, 64))
     if(optLevel > 0)
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+      MPM.add(createSROAPass());
+#else
       MPM.add(createSROAPass(/*RequiresDomTree*/ false));
+#endif
     MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
     MPM.add(createJumpThreadingPass());         // Thread jumps.
     MPM.add(createCorrelatedValuePropagationPass()); // Propagate conditionals
@@ -144,9 +171,13 @@ namespace gbe
     MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
     MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
     MPM.add(createLoopDeletionPass());          // Delete dead loops
-    MPM.add(createLoopUnrollPass(1024)); //1024, 32, 1024, 512)); //Unroll loops
+    MPM.add(createLoopUnrollPass(640)); //1024, 32, 1024, 512)); //Unroll loops
     if(optLevel > 0) {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+      MPM.add(createSROAPass());
+#else
       MPM.add(createSROAPass(/*RequiresDomTree*/ false));
+#endif
       MPM.add(createGVNPass());                 // Remove redundancies
     }
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
@@ -154,10 +185,16 @@ namespace gbe
     // and it may even make som cl kernel cannot compile because of limited scratch memory for spill.
     // As we observe this under strict math. So we disable CustomLoopUnroll if strict math is enabled.
     if (!strictMath) {
+#if !defined(__ANDROID__)
       MPM.add(createCustomLoopUnrollPass()); //1024, 32, 1024, 512)); //Unroll loops
+#endif
       MPM.add(createLoopUnrollPass()); //1024, 32, 1024, 512)); //Unroll loops
       if(optLevel > 0) {
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
+        MPM.add(createSROAPass());
+#else
         MPM.add(createSROAPass(/*RequiresDomTree*/ false));
+#endif
         MPM.add(createGVNPass());                 // Remove redundancies
       }
     }
@@ -184,7 +221,15 @@ namespace gbe
   }
 
 
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+#define OUTPUT_BITCODE(STAGE, MOD)  do {         \
+  legacy::PassManager passes__;           \
+   if (OCL_OUTPUT_LLVM_##STAGE) {                \
+     passes__.add(createPrintModulePass(*o));    \
+     passes__.run(MOD);                          \
+   }                                             \
+ }while(0)
+#elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
 #define OUTPUT_BITCODE(STAGE, MOD)  do {         \
    PassManager passes__;           \
    if (OCL_OUTPUT_LLVM_##STAGE) {                \
@@ -206,7 +251,36 @@ namespace gbe
   BVAR(OCL_OUTPUT_LLVM_AFTER_LINK, false);
   BVAR(OCL_OUTPUT_LLVM_AFTER_GEN, false);
 
-  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module, int optLevel, bool strictMath)
+  class gbeDiagnosticContext
+  {
+  public:
+    gbeDiagnosticContext() : _str(""), messages(_str), printer(messages), _has_errors(false) {}
+    void process(const llvm::DiagnosticInfo &diagnostic)
+    {
+      if (diagnostic.getSeverity() != DS_Remark) { // avoid noise from function inlining remarks
+        diagnostic.print(printer);
+      }
+      if (diagnostic.getSeverity() == DS_Error) {
+        _has_errors = true;
+      }
+    }
+    std::string str(){return messages.str();}
+    bool has_errors(){return _has_errors;}
+  private:
+    std::string _str;
+    llvm::raw_string_ostream messages;
+    llvm::DiagnosticPrinterRawOStream printer;
+    bool _has_errors;
+  };
+  
+  void gbeDiagnosticHandler(const llvm::DiagnosticInfo &diagnostic, void *context)
+  {
+    gbeDiagnosticContext *dc = reinterpret_cast<gbeDiagnosticContext*>(context);
+    dc->process(diagnostic);
+  }
+
+  bool llvmToGen(ir::Unit &unit, const char *fileName,const void* module,
+                 int optLevel, bool strictMath, int profiling, std::string &errors)
   {
     std::string errInfo;
     std::unique_ptr<llvm::raw_fd_ostream> o = NULL;
@@ -243,6 +317,9 @@ namespace gbe
 
     Module &mod = *M.get();
     DataLayout DL(&mod);
+    
+    gbeDiagnosticContext dc;
+    mod.getContext().setDiagnosticHandler(&gbeDiagnosticHandler,&dc);
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
     mod.setDataLayout(DL);
@@ -255,7 +332,11 @@ namespace gbe
 
     runFuntionPass(mod, libraryInfo, DL);
     runModulePass(mod, libraryInfo, DL, optLevel, strictMath);
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+    legacy::PassManager passes;
+#else
     PassManager passes;
+#endif
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
 #elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 6
     passes.add(new DataLayoutPass());
@@ -274,7 +355,7 @@ namespace gbe
     passes.add(createPromoteMemoryToRegisterPass());
     if(optLevel > 0)
       passes.add(createGVNPass());                 // Remove redundancies
-    passes.add(createPrintfParserPass());
+    passes.add(createPrintfParserPass(unit));
     passes.add(createExpandConstantExprPass());    // expand ConstantExpr
     passes.add(createScalarizePass());             // Expand all vector ops
     passes.add(createExpandLargeIntegersPass());   // legalize large integer operation
@@ -286,6 +367,9 @@ namespace gbe
     passes.add(createDeadInstEliminationPass());   // Remove simplified instructions
     passes.add(createCFGSimplificationPass());     // Merge & remove BBs
     passes.add(createLowerSwitchPass());           // simplify cfg will generate switch-case instruction
+    if (profiling) {
+      passes.add(createProfilingInserterPass(profiling, unit));     // insert the time stamp for profiling.
+    }
     passes.add(createScalarizePass());             // Expand all vector ops
 
     if(OCL_OUTPUT_CFG)
@@ -294,6 +378,12 @@ namespace gbe
       passes.add(createCFGOnlyPrinterPass());
     passes.add(createGenPass(unit));
     passes.run(mod);
+    errors = dc.str();
+    if(dc.has_errors()){
+      unit.setValid(false);
+      delete libraryInfo;
+      return true;
+    }
 
     // Print the code extra optimization passes
     OUTPUT_BITCODE(AFTER_GEN, mod);

@@ -93,9 +93,11 @@ namespace ir {
     usedLabels = elem.usedLabels;
   }
 
-  Register Context::reg(RegisterFamily family, bool uniform) {
+  Register Context::reg(RegisterFamily family, bool uniform,
+                        gbe_curbe_type curbeType,
+                        int subType) {
     GBE_ASSERTM(fn != NULL, "No function currently defined");
-    return fn->newRegister(family, uniform);
+    return fn->newRegister(family, uniform, curbeType, subType);
   }
 
   LabelIndex Context::label(void) {
@@ -113,6 +115,7 @@ namespace ir {
     GBE_ASSERTM(fn != NULL, "No function currently defined");
     GBE_ASSERTM(reg < fn->file.regNum(), "Out-of-bound register");
     FunctionArgument *arg = GBE_NEW(FunctionArgument, type, reg, elementSize, name, align, info, bti);
+    fn->setRegPayloadType(arg->reg, GBE_CURBE_KERNEL_ARGUMENT, fn->args.size());
     fn->args.push_back(arg);
   }
 
@@ -159,6 +162,7 @@ namespace ir {
     // Append the instruction in the stream
     Instruction *insnPtr = fn->newInstruction(insn);
     bb->append(*insnPtr);
+    insnPtr->setDBGInfo(this->DBGInfo);
 #if GBE_DEBUG
     std::string whyNot;
     if(getUnit().getValid())

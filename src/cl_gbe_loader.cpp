@@ -64,11 +64,12 @@ gbe_kernel_get_sampler_data_cb *interp_kernel_get_sampler_data = NULL;
 gbe_kernel_get_compile_wg_size_cb *interp_kernel_get_compile_wg_size = NULL;
 gbe_kernel_get_image_size_cb *interp_kernel_get_image_size = NULL;
 gbe_kernel_get_image_data_cb *interp_kernel_get_image_data = NULL;
+gbe_output_profiling_cb* interp_output_profiling = NULL;
+gbe_get_profiling_bti_cb* interp_get_profiling_bti = NULL;
+gbe_dup_profiling_cb* interp_dup_profiling = NULL;
 gbe_get_printf_num_cb* interp_get_printf_num = NULL;
 gbe_get_printf_buf_bti_cb* interp_get_printf_buf_bti = NULL;
-gbe_get_printf_indexbuf_bti_cb* interp_get_printf_indexbuf_bti = NULL;
 gbe_dup_printfset_cb* interp_dup_printfset = NULL;
-gbe_get_printf_sizeof_size_cb* interp_get_printf_sizeof_size = NULL;
 gbe_release_printf_info_cb* interp_release_printf_info = NULL;
 gbe_output_printf_cb* interp_output_printf = NULL;
 gbe_kernel_get_arg_info_cb *interp_kernel_get_arg_info = NULL;
@@ -87,7 +88,7 @@ struct GbeLoaderInitializer
   bool LoadInterp(const char*& path)
   {
     const char* interpPath = getenv("OCL_INTERP_PATH");
-    if (interpPath == NULL)
+    if (interpPath == NULL|| !strcmp(interpPath, ""))
       interpPath = INTERP_OBJECT_DIR;
 
     path = interpPath;
@@ -213,6 +214,18 @@ struct GbeLoaderInitializer
     if (interp_kernel_get_image_data == NULL)
       return false;
 
+    interp_output_profiling = *(gbe_output_profiling_cb**)dlsym(dlhInterp, "gbe_output_profiling");
+    if (interp_output_profiling == NULL)
+      return false;
+
+    interp_get_profiling_bti = *(gbe_get_profiling_bti_cb**)dlsym(dlhInterp, "gbe_get_profiling_bti");
+    if (interp_get_profiling_bti == NULL)
+      return false;
+
+    interp_dup_profiling = *(gbe_dup_profiling_cb**)dlsym(dlhInterp, "gbe_dup_profiling");
+    if (interp_dup_profiling == NULL)
+      return false;
+
     interp_get_printf_num = *(gbe_get_printf_num_cb**)dlsym(dlhInterp, "gbe_get_printf_num");
     if (interp_get_printf_num == NULL)
       return false;
@@ -221,16 +234,8 @@ struct GbeLoaderInitializer
     if (interp_get_printf_buf_bti == NULL)
       return false;
 
-    interp_get_printf_indexbuf_bti = *(gbe_get_printf_indexbuf_bti_cb**)dlsym(dlhInterp, "gbe_get_printf_indexbuf_bti");
-    if (interp_get_printf_indexbuf_bti == NULL)
-      return false;
-
     interp_dup_printfset = *(gbe_dup_printfset_cb**)dlsym(dlhInterp, "gbe_dup_printfset");
     if (interp_dup_printfset == NULL)
-      return false;
-
-    interp_get_printf_sizeof_size = *(gbe_get_printf_sizeof_size_cb**)dlsym(dlhInterp, "gbe_get_printf_sizeof_size");
-    if (interp_get_printf_sizeof_size == NULL)
       return false;
 
     interp_release_printf_info = *(gbe_release_printf_info_cb**)dlsym(dlhInterp, "gbe_release_printf_info");
@@ -259,7 +264,7 @@ struct GbeLoaderInitializer
     }
 
     const char* gbePath = getenv("OCL_GBE_PATH");
-    if (gbePath == NULL)
+    if (gbePath == NULL || !strcmp(gbePath, ""))
       gbePath = GBE_OBJECT_DIR;
 
     dlhCompiler = dlopen(gbePath, RTLD_LAZY | RTLD_LOCAL);
@@ -315,6 +320,11 @@ struct GbeLoaderInitializer
 
     if (dlhInterp != NULL)
       dlclose(dlhInterp);
+
+    //When destroy, set the release relative functions
+    //to NULL to avoid dangling pointer visit.
+    compiler_program_clean_llvm_resource = NULL;
+    interp_program_delete = NULL;
   }
 
   bool compilerLoaded;

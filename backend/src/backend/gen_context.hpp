@@ -49,6 +49,7 @@ namespace gbe
     REGISTER_ALLOCATION_FAIL,
     REGISTER_SPILL_EXCEED_THRESHOLD,
     REGISTER_SPILL_FAIL,
+    REGISTER_SPILL_NO_SPACE,
     OUT_OF_RANGE_IF_ENDIF,
   } CompileErrorCode;
 
@@ -86,6 +87,7 @@ namespace gbe
     /*! Simd width chosen for the current function */
     INLINE uint32_t getSimdWidth(void) const { return simdWidth; }
     void clearFlagRegister(void);
+    void profilingProlog(void);
     /*! check the flag reg, if is grf, use f0.1 instead */
     GenRegister checkFlagRegister(GenRegister flagReg);
     /*! Emit the per-lane stack pointer computation */
@@ -107,6 +109,9 @@ namespace gbe
       return this->liveness->getLiveIn(bb);
     }
 
+    void loadLaneID(GenRegister dst);
+    GenRegister getBlockIP(void);
+    void setBlockIP(GenRegister blockip, uint32_t label);
     void collectShifter(GenRegister dest, GenRegister src);
     void loadTopHalf(GenRegister dest, GenRegister src);
     void storeTopHalf(GenRegister dest, GenRegister src);
@@ -165,16 +170,27 @@ namespace gbe
     virtual void emitUnpackLongInstruction(const SelectionInstruction &insn);
     void emitDWordGatherInstruction(const SelectionInstruction &insn);
     void emitSampleInstruction(const SelectionInstruction &insn);
+    void emitVmeInstruction(const SelectionInstruction &insn);
     void emitTypedWriteInstruction(const SelectionInstruction &insn);
     void emitSpillRegInstruction(const SelectionInstruction &insn);
     void emitUnSpillRegInstruction(const SelectionInstruction &insn);
     void emitGetImageInfoInstruction(const SelectionInstruction &insn);
     virtual void emitI64MULInstruction(const SelectionInstruction &insn);
     virtual void emitI64DIVREMInstruction(const SelectionInstruction &insn);
+    virtual void emitF64DIVInstruction(const SelectionInstruction &insn);
+    void emitCalcTimestampInstruction(const SelectionInstruction &insn);
+    void emitStoreProfilingInstruction(const SelectionInstruction &insn);
+    virtual void emitWorkGroupOpInstruction(const SelectionInstruction &insn);
+    virtual void emitSubGroupOpInstruction(const SelectionInstruction &insn);
+    void emitPrintfInstruction(const SelectionInstruction &insn);
     void scratchWrite(const GenRegister header, uint32_t offset, uint32_t reg_num, uint32_t reg_type, uint32_t channel_mode);
     void scratchRead(const GenRegister dst, const GenRegister header, uint32_t offset, uint32_t reg_num, uint32_t reg_type, uint32_t channel_mode);
-    unsigned beforeMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, unsigned desc);
-    void afterMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, unsigned jip0);
+    unsigned beforeMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, GenRegister btiTmp, unsigned desc);
+    void afterMessage(const SelectionInstruction &insn, GenRegister bti, GenRegister flagTemp, GenRegister btiTmp, unsigned jip0);
+    void emitOBReadInstruction(const SelectionInstruction &insn);
+    void emitOBWriteInstruction(const SelectionInstruction &insn);
+    void emitMBReadInstruction(const SelectionInstruction &insn);
+    void emitMBWriteInstruction(const SelectionInstruction &insn);
 
     /*! Implements base class */
     virtual Kernel *allocateKernel(void);
@@ -205,6 +221,8 @@ namespace gbe
     bool relaxMath;
     bool getIFENDIFFix(void) const { return ifEndifFix; }
     void setIFENDIFFix(bool fix) { ifEndifFix = fix; }
+    bool getProfilingMode(void) const { return inProfilingMode; }
+    void setProfilingMode(bool b) { inProfilingMode = b; }
     CompileErrorCode getErrCode() { return errCode; }
 
   protected:
@@ -212,13 +230,18 @@ namespace gbe
       return GBE_NEW(Gen7Encoder, this->simdWidth, 7, deviceID);
     }
     /*! allocate a new curbe register and insert to curbe pool. */
-    void allocCurbeReg(ir::Register reg, gbe_curbe_type value, uint32_t subValue = 0);
+    void allocCurbeReg(ir::Register reg);
 
     virtual void setA0Content(uint16_t new_a0[16], uint16_t max_offset = 0, int sz = 0);
+    void calcGlobalXYZRange(GenRegister& reg, GenRegister& tmp, int flag, int subFlag);
+    virtual void subTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp);
+    virtual void addTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp);
+    virtual void emitPrintfLongInstruction(GenRegister& addr, GenRegister& data, GenRegister& src, uint32_t bti);
 
   private:
     CompileErrorCode errCode;
     bool ifEndifFix;
+    bool inProfilingMode;
     uint32_t regSpillTick;
     const char* asmFileName;
     /*! Build the curbe patch list for the given kernel */

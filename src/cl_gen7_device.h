@@ -24,6 +24,11 @@
 .local_mem_type = CL_GLOBAL,
 .local_mem_size = 64 << 10,
 .scratch_mem_size = 12 << 10,
+.max_mem_alloc_size = 2 * 1024 * 1024 * 1024ul,
+.global_mem_size = 2 * 1024 * 1024 * 1024ul,
 
+//temporarily define to only export builtin kernel block_motion_estimate_intel only for Gen7
+//will remove after HSW+ also support
+#define GEN7_DEVICE
 #include "cl_gt_device.h"
-
+#undef GEN7_DEVICE

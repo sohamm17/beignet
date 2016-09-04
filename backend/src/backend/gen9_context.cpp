@@ -51,6 +51,7 @@ namespace gbe
       p->BARRIER(src);
       p->curr.execWidth = 1;
       // Now we wait for the other threads
+      p->curr.predicate = GEN_PREDICATE_NONE;
       p->WAIT();
     p->pop();
   }
@@ -162,6 +163,10 @@ namespace gbe
              GenRegister::immud(new_a0[i*2 + 1] << 16 | new_a0[i*2]));
     }
     p->pop();
+  }
+
+  void KblContext::newSelection(void) {
+    this->sel = GBE_NEW(SelectionKbl, *this);
   }
 
 }

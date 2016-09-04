@@ -26,12 +26,14 @@
 #include "utest_helper.hpp"
 #include "utest_exception.hpp"
 #include <iostream>
+#include <string.h>
 #include <getopt.h>
 
-static const char *shortopts = "c:lanh";
+static const char *shortopts = "c:j:l::anh";
 struct option longopts[] = {
 {"casename", required_argument, NULL, 'c'},
-{"list", no_argument, NULL, 'l'},
+{"jobs", required_argument, NULL, 'j'},
+{"list", optional_argument, NULL, 'l'},
 {"all", no_argument, NULL, 'a'},
 {"allnoissue", no_argument, NULL, 'n'},
 {"help", no_argument, NULL, 'h'},
@@ -46,7 +48,8 @@ Usage:\n\
 \n\
   option:\n\
     -c <casename>: run sub-case named 'casename'\n\
-    -l           : list all the available case name\n\
+    -j <number>  : specifies the 'number' of jobs (multi-thread)\n\
+    -l <a/i>     : list case name that can run(a for all case, i for case with issue)\n\
     -a           : run all test cases\n\
     -n           : run all test cases without known issue (default option)\n\
     -h           : display this usage\n\
@@ -85,8 +88,32 @@ int main(int argc, char *argv[])
 
         break;
 
+      case 'j':
+        try {
+#if defined(__ANDROID__)
+          std::cout << "Do not support multithread in android, use single thread instead." << std::endl;
+          UTest::run(optarg);
+#else
+          UTest::runMultiThread(optarg);
+#endif
+        }
+        catch (Exception e){
+          std::cout << "  " << e.what() << "    [SUCCESS]" << std::endl;
+        }
+
+        break;
+
       case 'l':
-        UTest::listAllCases();
+        if (optarg == NULL)
+          UTest::listCasesCanRun();
+        else if (strcmp(optarg,"a") == 0)
+          UTest::listAllCases();
+        else if (strcmp(optarg,"i") == 0)
+          UTest::listCasesWithIssue();
+        else {
+          usage();
+          exit(1);
+        }
         break;
 
       case 'a':
@@ -129,5 +156,6 @@ int main(int argc, char *argv[])
 
 clean:
   cl_ocl_destroy();
+  return 0;
 }
 

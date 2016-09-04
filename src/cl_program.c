@@ -25,8 +25,10 @@
 #include "cl_utils.h"
 #include "cl_khr_icd.h"
 #include "cl_gbe_loader.h"
+#include "cl_cmrt.h"
 #include "CL/cl.h"
 #include "CL/cl_intel.h"
+#include "CL/cl_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,10 +94,17 @@ cl_program_delete(cl_program p)
       p->ctx->programs = p->next;
   pthread_mutex_unlock(&p->ctx->program_lock);
 
-  cl_free(p->bin);               /* Free the blob */
-  for (i = 0; i < p->ker_n; ++i) /* Free the kernels */
-    cl_kernel_delete(p->ker[i]);
-  cl_free(p->ker);
+#ifdef HAS_CMRT
+  if (p->cmrt_program != NULL)
+    cmrt_destroy_program(p);
+  else
+#endif
+  {
+    cl_free(p->bin);               /* Free the blob */
+    for (i = 0; i < p->ker_n; ++i) /* Free the kernels */
+      cl_kernel_delete(p->ker[i]);
+    cl_free(p->ker);
+  }
 
   /* Program belongs to their parent context */
   cl_context_delete(p->ctx);
@@ -103,14 +112,19 @@ cl_program_delete(cl_program p)
   /* Free the program as allocated by the compiler */
   if (p->opaque) {
     if (CompilerSupported())
-      compiler_program_clean_llvm_resource(p->opaque);
-    interp_program_delete(p->opaque);
+      //For static variables release, gbeLoader may have been released, so
+      //compiler_program_clean_llvm_resource and interp_program_delete may be NULL.
+      if(compiler_program_clean_llvm_resource)
+        compiler_program_clean_llvm_resource(p->opaque);
+    if(interp_program_delete)
+      interp_program_delete(p->opaque);
   }
 
   p->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
   cl_free(p);
 }
 
+#define BUILD_LOG_MAX_SIZE (1024*1024U)
 LOCAL cl_program
 cl_program_new(cl_context ctx)
 {
@@ -123,9 +137,10 @@ cl_program_new(cl_context ctx)
   p->ref_n = 1;
   p->magic = CL_MAGIC_PROGRAM_HEADER;
   p->ctx = ctx;
-  p->build_log = calloc(1000, sizeof(char));
+  p->cmrt_program = NULL;
+  p->build_log = calloc(BUILD_LOG_MAX_SIZE, sizeof(char));
   if (p->build_log)
-    p->build_log_max_sz = 1000;
+    p->build_log_max_sz = BUILD_LOG_MAX_SIZE;
   /* The queue also belongs to its context */
   cl_context_add_ref(ctx);
 
@@ -166,29 +181,41 @@ error:
   return err;
 }
 
-inline cl_bool isBitcodeWrapper(const unsigned char *BufPtr, const unsigned char *BufEnd)
+#define BINARY_HEADER_LENGTH 5
+
+static const unsigned char binary_type_header[BHI_MAX][BINARY_HEADER_LENGTH]=  \
+                                              {{'B','C', 0xC0, 0xDE},
+                                               {1, 'B', 'C', 0xC0, 0xDE},
+                                               {2, 'B', 'C', 0xC0, 0xDE},
+                                               {1, 'G','E', 'N', 'C'},
+                                               {'C','I', 'S', 'A'},
+                                               };
+
+LOCAL cl_bool headerCompare(const unsigned char *BufPtr, BINARY_HEADER_INDEX index)
 {
-  // See if you can find the hidden message in the magic bytes :-).
-  // (Hint: it's a little-endian encoding.)
-  return BufPtr != BufEnd &&
-    BufPtr[0] == 0xDE &&
-    BufPtr[1] == 0xC0 &&
-    BufPtr[2] == 0x17 &&
-    BufPtr[3] == 0x0B;
+  bool matched = true;
+  int length = (index == BHI_SPIR || index == BHI_CMRT) ? BINARY_HEADER_LENGTH -1 :BINARY_HEADER_LENGTH;
+  int i = 0;
+  if(index == BHI_GEN_BINARY)
+    i = 1;
+  for (; i < length; ++i)
+  {
+    matched = matched && (BufPtr[i] == binary_type_header[index][i]);
+  }
+  if(index == BHI_GEN_BINARY && matched) {
+    if(BufPtr[0] != binary_type_header[index][0]) {
+      DEBUGP(DL_WARNING, "Beignet binary format have been changed, please generate binary again.\n");
+      matched = false;
+    }
+  }
+  return matched;
 }
 
-inline cl_bool isRawBitcode(const unsigned char *BufPtr, const unsigned char *BufEnd)
-{
-  // These bytes sort of have a hidden message, but it's not in
-  // little-endian this time, and it's a little redundant.
-  return BufPtr != BufEnd &&
-    BufPtr[0] == 'B' &&
-    BufPtr[1] == 'C' &&
-    BufPtr[2] == 0xc0 &&
-    BufPtr[3] == 0xde;
-}
-
-#define isBitcode(BufPtr,BufEnd)  (isBitcodeWrapper(BufPtr, BufEnd) || isRawBitcode(BufPtr, BufEnd))
+#define isSPIR(BufPtr)      headerCompare(BufPtr, BHI_SPIR)
+#define isLLVM_C_O(BufPtr)  headerCompare(BufPtr, BHI_COMPIRED_OBJECT)
+#define isLLVM_LIB(BufPtr)  headerCompare(BufPtr, BHI_LIBRARY)
+#define isGenBinary(BufPtr) headerCompare(BufPtr, BHI_GEN_BINARY)
+#define isCMRT(BufPtr)      headerCompare(BufPtr, BHI_CMRT)
 
 LOCAL cl_program
 cl_program_create_from_binary(cl_context             ctx,
@@ -216,7 +243,8 @@ cl_program_create_from_binary(cl_context             ctx,
     goto error;
   }
 
-  if (lengths[0] == 0) {
+  //need at least 4 bytes to check the binary type.
+  if (lengths[0] == 0 || lengths[0] < 4) {
     err = CL_INVALID_VALUE;
     if (binary_status)
       binary_status[0] = CL_INVALID_VALUE;
@@ -229,14 +257,14 @@ cl_program_create_from_binary(cl_context             ctx,
       goto error;
   }
 
-  // TODO:  Need to check the binary format here to return CL_INVALID_BINARY.
   TRY_ALLOC(program->binary, cl_calloc(lengths[0], sizeof(char)));
   memcpy(program->binary, binaries[0], lengths[0]);
   program->binary_sz = lengths[0];
   program->source_type = FROM_BINARY;
 
-  if(isBitcode((unsigned char*)program->binary, (unsigned char*)program->binary+program->binary_sz)) {
-
+  if (isCMRT((unsigned char*)program->binary)) {
+    program->source_type = FROM_CMRT;
+  }else if(isSPIR((unsigned char*)program->binary)) {
     char* typed_binary;
     TRY_ALLOC(typed_binary, cl_calloc(lengths[0]+1, sizeof(char)));
     memcpy(typed_binary+1, binaries[0], lengths[0]);
@@ -249,10 +277,11 @@ cl_program_create_from_binary(cl_context             ctx,
     }
 
     program->source_type = FROM_LLVM_SPIR;
-  }else if(isBitcode((unsigned char*)program->binary+1, (unsigned char*)program->binary+program->binary_sz)) {
-    if(*program->binary == 1){
+    program->binary_type = CL_PROGRAM_BINARY_TYPE_INTERMEDIATE;
+  }else if(isLLVM_C_O((unsigned char*)program->binary) || isLLVM_LIB((unsigned char*)program->binary)) {
+    if(*program->binary == BHI_COMPIRED_OBJECT){
       program->binary_type = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
-    }else if(*program->binary == 2){
+    }else if(*program->binary == BHI_LIBRARY){
       program->binary_type = CL_PROGRAM_BINARY_TYPE_LIBRARY;
     }else{
       err= CL_INVALID_BINARY;
@@ -266,7 +295,7 @@ cl_program_create_from_binary(cl_context             ctx,
     }
     program->source_type = FROM_LLVM;
   }
-  else if (*program->binary == 0) {
+  else if (isGenBinary((unsigned char*)program->binary)) {
     program->opaque = interp_program_new_from_binary(program->ctx->device->device_id, program->binary, program->binary_sz);
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
@@ -276,6 +305,10 @@ cl_program_create_from_binary(cl_context             ctx,
     /* Create all the kernels */
     TRY (cl_program_load_gen_program, program);
     program->binary_type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+  }
+  else {
+    err= CL_INVALID_BINARY;
+    goto error;
   }
 
   if (binary_status)
@@ -388,7 +421,7 @@ cl_program_create_from_llvm(cl_context ctx,
       goto error;
   }
 
-  program->opaque = compiler_program_new_from_llvm(ctx->device->device_id, file_name, NULL, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1);
+  program->opaque = compiler_program_new_from_llvm(ctx->device->device_id, file_name, NULL, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1, NULL);
   if (UNLIKELY(program->opaque == NULL)) {
     err = CL_INVALID_PROGRAM;
     goto error;
@@ -513,6 +546,20 @@ cl_program_build(cl_program p, const char *options)
     goto error;
   }
 
+#if HAS_CMRT
+  if (p->source_type == FROM_CMRT) {
+    //only here we begins to invoke cmrt
+    //break spec to return other errors such as CL_DEVICE_NOT_FOUND
+    err = cmrt_build_program(p, options);
+    if (err == CL_SUCCESS) {
+      p->build_status = CL_BUILD_SUCCESS;
+      p->binary_type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+      return CL_SUCCESS;
+    } else
+      goto error;
+  }
+#endif
+
   if (!check_cl_version_option(p, options)) {
     err = CL_BUILD_PROGRAM_FAILURE;
     goto error;
@@ -525,17 +572,10 @@ cl_program_build(cl_program p, const char *options)
       }
       TRY_ALLOC (p->build_opts, cl_calloc(strlen(options) + 1, sizeof(char)));
       memcpy(p->build_opts, options, strlen(options));
-
-      p->source_type = p->source ? FROM_SOURCE : p->binary ? FROM_BINARY : FROM_LLVM;
-      if (strstr(options, "-x spir")) {
-        p->source_type = FROM_LLVM_SPIR;
-      }
     }
   }
 
   if (options == NULL && p->build_opts) {
-    p->source_type = p->source ? FROM_SOURCE : p->binary ? FROM_BINARY : FROM_LLVM;
-
     cl_free(p->build_opts);
     p->build_opts = NULL;
   }
@@ -573,7 +613,7 @@ cl_program_build(cl_program p, const char *options)
     }
     /* Create all the kernels */
     TRY (cl_program_load_gen_program, p);
-  } else if (p->source_type == FROM_BINARY) {
+  } else if (p->source_type == FROM_BINARY && p->binary_type != CL_PROGRAM_BINARY_TYPE_EXECUTABLE) {
     p->opaque = interp_program_new_from_binary(p->ctx->device->device_id, p->binary, p->binary_sz);
     if (UNLIKELY(p->opaque == NULL)) {
       err = CL_BUILD_PROGRAM_FAILURE;
@@ -620,18 +660,22 @@ cl_program_link(cl_context            context,
   int copyed = 0;
   cl_bool ret = 0;
   int avialable_program = 0;
-
   //Although we don't use options, but still need check options
   if(!compiler_program_check_opt(options)) {
     err = CL_INVALID_LINKER_OPTIONS;
     goto error;
   }
-
+  const char kernel_arg_option[] = "-cl-kernel-arg-info";
+  cl_bool option_exist = CL_TRUE;
   for(i = 0; i < num_input_programs; i++) {
     //num_input_programs >0 and input_programs MUST not NULL, so compare with input_programs[0] directly.
     if(input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_LIBRARY ||
-       input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT) {
+       input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT ||
+       input_programs[i]->binary_type == CL_PROGRAM_BINARY_TYPE_INTERMEDIATE) {
       avialable_program++;
+    }
+    if(input_programs[i]->build_opts == NULL || strstr(input_programs[i]->build_opts, kernel_arg_option) == NULL ) {
+      option_exist = CL_FALSE;
     }
   }
 
@@ -652,12 +696,17 @@ cl_program_link(cl_context            context,
       goto error;
   }
 
+  if(option_exist) {
+      TRY_ALLOC (p->build_opts, cl_calloc(strlen(kernel_arg_option) + 1, sizeof(char)));
+      memcpy(p->build_opts, kernel_arg_option, strlen(kernel_arg_option));
+  }
+
   if (!check_cl_version_option(p, options)) {
     err = CL_BUILD_PROGRAM_FAILURE;
     goto error;
   }
 
-  p->opaque = compiler_program_new_gen_program(context->device->device_id, NULL, NULL);
+  p->opaque = compiler_program_new_gen_program(context->device->device_id, NULL, NULL, NULL);
   for(i = 0; i < num_input_programs; i++) {
     // if program create with llvm binary, need deserilize first to get module.
     if(input_programs[i])
@@ -708,6 +757,7 @@ error:
   return p;
 }
 
+#define FILE_PATH_LENGTH  1024
 LOCAL cl_int
 cl_program_compile(cl_program            p,
                    cl_uint               num_input_headers,
@@ -736,19 +786,20 @@ cl_program_compile(cl_program            p,
       }
       TRY_ALLOC (p->build_opts, cl_calloc(strlen(options) + 1, sizeof(char)));
       memcpy(p->build_opts, options, strlen(options));
-
-      p->source_type = p->source ? FROM_SOURCE : p->binary ? FROM_BINARY : FROM_LLVM;
     }
   }
 
   if (options == NULL && p->build_opts) {
-    p->source_type = p->source ? FROM_SOURCE : p->binary ? FROM_BINARY : FROM_LLVM;
-
     cl_free(p->build_opts);
     p->build_opts = NULL;
   }
 
+#if defined(__ANDROID__)
+  char temp_header_template[]= "/data/local/tmp/beignet.XXXXXX";
+#else
   char temp_header_template[]= "/tmp/beignet.XXXXXX";
+#endif
+
   char* temp_header_path = mkdtemp(temp_header_template);
 
   if (p->source_type == FROM_SOURCE) {
@@ -762,11 +813,15 @@ cl_program_compile(cl_program            p,
     for (i = 0; i < num_input_headers; i++) {
       if(header_include_names[i] == NULL || input_headers[i] == NULL)
         continue;
-
-      char temp_path[255]="";
-      strncpy(temp_path, temp_header_path, strlen(temp_header_path));
+      char temp_path[FILE_PATH_LENGTH]="";
+      strncat(temp_path, temp_header_path, strlen(temp_header_path));
       strncat(temp_path, "/", 1);
       strncat(temp_path, header_include_names[i], strlen(header_include_names[i]));
+      if(strlen(temp_path) >= FILE_PATH_LENGTH - 1 ) {
+        err = CL_COMPILE_PROGRAM_FAILURE;
+        goto error;
+      }
+      temp_path[strlen(temp_path)+1] = '\0';
       char* dirc = strdup(temp_path);
       char* dir = dirname(dirc);
       mkdir(dir, 0755);
@@ -807,7 +862,6 @@ cl_program_compile(cl_program            p,
     }
 
     /* Create all the kernels */
-    p->source_type = FROM_LLVM;
     p->binary_type = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
   }else if(p->source_type == FROM_BINARY){
     err = CL_INVALID_OPERATION;
@@ -829,6 +883,20 @@ cl_program_create_kernel(cl_program p, const char *name, cl_int *errcode_ret)
   cl_kernel from = NULL, to = NULL;
   cl_int err = CL_SUCCESS;
   uint32_t i = 0;
+
+#ifdef HAS_CMRT
+  if (p->cmrt_program != NULL) {
+    void* cmrt_kernel = cmrt_create_kernel(p, name);
+    if (cmrt_kernel != NULL) {
+      to = cl_kernel_new(p);
+      to->cmrt_kernel = cmrt_kernel;
+      goto exit;
+    } else {
+      err = CL_INVALID_KERNEL_NAME;
+      goto error;
+    }
+  }
+#endif
 
   /* Find the program first */
   for (i = 0; i < p->ker_n; ++i) {
@@ -897,6 +965,7 @@ cl_program_get_kernel_names(cl_program p, size_t size, char *names, size_t *size
   len = strlen(ker_name);
   if(names) {
     strncpy(names, cl_kernel_get_name(p->ker[0]), size - 1);
+    names[size - 1] = '\0';
     if(size < len - 1) {
       if(size_ret) *size_ret = size;
       return;

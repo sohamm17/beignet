@@ -26,6 +26,7 @@
 #define __UTEST_HELPER_HPP__
 
 #include "CL/cl.h"
+#include "CL/cl_ext.h"
 #include "CL/cl_intel.h"
 #include "utest.hpp"
 #include "utest_assert.hpp"
@@ -33,6 +34,10 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+
+#if defined(__ANDROID__)
+#define __thread
+#endif
 
 #ifdef HAS_EGL
 #define EGL_WINDOW_WIDTH 256
@@ -46,6 +51,11 @@ extern EGLDisplay  eglDisplay;
 extern EGLContext  eglContext;
 extern EGLSurface  eglSurface;
 #endif
+
+union uint32_cast {
+  uint32_t _uint;
+  float _float;
+};
 
 #define OCL_THROW_ERROR(FN, STATUS) \
   do { \
@@ -122,24 +132,60 @@ extern EGLSurface  eglSurface;
 #define OCL_CREATE_SAMPLER(SAMPLER, ADDRESS_MODE, FILTER_MODE)          \
     OCL_CALL2(clCreateSampler, SAMPLER, ctx, 0, ADDRESS_MODE, FILTER_MODE)
 
+#define OCL_CALL_MAP(FN, ID, RET, ...) \
+  do { \
+    cl_int status; \
+    size_t size = 0; \
+    status = clGetMemObjectInfo(buf[ID], CL_MEM_SIZE, sizeof(size), &size, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    RET = FN(__VA_ARGS__, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, size, 0, NULL, NULL, &status);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+  } while (0)
+
 #define OCL_MAP_BUFFER(ID) \
-    OCL_CALL2(clMapBufferIntel, buf_data[ID], buf[ID])
+    OCL_CALL_MAP(clEnqueueMapBuffer, ID, buf_data[ID], queue, buf[ID])
 
 #define OCL_UNMAP_BUFFER(ID) \
   do { \
     if (buf[ID] != NULL) { \
-      OCL_CALL (clUnmapBufferIntel, buf[ID]); \
+      OCL_CALL (clEnqueueUnmapMemObject, queue, buf[ID], buf_data[ID], 0, NULL, NULL); \
       buf_data[ID] = NULL; \
     } \
   } while (0)
 
+#define OCL_CALL_MAP_GTT(FN, ID, RET, ...) \
+  do { \
+    cl_int status; \
+    size_t image_row_pitch = 0; \
+    status = clGetImageInfo(buf[ID], CL_IMAGE_ROW_PITCH, sizeof(image_row_pitch), &image_row_pitch, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    size_t image_slice_pitch = 0; \
+    status = clGetImageInfo(buf[ID], CL_IMAGE_ROW_PITCH, sizeof(image_slice_pitch), &image_slice_pitch, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    size_t image_width = 0; \
+    status = clGetImageInfo(buf[ID], CL_IMAGE_WIDTH, sizeof(image_width), &image_width, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    size_t image_height = 0; \
+    status = clGetImageInfo(buf[ID], CL_IMAGE_HEIGHT, sizeof(image_height), &image_height, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    size_t image_depth= 0; \
+    status = clGetImageInfo(buf[ID], CL_IMAGE_DEPTH, sizeof(image_depth), &image_depth, NULL);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+    if(image_depth == 0) image_depth = 1; \
+    if(image_height == 0) image_height = 1; \
+    size_t origin[3] = {0, 0, 0}; \
+    size_t region[3] = {image_width, image_height, image_depth}; \
+    RET = FN(__VA_ARGS__, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, origin, region, &image_row_pitch, &image_slice_pitch, 0, NULL, NULL, &status);\
+    if (status != CL_SUCCESS) OCL_THROW_ERROR(FN, status); \
+  } while (0)
+
 #define OCL_MAP_BUFFER_GTT(ID) \
-    OCL_CALL2(clMapBufferGTTIntel, buf_data[ID], buf[ID])
+    OCL_CALL_MAP_GTT(clEnqueueMapImage, ID, buf_data[ID], queue, buf[ID])
 
 #define OCL_UNMAP_BUFFER_GTT(ID) \
   do { \
     if (buf[ID] != NULL) { \
-      OCL_CALL (clUnmapBufferGTTIntel, buf[ID]); \
+      OCL_CALL (clEnqueueUnmapMemObject, queue, buf[ID], buf_data[ID], 0, NULL, NULL); \
       buf_data[ID] = NULL; \
     } \
   } while (0)
@@ -158,13 +204,13 @@ enum { MAX_BUFFER_N = 16 };
 extern cl_platform_id platform;
 extern cl_device_id device;
 extern cl_context ctx;
-extern cl_program program;
-extern cl_kernel kernel;
+extern __thread cl_program program;
+extern __thread cl_kernel kernel;
 extern cl_command_queue queue;
-extern cl_mem buf[MAX_BUFFER_N];
-extern void* buf_data[MAX_BUFFER_N];
-extern size_t globals[3];
-extern size_t locals[3];
+extern __thread cl_mem buf[MAX_BUFFER_N];
+extern __thread void* buf_data[MAX_BUFFER_N];
+extern __thread size_t globals[3];
+extern __thread size_t locals[3];
 extern float ULPSIZE_FAST_MATH;
 
 enum {
@@ -194,6 +240,10 @@ extern int cl_ocl_init(void);
 /* Init program and kernel for the test */
 extern int cl_kernel_init(const char *file_name,
                 const char *kernel_name, int format, const char * build_opt);
+extern int cl_kernel_compile(const char *file_name, const char *kernel_name, 
+                const char * compile_opt);
+extern int cl_kernel_link(const char *file_name, const char *kernel_name, 
+                const char * link_opt);
 
 /* Get the file path */
 extern char* cl_do_kiss_path(const char *file, cl_device_id device);
@@ -237,5 +287,30 @@ double time_subtract(struct timeval *y, struct timeval *x, struct timeval *resul
 /* check ulpsize */
 float select_ulpsize(float ULPSIZE_FAST_MATH, float ULPSIZE_NO_FAST_MATH);
 
-#endif /* __UTEST_HELPER_HPP__ */
+/* Check is FP64 enabled. */
+extern int cl_check_double(void);
 
+/* Check is beignet device. */
+extern int cl_check_beignet(void);
+
+/* Check is intel subgroups enabled. */
+extern int cl_check_subgroups(void);
+
+typedef cl_int(clGetKernelSubGroupInfoKHR_cb)(cl_kernel, cl_device_id,
+                                              cl_kernel_sub_group_info, size_t,
+                                              const void *, size_t, void *,
+                                              size_t *);
+extern clGetKernelSubGroupInfoKHR_cb* utestclGetKernelSubGroupInfoKHR;
+
+/* Check is cl version 2.0. */
+extern int cl_check_ocl20(void);
+
+/* Check is FP16 enabled. */
+extern int cl_check_half(void);
+
+/* Helper function for half type numbers */
+extern uint32_t __half_to_float(uint16_t h, bool* isInf = NULL, bool* infSign = NULL);
+extern uint16_t __float_to_half(uint32_t x);
+extern float as_float(uint32_t i);
+extern uint32_t as_uint(float f);
+#endif /* __UTEST_HELPER_HPP__ */

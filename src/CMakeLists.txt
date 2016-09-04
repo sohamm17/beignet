@@ -56,7 +56,8 @@ cl_internal_fill_buf_align8 cl_internal_fill_buf_align4
 cl_internal_fill_buf_align2 cl_internal_fill_buf_unalign
 cl_internal_fill_buf_align128 cl_internal_fill_image_1d
 cl_internal_fill_image_1d_array cl_internal_fill_image_2d
-cl_internal_fill_image_2d_array cl_internal_fill_image_3d)
+cl_internal_fill_image_2d_array cl_internal_fill_image_3d
+cl_internal_block_motion_estimate_intel)
 set (BUILT_IN_NAME  cl_internal_built_in_kernel)
 MakeBuiltInKernelStr ("${CMAKE_CURRENT_SOURCE_DIR}/kernels/" "${KERNEL_NAMES}")
 MakeKernelBinStr ("${CMAKE_CURRENT_SOURCE_DIR}/kernels/" "${KERNEL_NAMES}")
@@ -70,6 +71,7 @@ set(OPENCL_SRC
     cl_program.c
     cl_gbe_loader.cpp
     cl_sampler.c
+    cl_accelerator_intel.c
     cl_event.c
     cl_enqueue.c
     cl_image.c
@@ -99,35 +101,52 @@ if (X11_FOUND)
       x11/va_dri2.c)
 endif (X11_FOUND)
 
+if (CMRT_FOUND)
+  set(CMAKE_CXX_FLAGS "-DHAS_CMRT ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-DCMRT_PATH=${CMRT_LIBRARY_DIRS}/libcmrt.so ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_C_FLAGS "-DHAS_CMRT ${CMAKE_C_FLAGS}")
+  set(OPENCL_SRC ${OPENCL_SRC} cl_cmrt.cpp)
+endif (CMRT_FOUND)
+
 if (EGL_FOUND AND MESA_SOURCE_FOUND)
-set (OPENCL_SRC ${OPENCL_SRC} cl_mem_gl.c cl_gl_api.c x11/mesa_egl_extension.c x11/mesa_egl_res_share.c intel/intel_dri_resource_sharing.c)
-SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS}")
-SET(OPTIONAL_EGL_LIBRARY "${EGL_LIBRARY}")
+  set (OPENCL_SRC ${OPENCL_SRC} cl_mem_gl.c cl_gl_api.c x11/mesa_egl_extension.c x11/mesa_egl_res_share.c intel/intel_dri_resource_sharing.c)
+  SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS}")
+  SET(OPTIONAL_EGL_LIBRARY "${EGL_LIBRARY}")
 else(EGL_FOUND AND MESA_SOURCE_FOUND)
-SET(OPTIONAL_EGL_LIBRARY "")
+  SET(OPTIONAL_EGL_LIBRARY "")
 endif (EGL_FOUND AND MESA_SOURCE_FOUND)
 
 if (OCLIcd_FOUND)
-set (OPENCL_SRC ${OPENCL_SRC} cl_khr_icd.c)
-SET(CMAKE_CXX_FLAGS "-DHAS_OCLIcd ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_OCLIcd ${CMAKE_C_FLAGS}")
+  set (OPENCL_SRC ${OPENCL_SRC} cl_khr_icd.c)
+  SET(CMAKE_CXX_FLAGS "-DHAS_OCLIcd ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_OCLIcd ${CMAKE_C_FLAGS}")
 endif (OCLIcd_FOUND)
 
-if (DRM_INTEL_USERPTR)
-SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
-endif (DRM_INTEL_USERPTR)
+if (HAVE_DRM_INTEL_USERPTR)
+  SET(CMAKE_CXX_FLAGS "-DHAS_USERPTR ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_USERPTR ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_USERPTR)
 
-if (DRM_INTEL_EU_TOTAL)
-SET(CMAKE_CXX_FLAGS "-DHAS_EU_TOTAL ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_EU_TOTAL ${CMAKE_C_FLAGS}")
-endif (DRM_INTEL_EU_TOTAL)
+if (HAVE_DRM_INTEL_EU_TOTAL)
+  SET(CMAKE_CXX_FLAGS "-DHAS_EU_TOTAL ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_EU_TOTAL ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_EU_TOTAL)
 
-if (DRM_INTEL_SUBSLICE_TOTAL)
-SET(CMAKE_CXX_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_C_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_C_FLAGS}")
-endif (DRM_INTEL_SUBSLICE_TOTAL)
+if (HAVE_DRM_INTEL_SUBSLICE_TOTAL)
+  SET(CMAKE_CXX_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_SUBSLICE_TOTAL ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_SUBSLICE_TOTAL)
+
+if (HAVE_DRM_INTEL_POOLED_EU)
+  SET(CMAKE_CXX_FLAGS "-DHAS_POOLED_EU ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_POOLED_EU ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_POOLED_EU)
+
+if (HAVE_DRM_INTEL_MIN_EU_IN_POOL)
+  SET(CMAKE_CXX_FLAGS "-DHAS_MIN_EU_IN_POOL ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_MIN_EU_IN_POOL ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_MIN_EU_IN_POOL)
 
 set(GIT_SHA1 "git_sha1.h")
 add_custom_target(${GIT_SHA1} ALL
@@ -142,6 +161,7 @@ add_library(cl SHARED ${OPENCL_SRC})
 ADD_DEPENDENCIES(cl ${GIT_SHA1})
 target_link_libraries(
                       cl
+                      rt
                       ${X11_LIBRARIES}
                       ${XEXT_LIBRARIES}
                       ${XFIXES_LIBRARIES}

@@ -35,13 +35,22 @@ namespace gbe {
     GenLoadStoreOptimization() : BasicBlockPass(ID) {}
 
     void getAnalysisUsage(AnalysisUsage &AU) const {
+#if LLVM_VERSION_MAJOR == 3 &&  LLVM_VERSION_MINOR >= 8
+      AU.addRequired<ScalarEvolutionWrapperPass>();
+      AU.addPreserved<ScalarEvolutionWrapperPass>();
+#else
       AU.addRequired<ScalarEvolution>();
       AU.addPreserved<ScalarEvolution>();
+#endif
       AU.setPreservesCFG();
     }
 
     virtual bool runOnBasicBlock(BasicBlock &BB) {
+#if LLVM_VERSION_MAJOR == 3 &&  LLVM_VERSION_MINOR >= 8
+      SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+#else
       SE = &getAnalysis<ScalarEvolution>();
+#endif
       #if LLVM_VERSION_MINOR >= 7
         TD = &BB.getModule()->getDataLayout();
       #elif LLVM_VERSION_MINOR >= 5
@@ -61,11 +70,11 @@ namespace gbe {
     bool     isLoadStoreCompatible(Value *A, Value *B);
     void     mergeLoad(BasicBlock &BB, SmallVector<Instruction*, 16> &merged);
     void     mergeStore(BasicBlock &BB, SmallVector<Instruction*, 16> &merged);
-    BasicBlock::iterator findConsecutiveAccess(BasicBlock &BB,
-                                               SmallVector<Instruction*, 16> &merged,
-                                               BasicBlock::iterator &start,
-                                               unsigned maxVecSize,
-                                               bool isLoad);
+    bool     findConsecutiveAccess(BasicBlock &BB,
+                                  SmallVector<Instruction*, 16> &merged,
+                                  const BasicBlock::iterator &start,
+                                  unsigned maxVecSize,
+                                  bool isLoad);
 
     virtual const char *getPassName() const {
       return "Merge compatible Load/stores for Gen";
@@ -150,38 +159,58 @@ namespace gbe {
       values[i]->replaceAllUsesWith(S);
     }
   }
-
-  BasicBlock::iterator
+  // When searching for consecutive memory access, we do it in a small window,
+  // if the window is too large, it would take up too much compiling time.
+  // An Important rule we have followed is don't try to change load/store order.
+  // But an exeption is 'load& store that are from different address spaces. The
+  // return value will indicate wheter such kind of reorder happens.
+  bool
   GenLoadStoreOptimization::findConsecutiveAccess(BasicBlock &BB,
                             SmallVector<Instruction*, 16> &merged,
-                            BasicBlock::iterator &start,
+                            const BasicBlock::iterator &start,
                             unsigned maxVecSize,
                             bool isLoad) {
 
-    BasicBlock::iterator stepForward = start;
-    if(!isSimpleLoadStore(start)) return stepForward;
+    if(!isSimpleLoadStore(&*start)) return false;
 
-    merged.push_back(start);
+    merged.push_back(&*start);
+    unsigned targetAddrSpace = getAddressSpace(&*start);
 
     BasicBlock::iterator E = BB.end();
-    BasicBlock::iterator J = ++start;
+    BasicBlock::iterator J = start;
+    ++J;
 
-    unsigned maxLimit = maxVecSize * 3;
+    unsigned maxLimit = maxVecSize * 8;
+    bool reordered = false;
 
     for(unsigned ss = 0; J != E && ss <= maxLimit; ++ss, ++J) {
       if((isLoad && isa<LoadInst>(*J)) || (!isLoad && isa<StoreInst>(*J))) {
-        if(isLoadStoreCompatible(merged[merged.size()-1], J)) {
-          merged.push_back(J);
-          stepForward = ++J;
+        if(isLoadStoreCompatible(merged[merged.size()-1], &*J)) {
+          merged.push_back(&*J);
         }
-      } else if((isLoad && isa<StoreInst>(*J)) || (!isLoad && isa<LoadInst>(*J))) {
+      } else if((isLoad && isa<StoreInst>(*J))) {
         // simple stop to keep read/write order
-        break;
+        StoreInst *st = cast<StoreInst>(&*J);
+        unsigned addrSpace = st->getPointerAddressSpace();
+        if (addrSpace != targetAddrSpace) {
+          reordered = true;
+        } else {
+          break;
+        }
+      } else if ((!isLoad && isa<LoadInst>(*J))) {
+        LoadInst *ld = cast<LoadInst>(&*J);
+        unsigned addrSpace = ld->getPointerAddressSpace();
+        if (addrSpace != targetAddrSpace) {
+          reordered = true;
+        } else {
+          break;
+        }
       }
 
       if(merged.size() >= maxVecSize) break;
     }
-    return stepForward;
+
+    return reordered;
   }
 
   void GenLoadStoreOptimization::mergeStore(BasicBlock &BB, SmallVector<Instruction*, 16> &merged) {
@@ -193,6 +222,9 @@ namespace gbe {
       values.push_back(cast<StoreInst>(merged[i])->getValueOperand());
     }
     StoreInst *st = cast<StoreInst>(merged[0]);
+    if(!st)
+      return;
+
     unsigned addrSpace = st->getPointerAddressSpace();
 
     unsigned align = st->getAlignment();
@@ -206,9 +238,34 @@ namespace gbe {
       parent = Builder.CreateInsertElement(parent, values[i], ConstantInt::get(IntegerType::get(st->getContext(), 32), i));
     }
 
-    Value *newPtr = Builder.CreateBitCast(st->getPointerOperand(), PointerType::get(vecTy, addrSpace));
+    Value * stPointer = st->getPointerOperand();
+    if(!stPointer)
+      return;
+    Value *newPtr = Builder.CreateBitCast(stPointer, PointerType::get(vecTy, addrSpace));
     StoreInst *newST = Builder.CreateStore(parent, newPtr);
     newST->setAlignment(align);
+  }
+
+  // Find the safe iterator we can point to. If reorder happens, we need to
+  // point to the instruction after the first of toBeDeleted. If no reorder,
+  // we are safe to point to the instruction after the last of toBeDeleted
+  static BasicBlock::iterator
+  findSafeInstruction(SmallVector<Instruction*, 16> &toBeDeleted,
+                           const BasicBlock::iterator &current,
+                           bool reorder) {
+    BasicBlock::iterator safe = current;
+    unsigned size = toBeDeleted.size();
+    if (reorder) {
+      unsigned i = 0;
+      while (i < size && toBeDeleted[i] == &*safe) {
+        ++i;
+        ++safe;
+      }
+    } else {
+      safe = BasicBlock::iterator(toBeDeleted[size - 1]);
+      ++safe;
+    }
+    return safe;
   }
 
   bool GenLoadStoreOptimization::optimizeLoadStore(BasicBlock &BB) {
@@ -217,17 +274,25 @@ namespace gbe {
     for (BasicBlock::iterator BBI = BB.begin(), E = BB.end(); BBI != E;++BBI) {
       if(isa<LoadInst>(*BBI) || isa<StoreInst>(*BBI)) {
         bool isLoad = isa<LoadInst>(*BBI) ? true: false;
-        Type *ty = getValueType(BBI);
+        Type *ty = getValueType(&*BBI);
+        if(!ty) continue;
         if(ty->isVectorTy()) continue;
         // TODO Support DWORD/WORD/BYTE LOAD for store support DWORD only now.
         if (!(ty->isFloatTy() || ty->isIntegerTy(32) ||
              ((ty->isIntegerTy(8) || ty->isIntegerTy(16)) && isLoad)))
           continue;
+
         unsigned maxVecSize = (ty->isFloatTy() || ty->isIntegerTy(32)) ? 4 :
                               (ty->isIntegerTy(16) ? 8 : 16);
-        BBI = findConsecutiveAccess(BB, merged, BBI, maxVecSize, isLoad);
+        bool reorder = findConsecutiveAccess(BB, merged, BBI, maxVecSize, isLoad);
         uint32_t size = merged.size();
         uint32_t pos = 0;
+        bool doDeleting = size > 1;
+        if (doDeleting) {
+          // choose next undeleted instruction
+          BBI = findSafeInstruction(merged, BBI, reorder);
+        }
+
         while(size > 1) {
           unsigned vecSize = (size >= 16) ? 16 :
                              (size >= 8 ? 8 :
@@ -243,6 +308,12 @@ namespace gbe {
           changed = true;
           pos += vecSize;
           size -= vecSize;
+        }
+        if (doDeleting) {
+          //adjust the BBI back by one, as we would increase it in for loop
+          //don't do this if BBI points to the very first instruction.
+          if (BBI != BB.begin())
+            --BBI;
         }
         merged.clear();
       }

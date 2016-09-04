@@ -44,13 +44,7 @@ namespace gbe
     p->push();
       p->curr.execWidth = 1;
       p->curr.predicate = GEN_PREDICATE_NONE;
-      GenRegister sr0 = GenRegister(GEN_ARCHITECTURE_REGISTER_FILE,
-                                    GEN_ARF_STATE,
-                                    1,
-                                    GEN_TYPE_UD,
-                                    GEN_VERTICAL_STRIDE_8,
-                                    GEN_WIDTH_8,
-                                    GEN_HORIZONTAL_STRIDE_1);
+      GenRegister sr0 = GenRegister::sr(0, 1);
       p->SHR(sr0, slm_index, GenRegister::immud(16));
     p->pop();
   }
@@ -67,40 +61,44 @@ namespace gbe
     using namespace ir;
 
     // Only emit stack pointer computation if we use a stack
-    if (kernel->getCurbeOffset(GBE_CURBE_STACK_POINTER, 0) <= 0)
+    if (kernel->getStackSize() == 0)
       return;
 
     // Check that everything is consistent in the kernel code
     const uint32_t perLaneSize = kernel->getStackSize();
-    const uint32_t perThreadSize = perLaneSize * this->simdWidth;
     GBE_ASSERT(perLaneSize > 0);
 
     const GenRegister selStatckPtr = this->simdWidth == 8 ?
       GenRegister::ud8grf(ir::ocl::stackptr) :
       GenRegister::ud16grf(ir::ocl::stackptr);
     const GenRegister stackptr = ra->genReg(selStatckPtr);
+    // borrow block ip as temporary register as we will
+    // initialize block ip latter.
+    const GenRegister tmpReg = GenRegister::retype(GenRegister::vec1(getBlockIP()), GEN_TYPE_UW);
+    const GenRegister tmpReg_ud = GenRegister::retype(GenRegister::vec1(getBlockIP()), GEN_TYPE_UD);
 
     // We compute the per-lane stack pointer here
-    // private address start from zero
+    // threadId * perThreadSize + laneId*perLaneSize or
+    // (threadId * simdWidth + laneId)*perLaneSize
     p->push();
       p->curr.execWidth = 1;
       p->curr.predicate = GEN_PREDICATE_NONE;
       //p->AND(GenRegister::ud1grf(126,0), GenRegister::ud1grf(0,5), GenRegister::immud(0x1ff));
-      p->AND(GenRegister::ud1grf(126,0), GenRegister::ud1grf(0,5), GenRegister::immud(0x7f));
-      p->AND(GenRegister::ud1grf(126,4), GenRegister::ud1grf(0,5), GenRegister::immud(0x180));
-      p->SHR(GenRegister::ud1grf(126,4), GenRegister::ud1grf(126, 4), GenRegister::immud(7));
+      p->AND(tmpReg, GenRegister::ud1grf(0,5), GenRegister::immud(0x7f));
+      p->AND(stackptr, GenRegister::ud1grf(0,5), GenRegister::immud(0x180));
+      p->SHR(stackptr, stackptr, GenRegister::immud(7));
+      p->SHL(tmpReg, tmpReg, GenRegister::immud(2));
+      p->ADD(tmpReg, tmpReg, stackptr); //threadId
+
+      p->MUL(tmpReg, tmpReg, GenRegister::immuw(this->simdWidth));  //threadId * simdWidth
       p->curr.execWidth = this->simdWidth;
-      p->MUL(stackptr, stackptr, GenRegister::immuw(perLaneSize));  //perLaneSize < 64K
+      loadLaneID(stackptr);
+      p->ADD(stackptr, GenRegister::unpacked_uw(stackptr), tmpReg);  //threadId * simdWidth + laneId, must < 64K
       p->curr.execWidth = 1;
-      p->SHL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immud(2));
-      p->ADD(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::ud1grf(126, 4));
-      if(perThreadSize > 0xffff) {
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(perLaneSize));
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(this->simdWidth));  //Only support W * D, perLaneSize < 64K
-      } else
-        p->MUL(GenRegister::ud1grf(126,0), GenRegister::ud1grf(126,0), GenRegister::immuw(perThreadSize));
+      p->MOV(tmpReg_ud, GenRegister::immud(perLaneSize));
       p->curr.execWidth = this->simdWidth;
-      p->ADD(stackptr, stackptr, GenRegister::ud1grf(126,0));
+      p->MUL(stackptr, tmpReg_ud, stackptr); // (threadId * simdWidth + laneId)*perLaneSize
+
     p->pop();
   }
 

@@ -174,6 +174,8 @@ enum opcode {
   GEN_OPCODE_LINE = 89,
   GEN_OPCODE_PLN = 90,
   GEN_OPCODE_MAD = 91,
+  GEN_OPCODE_LRP = 92,
+  GEN_OPCODE_MADM = 93,
   GEN_OPCODE_NOP = 126,
 };
 
@@ -463,6 +465,17 @@ enum GenMessageTarget {
 #define GEN_UPDATE_GATEWAT_STATE  0b101
 #define GEN_MMIO_READ_WRITE       0b110
 
+/* Accumulator acc2~acc9 in instruction */
+#define GEN8_INSN_ACC2            0
+#define GEN8_INSN_ACC3            1
+#define GEN8_INSN_ACC4            2
+#define GEN8_INSN_ACC5            3
+#define GEN8_INSN_ACC6            4
+#define GEN8_INSN_ACC7            5
+#define GEN8_INSN_ACC8            6
+#define GEN8_INSN_ACC9            7
+#define GEN8_INSN_NOACC           8
+
 /////////////////////////////////////////////////////////////////////////////
 // Gen EU structures
 /////////////////////////////////////////////////////////////////////////////
@@ -479,6 +492,32 @@ struct GenInstruction {
 
 union GenCompactInstruction {
   struct GenInstruction low;
+  /* Gen8+ src3 compact inst */
+  struct {
+    struct {
+      uint32_t opcode:7;
+      uint32_t pad:1;
+      uint32_t control_index:2;
+      uint32_t src_index:2;
+      uint32_t dst_reg_nr:7;
+      uint32_t pad1:9;
+      uint32_t src0_rep_ctrl:1;
+      uint32_t compact_control:1;
+      uint32_t debug_control:1;
+      uint32_t saturate:1;
+    } bits1;
+    struct {
+      uint32_t src1_rep_ctrl:1;
+      uint32_t src2_rep_ctrl:1;
+      uint32_t src0_subnr:3;
+      uint32_t src1_subnr:3;
+      uint32_t src2_subnr:3;
+      uint32_t src0_reg_nr:7;
+      uint32_t src1_reg_nr:7;
+      uint32_t src2_reg_nr:7;
+    } bits2;
+  } src3Insn;
+  /* Normal src2 compact inst */
   struct {
     struct {
       uint32_t opcode:7;
@@ -601,6 +640,21 @@ union GenNativeInstruction
         uint32_t pad1:2;
         uint32_t end_of_thread:1;
       } sampler_gen7;
+
+      struct {
+        uint32_t bti:8;
+        uint32_t vme_search_path_lut:3;
+        uint32_t lut_sub:2;
+        uint32_t msg_type:2;
+        uint32_t stream_in:1;
+        uint32_t stream_out:1;
+        uint32_t reserved_mbz:2;
+        uint32_t header_present:1;
+        uint32_t response_length:5;
+        uint32_t msg_length:4;
+        uint32_t pad1:2;
+        uint32_t end_of_thread:1;
+      } vme_gen7;
 
       /**
        * Message for the Sandybridge Sampler Cache or Constant Cache Data Port.
@@ -755,6 +809,22 @@ union GenNativeInstruction
       struct {
         uint32_t jip:32;
       } gen8_branch;
+
+      /*! Data port Media block read / write */
+      struct {
+        uint32_t bti:8;
+        uint32_t ver_line_stride_offset:1;
+        uint32_t ver_line_stride:1;
+        uint32_t ver_line_stride_override:1;
+        uint32_t ignored:3;
+        uint32_t msg_type:4;
+        uint32_t category:1;
+        uint32_t header_present:1;
+        uint32_t response_length:5;
+        uint32_t msg_length:4;
+        uint32_t pad2:2;
+        uint32_t end_of_thread:1;
+      } gen7_mblock_rw;
 
       int d;
       uint32_t ud;

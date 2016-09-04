@@ -46,8 +46,9 @@ cl_set_varying_payload(const cl_kernel ker,
 {
   uint32_t *ids[3] = {NULL,NULL,NULL};
   uint16_t *block_ips = NULL;
+  uint32_t *thread_ids = NULL;
   size_t i, j, k, curr = 0;
-  int32_t id_offset[3], ip_offset;
+  int32_t id_offset[3], ip_offset, tid_offset;
   cl_int err = CL_SUCCESS;
   int32_t dw_ip_offset = -1;
 
@@ -55,18 +56,23 @@ cl_set_varying_payload(const cl_kernel ker,
   id_offset[1] = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_LOCAL_ID_Y, 0);
   id_offset[2] = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_LOCAL_ID_Z, 0);
   ip_offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_BLOCK_IP, 0);
+  tid_offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_THREAD_ID, 0);
   if (ip_offset < 0)
     dw_ip_offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_DW_BLOCK_IP, 0);
   assert(ip_offset < 0 || dw_ip_offset < 0);
-  assert(id_offset[0] >= 0 &&
-         id_offset[1] >= 0 &&
-         id_offset[2] >= 0 &&
-         (ip_offset >= 0 || dw_ip_offset >= 0));
+  assert(ip_offset >= 0 || dw_ip_offset >= 0);
 
-  TRY_ALLOC(ids[0], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
-  TRY_ALLOC(ids[1], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
-  TRY_ALLOC(ids[2], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
+  if (id_offset[0] >= 0)
+    TRY_ALLOC(ids[0], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
+  if (id_offset[1] >= 0)
+    TRY_ALLOC(ids[1], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
+  if (id_offset[2] >= 0)
+    TRY_ALLOC(ids[2], (uint32_t*) alloca(sizeof(uint32_t)*thread_n*simd_sz));
   TRY_ALLOC(block_ips, (uint16_t*) alloca(sizeof(uint16_t)*thread_n*simd_sz));
+  if (tid_offset >= 0) {
+    TRY_ALLOC(thread_ids, (uint32_t*) alloca(sizeof(uint32_t)*thread_n));
+    memset(thread_ids, 0, sizeof(uint32_t)*thread_n);
+  }
   /* 0xffff means that the lane is inactivated */
   memset(block_ips, 0xff, sizeof(int16_t)*thread_n*simd_sz);
 
@@ -75,10 +81,15 @@ cl_set_varying_payload(const cl_kernel ker,
   for (k = 0; k < local_wk_sz[2]; ++k)
   for (j = 0; j < local_wk_sz[1]; ++j)
   for (i = 0; i < local_wk_sz[0]; ++i, ++curr) {
-    ids[0][curr] = i;
-    ids[1][curr] = j;
-    ids[2][curr] = k;
+    if (id_offset[0] >= 0)
+      ids[0][curr] = i;
+    if (id_offset[1] >= 0)
+      ids[1][curr] = j;
+    if (id_offset[2] >= 0)
+      ids[2][curr] = k;
     block_ips[curr] = 0;
+    if (thread_ids)
+      thread_ids[curr/simd_sz] = curr/simd_sz;
   }
 
   /* Copy them to the curbe buffer */
@@ -89,10 +100,17 @@ cl_set_varying_payload(const cl_kernel ker,
     uint32_t *ids2 = (uint32_t *) (data + id_offset[2]);
     uint16_t *ips  = (uint16_t *) (data + ip_offset);
     uint32_t *dw_ips  = (uint32_t *) (data + dw_ip_offset);
+
+    if (thread_ids)
+      *(uint32_t *)(data + tid_offset) = thread_ids[i];
+
     for (j = 0; j < simd_sz; ++j, ++curr) {
-      ids0[j] = ids[0][curr];
-      ids1[j] = ids[1][curr];
-      ids2[j] = ids[2][curr];
+      if (id_offset[0] >= 0)
+        ids0[j] = ids[0][curr];
+      if (id_offset[1] >= 0)
+        ids1[j] = ids[1][curr];
+      if (id_offset[2] >= 0)
+        ids2[j] = ids[2][curr];
       if (ip_offset >= 0)
         ips[j] = block_ips[curr];
       if (dw_ip_offset >= 0)
@@ -167,7 +185,8 @@ cl_upload_constant_buffer(cl_command_queue queue, cl_kernel ker)
       uint32_t alignment = interp_kernel_get_arg_align(ker->opaque, arg);
       offset = ALIGN(offset, alignment);
       curbe_offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_KERNEL_ARGUMENT, arg);
-      assert(curbe_offset >= 0);
+      if (curbe_offset < 0)
+        continue;
       *(uint32_t *) (ker->curbe + curbe_offset) = offset;
 
       cl_buffer_map(mem->bo, 1);
@@ -210,23 +229,6 @@ cl_curbe_fill(cl_kernel ker,
   UPLOAD(GBE_CURBE_WORK_DIM, work_dim);
 #undef UPLOAD
 
-  /* get_sub_group_id needs it */
-  if ((offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_LANE_ID, 0)) >= 0) {
-    const uint32_t simd_sz = interp_kernel_get_simd_width(ker->opaque);
-    uint32_t *laneid = (uint32_t *) (ker->curbe + offset);
-    int32_t i;
-    for (i = 0; i < (int32_t) simd_sz; ++i) laneid[i] = i;
-  }
-
-  /* Write identity for the stack pointer. This is required by the stack pointer
-   * computation in the kernel
-   */
-  if ((offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_STACK_POINTER, 0)) >= 0) {
-    const uint32_t simd_sz = interp_kernel_get_simd_width(ker->opaque);
-    uint32_t *stackptr = (uint32_t *) (ker->curbe + offset);
-    int32_t i;
-    for (i = 0; i < (int32_t) simd_sz; ++i) stackptr[i] = i;
-  }
   /* Handle the various offsets to SLM */
   const int32_t arg_n = interp_kernel_get_arg_num(ker->opaque);
   int32_t arg, slm_offset = interp_kernel_get_slm_size(ker->opaque);
@@ -239,7 +241,8 @@ cl_curbe_fill(cl_kernel ker,
     assert(align != 0);
     slm_offset = ALIGN(slm_offset, align);
     offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_KERNEL_ARGUMENT, arg);
-    assert(offset >= 0);
+    if (offset < 0)
+      continue;
     uint32_t *slmptr = (uint32_t *) (ker->curbe + offset);
     *slmptr = slm_offset;
     slm_offset += ker->args[arg].local_sz;
@@ -279,30 +282,48 @@ cl_bind_stack(cl_gpgpu gpgpu, cl_kernel ker)
 }
 
 static int
-cl_bind_printf(cl_gpgpu gpgpu, cl_kernel ker, void* printf_info, int printf_num, size_t global_sz) {
-  int32_t value = GBE_CURBE_PRINTF_INDEX_POINTER;
-  int32_t offset = interp_kernel_get_curbe_offset(ker->opaque, value, 0);
-  size_t buf_size = global_sz * sizeof(int) * printf_num;
-  if (offset > 0) {
-    if (cl_gpgpu_set_printf_buffer(gpgpu, 0, buf_size*2, offset, interp_get_printf_indexbuf_bti(printf_info)) != 0)
-      return -1;
+cl_bind_profiling(cl_gpgpu gpgpu, uint32_t simd_sz, cl_kernel ker, size_t global_sz, size_t local_sz, uint32_t bti) {
+  int32_t offset;
+  int i = 0;
+  int thread_num;
+  if (simd_sz == 16) {
+    for(i = 0; i < 3; i++) {
+      offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_PROFILING_TIMESTAMP0 + i, 0);
+      assert(offset >= 0);
+      memset(ker->curbe + offset, 0x0, sizeof(uint32_t)*8*2);
+      thread_num = (local_sz + 15)/16;
+    }
+  } else {
+    assert(simd_sz == 8);
+    for(i = 0; i < 5; i++) {
+      offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_PROFILING_TIMESTAMP0 + i, 0);
+      assert(offset >= 0);
+      memset(ker->curbe + offset, 0x0, sizeof(uint32_t)*8);
+      thread_num = (local_sz + 7)/8;
+    }
   }
 
-  value = GBE_CURBE_PRINTF_BUF_POINTER;
-  offset = interp_kernel_get_curbe_offset(ker->opaque, value, 0);
-  buf_size = interp_get_printf_sizeof_size(printf_info) * global_sz;
-  /* because of the printf may exist in a loop, which loop number can not be gotten by
-     static analysis. So we set the data buffer as big as we can. Out of bound printf
-     info will be discarded. */
-  if (buf_size < 1*1024)
+  offset = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_PROFILING_BUF_POINTER, 0);
+  thread_num = thread_num*(global_sz/local_sz);
+  if (cl_gpgpu_set_profiling_buffer(gpgpu, thread_num*128 + 4, offset, bti))
+    return -1;
+
+  return 0;
+}
+
+
+static int
+cl_alloc_printf(cl_gpgpu gpgpu, cl_kernel ker, void* printf_info, int printf_num, size_t global_sz) {
+  /* An guess size. */
+  size_t buf_size = global_sz * sizeof(int) * 16 * printf_num;
+  if (buf_size > 16*1024*1024) //at most.
+    buf_size = 16*1024*1024;
+  if (buf_size < 1*1024*1024) // at least.
     buf_size = 1*1024*1024;
-  else
-    buf_size = 16*1024*1024; //at most.
 
-  if (offset > 0) {
-    if (cl_gpgpu_set_printf_buffer(gpgpu, 1, buf_size, offset, interp_get_printf_buf_bti(printf_info)) != 0)
-      return -1;
-  }
+  if (cl_gpgpu_set_printf_buffer(gpgpu, buf_size, interp_get_printf_buf_bti(printf_info)) != 0)
+	return -1;
+
   return 0;
 }
 
@@ -338,27 +359,27 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
 
   /* Compute the number of HW threads we need */
   if(UNLIKELY(err = cl_kernel_work_group_sz(ker, local_wk_sz, 3, &local_sz) != CL_SUCCESS)) {
-    fprintf(stderr, "Beignet: Work group size exceed Kernel's work group size.\n");
+    DEBUGP(DL_ERROR, "Work group size exceed Kernel's work group size.");
     return err;
   }
   kernel.thread_n = thread_n = (local_sz + simd_sz - 1) / simd_sz;
   kernel.curbe_sz = cst_sz;
 
   if (scratch_sz > ker->program->ctx->device->scratch_mem_size) {
-    fprintf(stderr, "Beignet: Out of scratch memory %d.\n", scratch_sz);
+    DEBUGP(DL_ERROR, "Out of scratch memory %d.", scratch_sz);
     return CL_OUT_OF_RESOURCES;
   }
   /* Curbe step 1: fill the constant urb buffer data shared by all threads */
   if (ker->curbe) {
     kernel.slm_sz = cl_curbe_fill(ker, work_dim, global_wk_off, global_wk_sz, local_wk_sz, thread_n);
     if (kernel.slm_sz > ker->program->ctx->device->local_mem_size) {
-      fprintf(stderr, "Beignet: Out of shared local memory %d.\n", kernel.slm_sz);
+      DEBUGP(DL_ERROR, "Out of shared local memory %d.", kernel.slm_sz);
       return CL_OUT_OF_RESOURCES;
     }
   }
 
   printf_info = interp_dup_printfset(ker->opaque);
-  cl_gpgpu_set_printf_info(gpgpu, printf_info, (size_t *)global_wk_sz);
+  cl_gpgpu_set_printf_info(gpgpu, printf_info);
 
   /* Setup the kernel */
   if (queue->props & CL_QUEUE_PROFILING_ENABLE)
@@ -369,16 +390,27 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
     goto error;
   printf_num = interp_get_printf_num(printf_info);
   if (printf_num) {
-    if (cl_bind_printf(gpgpu, ker, printf_info, printf_num, global_size) != 0)
+    if (cl_alloc_printf(gpgpu, ker, printf_info, printf_num, global_size) != 0)
       goto error;
+  }
+  if (interp_get_profiling_bti(ker->opaque) != 0) {
+    if (cl_bind_profiling(gpgpu, simd_sz, ker, global_size, local_sz, interp_get_profiling_bti(ker->opaque)))
+      goto error;
+    cl_gpgpu_set_profiling_info(gpgpu, interp_dup_profiling(ker->opaque));
+  } else {
+	cl_gpgpu_set_profiling_info(gpgpu, NULL);
   }
 
   /* Bind user buffers */
   cl_command_queue_bind_surface(queue, ker);
   /* Bind user images */
-  cl_command_queue_bind_image(queue, ker);
+  if(UNLIKELY(err = cl_command_queue_bind_image(queue, ker) != CL_SUCCESS))
+    return err;
   /* Bind all samplers */
-  cl_gpgpu_bind_sampler(gpgpu, ker->samplers, ker->sampler_sz);
+  if (ker->vme)
+    cl_gpgpu_bind_vme_state(gpgpu, ker->accel);
+  else
+    cl_gpgpu_bind_sampler(gpgpu, ker->samplers, ker->sampler_sz);
 
   if (cl_gpgpu_set_scratch(gpgpu, scratch_sz) != 0)
     goto error;

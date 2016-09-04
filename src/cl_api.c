@@ -28,8 +28,10 @@
 #include "cl_mem.h"
 #include "cl_image.h"
 #include "cl_sampler.h"
+#include "cl_accelerator_intel.h"
 #include "cl_alloc.h"
 #include "cl_utils.h"
+#include "cl_cmrt.h"
 
 #include "CL/cl.h"
 #include "CL/cl_ext.h"
@@ -56,6 +58,7 @@ typedef intptr_t cl_device_partition_property;
 	  if (param_value && param_value_size < sizeof(TYPE)*ELT) \
 	      return CL_INVALID_VALUE;  \
 	  if (param_value) { \
+	      memset(param_value, 0, param_value_size); \
 	      memcpy(param_value, (VAL), sizeof(TYPE)*ELT); \
 	  } \
           \
@@ -64,7 +67,7 @@ typedef intptr_t cl_device_partition_property;
 	  return RET; \
 	} while(0)
 
-inline cl_int
+static inline cl_int
 handle_events(cl_command_queue queue, cl_int num, const cl_event *wait_list,
               cl_event* event, enqueue_data* data, cl_command_type type)
 {
@@ -275,6 +278,11 @@ clRetainDevice(cl_device_id device)
 cl_int
 clReleaseDevice(cl_device_id device)
 {
+#ifdef HAS_CMRT
+  if (device->cmrt_device != NULL)
+    cmrt_destroy_device(device);
+#endif
+
   // XXX stub for C++ Bindings
   return CL_SUCCESS;
 }
@@ -550,8 +558,9 @@ clCreateImage(cl_context context,
     goto error;
   }
   /* buffer refers to a valid buffer memory object if image_type is
-     CL_MEM_OBJECT_IMAGE1D_BUFFER. Otherwise it must be NULL. */
+     CL_MEM_OBJECT_IMAGE1D_BUFFER or CL_MEM_OBJECT_IMAGE2D. Otherwise it must be NULL. */
   if (image_desc->image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER &&
+      image_desc->image_type != CL_MEM_OBJECT_IMAGE2D &&
          image_desc->buffer) {
     err = CL_INVALID_IMAGE_DESCRIPTOR;
     goto error;
@@ -679,6 +688,7 @@ clGetSupportedImageFormats(cl_context         ctx,
   }
   if (UNLIKELY(image_type != CL_MEM_OBJECT_IMAGE1D &&
                image_type != CL_MEM_OBJECT_IMAGE1D_ARRAY &&
+               image_type != CL_MEM_OBJECT_IMAGE1D_BUFFER &&
                image_type != CL_MEM_OBJECT_IMAGE2D_ARRAY &&
                image_type != CL_MEM_OBJECT_IMAGE2D &&
                image_type != CL_MEM_OBJECT_IMAGE3D)) {
@@ -939,11 +949,11 @@ clBuildProgram(cl_program            program,
     INVALID_DEVICE_IF (device_list[0] != program->ctx->device);
   }
 
-  /* TODO support create program from binary */
   assert(program->source_type == FROM_LLVM ||
          program->source_type == FROM_SOURCE ||
          program->source_type == FROM_LLVM_SPIR ||
-         program->source_type == FROM_BINARY);
+         program->source_type == FROM_BINARY ||
+         program->source_type == FROM_CMRT);
   if((err = cl_program_build(program, options)) != CL_SUCCESS) {
     goto error;
   }
@@ -984,6 +994,7 @@ clCompileProgram(cl_program            program ,
   /* TODO support create program from binary */
   assert(program->source_type == FROM_LLVM ||
       program->source_type == FROM_SOURCE ||
+      program->source_type == FROM_LLVM_SPIR ||
       program->source_type == FROM_BINARY);
   if((err = cl_program_compile(program, num_input_headers, input_headers, header_include_names, options)) != CL_SUCCESS) {
     goto error;
@@ -1242,7 +1253,13 @@ clSetKernelArg(cl_kernel     kernel,
 {
   cl_int err = CL_SUCCESS;
   CHECK_KERNEL(kernel);
-  err = cl_kernel_set_arg(kernel, arg_index, arg_size, arg_value);
+
+#ifdef HAS_CMRT
+  if (kernel->cmrt_kernel != NULL)
+    err = cmrt_set_kernel_arg(kernel, arg_index, arg_size, arg_value);
+  else
+#endif
+    err = cl_kernel_set_arg(kernel, arg_index, arg_size, arg_value);
 error:
   return err;
 }
@@ -1328,6 +1345,26 @@ clGetKernelWorkGroupInfo(cl_kernel                   kernel,
                                       param_value_size,
                                       param_value,
                                       param_value_size_ret);
+}
+
+cl_int
+clGetKernelSubGroupInfoKHR(cl_kernel                   kernel,
+                          cl_device_id                device,
+                          cl_kernel_work_group_info   param_name,
+                          size_t                      input_value_size,
+                          const void *                input_value,
+                          size_t                      param_value_size,
+                          void *                      param_value,
+                          size_t *                    param_value_size_ret)
+{
+  return cl_get_kernel_subgroup_info(kernel,
+                                     device,
+                                     param_name,
+                                     input_value_size,
+                                     input_value,
+                                     param_value_size,
+                                     param_value,
+                                     param_value_size_ret);
 }
 
 cl_int
@@ -1530,6 +1567,12 @@ clFinish(cl_command_queue command_queue)
   cl_int err = CL_SUCCESS;
 
   CHECK_QUEUE (command_queue);
+
+#ifdef HAS_CMRT
+  if (command_queue->cmrt_event != NULL)
+    return cmrt_wait_for_task_finished(command_queue);
+#endif
+
   err = cl_command_queue_finish(command_queue);
 
 error:
@@ -2653,6 +2696,11 @@ clEnqueueMapBuffer(cl_command_queue  command_queue,
     goto error;
   }
 
+#ifdef HAS_CMRT
+  if (command_queue->cmrt_event != NULL)
+    cmrt_wait_for_task_finished(command_queue);
+#endif
+
   TRY(cl_event_check_waitlist, num_events_in_wait_list, event_wait_list, event, buffer->ctx);
 
   data = &no_wait_data;
@@ -2740,6 +2788,11 @@ clEnqueueMapImage(cl_command_queue   command_queue,
     err = CL_INVALID_OPERATION;
     goto error;
   }
+
+#ifdef HAS_CMRT
+  if (command_queue->cmrt_event != NULL)
+    cmrt_wait_for_task_finished(command_queue);
+#endif
 
   TRY(cl_event_check_waitlist, num_events_in_wait_list, event_wait_list, event, mem->ctx);
 
@@ -2912,6 +2965,17 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
     goto error;
   }
 
+  if (kernel->vme) {
+    if (work_dim != 2) {
+      err = CL_INVALID_WORK_DIMENSION;
+      goto error;
+    }
+    if (local_work_size != NULL) {
+      err = CL_INVALID_WORK_GROUP_SIZE;
+      goto error;
+    }
+  }
+
   if (global_work_offset != NULL)
     for (i = 0; i < work_dim; ++i) {
       if (UNLIKELY(global_work_offset[i] + global_work_size[i] > (size_t)-1)) {
@@ -2935,6 +2999,12 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
     goto error;
   }
 
+#ifdef HAS_CMRT
+  if (kernel->cmrt_kernel != NULL) {
+    err = cmrt_enqueue(command_queue, kernel, global_work_size, local_work_size);
+    goto error;
+  }
+#endif
 
   /* XXX No event right now */
   //FATAL_IF(num_events_in_wait_list > 0, "Events are not supported");
@@ -2945,22 +3015,35 @@ clEnqueueNDRangeKernel(cl_command_queue  command_queue,
     for (i = 0; i < work_dim; ++i)
       fixed_local_sz[i] = local_work_size[i];
   } else {
-    uint j, maxDimSize = 64 /* from 64? */, maxGroupSize = 256; //MAX_WORK_GROUP_SIZE may too large
-    for (i = 0; i< work_dim; i++) {
-      for (j = maxDimSize; j > 1; j--) {
-        if (global_work_size[i] % j == 0 && j <= maxGroupSize) {
-          fixed_local_sz[i] = j;
-          maxGroupSize = maxGroupSize /j;
-          maxDimSize = maxGroupSize > maxDimSize ? maxDimSize : maxGroupSize;
-          break;  //choose next work_dim
+    if (kernel->vme) {
+        fixed_local_sz[0] = 16;
+        fixed_local_sz[1] = 1;
+    } else {
+      uint j, maxDimSize = 64 /* from 64? */, maxGroupSize = 256; //MAX_WORK_GROUP_SIZE may too large
+      size_t realGroupSize = 1;
+      for (i = 0; i< work_dim; i++) {
+        for (j = maxDimSize; j > 1; j--) {
+          if (global_work_size[i] % j == 0 && j <= maxGroupSize) {
+            fixed_local_sz[i] = j;
+            maxGroupSize = maxGroupSize /j;
+            maxDimSize = maxGroupSize > maxDimSize ? maxDimSize : maxGroupSize;
+            break;  //choose next work_dim
+          }
         }
+        realGroupSize *= fixed_local_sz[i];
       }
+      if (realGroupSize % 8 != 0)
+        DEBUGP(DL_WARNING, "unable to find good values for local_work_size[i], please provide local_work_size[] explicitly, you can find good values with trial-and-error method.");
     }
   }
 
-  if (global_work_size != NULL)
+  if (kernel->vme) {
+    fixed_global_sz[0] = (global_work_size[0]+15) / 16 * 16;
+    fixed_global_sz[1] = (global_work_size[1]+15) / 16;
+  } else {
     for (i = 0; i < work_dim; ++i)
       fixed_global_sz[i] = global_work_size[i];
+  }
   if (global_work_offset != NULL)
     for (i = 0; i < work_dim; ++i)
       fixed_global_off[i] = global_work_offset[i];
@@ -3190,6 +3273,13 @@ internal_clGetExtensionFunctionAddress(const char *func_name)
   EXTFUNC(clCreateBufferFromLibvaIntel)
   EXTFUNC(clCreateImageFromLibvaIntel)
   EXTFUNC(clGetMemObjectFdIntel)
+  EXTFUNC(clCreateBufferFromFdINTEL)
+  EXTFUNC(clCreateImageFromFdINTEL)
+  EXTFUNC(clCreateAcceleratorINTEL)
+  EXTFUNC(clRetainAcceleratorINTEL)
+  EXTFUNC(clReleaseAcceleratorINTEL)
+  EXTFUNC(clGetAcceleratorInfoINTEL)
+  EXTFUNC(clGetKernelSubGroupInfoKHR)
   return NULL;
 }
 
@@ -3354,6 +3444,129 @@ clGetMemObjectFdIntel(cl_context context,
   CHECK_MEM (memobj);
 
   err = cl_mem_get_fd(memobj, fd);
+
+error:
+  return err;
+}
+
+cl_mem
+clCreateBufferFromFdINTEL(cl_context context,
+                          const cl_import_buffer_info_intel* info,
+                          cl_int *errorcode_ret)
+{
+  cl_mem mem = NULL;
+  cl_int err = CL_SUCCESS;
+  CHECK_CONTEXT (context);
+
+  if (!info) {
+    err = CL_INVALID_VALUE;
+    goto error;
+  }
+
+  mem = cl_mem_new_buffer_from_fd(context, info->fd, info->size, &err);
+
+error:
+  if (errorcode_ret)
+    *errorcode_ret = err;
+  return mem;
+}
+
+cl_mem
+clCreateImageFromFdINTEL(cl_context context,
+                         const cl_import_image_info_intel* info,
+                         cl_int *errorcode_ret)
+{
+  cl_mem mem = NULL;
+  cl_int err = CL_SUCCESS;
+  CHECK_CONTEXT (context);
+
+  if (!info) {
+    err = CL_INVALID_VALUE;
+    goto error;
+  }
+
+  /* Create image object from fd.
+   * We just support creating CL_MEM_OBJECT_IMAGE2D image object now.
+   * Other image type will be supported later if necessary.
+   */
+  if(info->type == CL_MEM_OBJECT_IMAGE2D){
+    mem = cl_mem_new_image_from_fd(context,
+                                   info->fd, info->size,
+                                   info->offset,
+                                   info->width, info->height,
+                                   info->fmt, info->row_pitch,
+                                   &err);
+  }
+  else{
+    err = CL_INVALID_ARG_VALUE;
+    goto error;
+  }
+
+error:
+  if (errorcode_ret)
+    *errorcode_ret = err;
+  return mem;
+}
+
+cl_accelerator_intel
+clCreateAcceleratorINTEL(cl_context context,
+                         cl_accelerator_type_intel accel_type,
+                         size_t desc_sz,
+                         const void* desc,
+                         cl_int* errcode_ret)
+{
+
+  cl_accelerator_intel accel = NULL;
+  cl_int err = CL_SUCCESS;
+  CHECK_CONTEXT(context);
+  accel = cl_accelerator_intel_new(context, accel_type, desc_sz, desc, &err);
+error:
+  if (errcode_ret)
+    *errcode_ret = err;
+  return accel;
+}
+
+cl_int
+clRetainAcceleratorINTEL(cl_accelerator_intel accel)
+{
+  cl_int err = CL_SUCCESS;
+  CHECK_ACCELERATOR_INTEL(accel);
+  cl_accelerator_intel_add_ref(accel);
+error:
+  return err;
+}
+
+cl_int
+clReleaseAcceleratorINTEL(cl_accelerator_intel accel)
+{
+  cl_int err = CL_SUCCESS;
+  CHECK_ACCELERATOR_INTEL(accel);
+  cl_accelerator_intel_delete(accel);
+error:
+  return err;
+}
+
+cl_int
+clGetAcceleratorInfoINTEL(cl_accelerator_intel           accel,
+                            cl_accelerator_info_intel    param_name,
+                            size_t                       param_value_size,
+                            void*                        param_value,
+                            size_t*                      param_value_size_ret)
+{
+  cl_int err = CL_SUCCESS;
+  CHECK_ACCELERATOR_INTEL(accel);
+
+  if (param_name == CL_ACCELERATOR_REFERENCE_COUNT_INTEL) {
+    FILL_GETINFO_RET (cl_uint, 1, (cl_uint*)&accel->ref_n, CL_SUCCESS);
+  } else if (param_name == CL_ACCELERATOR_CONTEXT_INTEL) {
+    FILL_GETINFO_RET (cl_context, 1, &accel->ctx, CL_SUCCESS);
+  } else if (param_name == CL_ACCELERATOR_TYPE_INTEL) {
+    FILL_GETINFO_RET (cl_uint, 1, &accel->type, CL_SUCCESS);
+  } else if (param_name == CL_ACCELERATOR_DESCRIPTOR_INTEL) {
+    FILL_GETINFO_RET (cl_motion_estimation_desc_intel, 1, &(accel->desc.me), CL_SUCCESS);
+  } else{
+    return CL_INVALID_VALUE;
+  }
 
 error:
   return err;

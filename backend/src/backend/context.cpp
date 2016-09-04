@@ -38,44 +38,47 @@ namespace gbe
   class SimpleAllocator
   {
   public:
-    SimpleAllocator(int16_t startOffset, int16_t size, bool _assertFail);
+    SimpleAllocator(int32_t startOffset, int32_t size);
     ~SimpleAllocator(void);
 
     /*! Allocate some memory from the pool.
      */
-    int16_t allocate(int16_t size, int16_t alignment, bool bFwd=false);
+    int32_t allocate(int32_t size, int32_t alignment, bool bFwd=false);
 
     /*! Free the given register file piece */
-    void deallocate(int16_t offset);
+    void deallocate(int32_t offset);
 
+    /*! check whether a super register is in free list,
+     *  a super register means a 32byte register, Gen
+     *  often has 128 super registers*/
+    bool isSuperRegisterFree(int32_t offset);
     /*! Spilt a block into 2 blocks */
-    void splitBlock(int16_t offset, int16_t subOffset);
+    void splitBlock(int32_t offset, int32_t subOffset);
 
   protected:
     /*! Double chained list of free spaces */
     struct Block {
-      Block(int16_t offset, int16_t size) :
+      Block(int32_t offset, int32_t size) :
         prev(NULL), next(NULL), offset(offset), size(size) {}
       Block *prev, *next; //!< Previous and next free blocks
-      int16_t offset;        //!< Where the free block starts
-      int16_t size;          //!< Size of the free block
+      int32_t offset;        //!< Where the free block starts
+      int32_t size;          //!< Size of the free block
     };
 
     /*! Try to coalesce two blocks (left and right). They must be in that order.
      *  If the colascing was done, the left block is deleted
      */
     void coalesce(Block *left, Block *right);
+    void dumpFreeList();
     /*! the maximum offset */
-    int16_t maxOffset;
-    /*! whether trigger an assertion on allocation failure */
-    bool assertFail;
+    int32_t maxOffset;
     /*! Head and tail of the free list */
     Block *head;
     Block *tail;
     /*! Handle free list element allocation */
     DECL_POOL(Block, blockPool);
     /*! Track allocated memory blocks <offset, size> */
-    map<int16_t, int16_t> allocatedBlocks;
+    map<int32_t, int32_t> allocatedBlocks;
     /*! Use custom allocators */
     GBE_CLASS(SimpleAllocator);
   };
@@ -90,7 +93,7 @@ namespace gbe
 
   class RegisterAllocator: public SimpleAllocator {
   public:
-    RegisterAllocator(int16_t offset, int16_t size): SimpleAllocator(offset, size, false) {}
+    RegisterAllocator(int32_t offset, int32_t size): SimpleAllocator(offset, size) {}
 
     GBE_CLASS(RegisterAllocator);
   };
@@ -102,17 +105,15 @@ namespace gbe
 
   class ScratchAllocator: public SimpleAllocator {
   public:
-    ScratchAllocator(int16_t size): SimpleAllocator(0, size, true) {}
-    int16_t getMaxScatchMemUsed() { return maxOffset; }
+    ScratchAllocator(int32_t size): SimpleAllocator(0, size) {}
+    int32_t getMaxScatchMemUsed() { return maxOffset; }
 
     GBE_CLASS(ScratchAllocator);
   };
 
-  SimpleAllocator::SimpleAllocator(int16_t startOffset,
-                                   int16_t size,
-                                   bool _assertFail)
-                                  : maxOffset(0),
-                                  assertFail(_assertFail){
+  SimpleAllocator::SimpleAllocator(int32_t startOffset,
+                                   int32_t size)
+                                  : maxOffset(0) {
     tail = head = this->newBlock(startOffset, size);
   }
 
@@ -124,14 +125,38 @@ namespace gbe
     }
   }
 
-  int16_t SimpleAllocator::allocate(int16_t size, int16_t alignment, bool bFwd)
+  void SimpleAllocator::dumpFreeList() {
+    Block *s = head;
+    printf("register free list:\n");
+    while (s) {
+      printf("blk: %d(r%d.%d) (%d)\n", s->offset, s->offset/GEN_REG_SIZE, s->offset % GEN_REG_SIZE, s->size);
+      s = s->next;
+    }
+    printf("free list end\n");
+  }
+
+  bool SimpleAllocator::isSuperRegisterFree(int32_t offset) {
+    assert((offset % GEN_REG_SIZE) == 0);
+    Block *s = head;
+    while (s) {
+      if (s->offset <= offset && (s->offset+s->size) >= offset+GEN_REG_SIZE) {
+        return true;
+      }
+      if (s->offset > offset)
+        return false;
+      s = s->next;
+    }
+    return false;
+  }
+
+  int32_t SimpleAllocator::allocate(int32_t size, int32_t alignment, bool bFwd)
   {
     // Make it simple and just use the first block we find
     Block *list = bFwd ? head : tail;
     while (list) {
-      int16_t aligned;
-      int16_t spaceOnLeft;
-      int16_t spaceOnRight;
+      int32_t aligned;
+      int32_t spaceOnLeft;
+      int32_t spaceOnRight;
       if(bFwd) {
         aligned = ALIGN(list->offset, alignment);
         spaceOnLeft = aligned - list->offset;
@@ -143,7 +168,7 @@ namespace gbe
           continue;
         }
       } else {
-        int16_t unaligned = list->offset + list->size - size - (alignment-1);
+        int32_t unaligned = list->offset + list->size - size - (alignment-1);
         if(unaligned < 0) {
           list = list->prev;
           continue;
@@ -229,16 +254,15 @@ namespace gbe
       // We have a valid offset now
       return aligned;
     }
-    GBE_ASSERT( !assertFail );
-    return 0;
+    return -1;
   }
 
-  void SimpleAllocator::deallocate(int16_t offset)
+  void SimpleAllocator::deallocate(int32_t offset)
   {
     // Retrieve the size in the allocation map
     auto it = allocatedBlocks.find(offset);
     GBE_ASSERT(it != allocatedBlocks.end());
-    const int16_t size = it->second;
+    const int32_t size = it->second;
 
     // Find the two blocks where to insert the new block
     Block *list = tail, *next = NULL;
@@ -292,7 +316,7 @@ namespace gbe
     }
   }
 
-  void SimpleAllocator::splitBlock(int16_t offset, int16_t subOffset) {
+  void SimpleAllocator::splitBlock(int32_t offset, int32_t subOffset) {
     // Retrieve the size in the allocation map
     auto it = allocatedBlocks.find(offset);
     GBE_ASSERT(it != allocatedBlocks.end());
@@ -306,7 +330,7 @@ namespace gbe
 
     if(subOffset == 0)
       return;
-    int16_t size = it->second;
+    int32_t size = it->second;
     allocatedBlocks.erase(it);
     // Track the allocation to retrieve the size later
     allocatedBlocks.insert(std::make_pair(offset, subOffset));
@@ -322,7 +346,7 @@ namespace gbe
     unit(unit), fn(*unit.getFunction(name)), name(name), liveness(NULL), dag(NULL), useDWLabel(false)
   {
     GBE_ASSERT(unit.getPointerSize() == ir::POINTER_32_BITS);
-    this->liveness = GBE_NEW(ir::Liveness, const_cast<ir::Function&>(fn));
+    this->liveness = GBE_NEW(ir::Liveness, const_cast<ir::Function&>(fn), true);
     this->dag = GBE_NEW(ir::FunctionDAG, *this->liveness);
     // r0 (GEN_REG_SIZE) is always set by the HW and used at the end by EOT
     this->registerAllocator = NULL; //GBE_NEW(RegisterAllocator, GEN_REG_SIZE, 4*KB - GEN_REG_SIZE);
@@ -373,13 +397,17 @@ namespace gbe
     return this->kernel;
   }
 
-  int16_t Context::allocate(int16_t size, int16_t alignment) {
-    return registerAllocator->allocate(size, alignment);
+  int32_t Context::allocate(int32_t size, int32_t alignment, bool bFwd) {
+    return registerAllocator->allocate(size, alignment, bFwd);
   }
 
-  void Context::deallocate(int16_t offset) { registerAllocator->deallocate(offset); }
+  bool Context::isSuperRegisterFree(int offset) {
+    return registerAllocator->isSuperRegisterFree(offset);
+  }
 
-  void Context::splitBlock(int16_t offset, int16_t subOffset) {
+  void Context::deallocate(int32_t offset) { registerAllocator->deallocate(offset); }
+
+  void Context::splitBlock(int32_t offset, int32_t subOffset) {
     registerAllocator->splitBlock(offset, subOffset);
   }
 
@@ -396,14 +424,14 @@ namespace gbe
 
   void Context::buildStack(void) {
     const auto &stackUse = dag->getUse(ir::ocl::stackptr);
-    if (stackUse.size() == 0)  // no stack is used if stackptr is unused
+    if (stackUse.size() == 0) {  // no stack is used if stackptr is unused
+      this->kernel->stackSize = 0;
       return;
-    // Be sure that the stack pointer is set
-    // GBE_ASSERT(this->kernel->getCurbeOffset(GBE_CURBE_STACK_POINTER, 0) >= 0);
+    }
     uint32_t stackSize = 128;
     while (stackSize < fn.getStackSize()) {
       stackSize *= 3;
-      GBE_ASSERT(stackSize <= 64*KB);
+      //GBE_ASSERT(stackSize <= 64*KB);
     }
     this->kernel->stackSize = stackSize;
   }
@@ -419,20 +447,6 @@ namespace gbe
     kernel->patches.push_back(PatchInfo(value, subValue, offset - GEN_REG_SIZE));
     kernel->curbeSize = std::max(kernel->curbeSize, offset + size - GEN_REG_SIZE);
     return offset;
-  }
-
-  uint32_t Context::getImageInfoCurbeOffset(ir::ImageInfoKey key, size_t size)
-  {
-    int32_t offset = fn.getImageSet()->getInfoOffset(key);
-    if (offset >= 0)
-      return offset + GEN_REG_SIZE;
-    newCurbeEntry(GBE_CURBE_IMAGE_INFO, key.data, size, 4);
-    std::sort(kernel->patches.begin(), kernel->patches.end());
-
-    offset = kernel->getCurbeOffset(GBE_CURBE_IMAGE_INFO, key.data);
-    GBE_ASSERT(offset >= 0); // XXX do we need to spill it out to bo?
-    fn.getImageSet()->appendInfo(key, offset);
-    return offset + GEN_REG_SIZE;
   }
 
   void Context::insertCurbeReg(ir::Register reg, uint32_t offset) {
