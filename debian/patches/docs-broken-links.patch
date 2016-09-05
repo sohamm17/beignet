@@ -2,8 +2,8 @@ Description: Fix broken internal links in documentation
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
---- beignet-1.1.2.orig/docs/Beignet.mdwn
-+++ beignet-1.1.2/docs/Beignet.mdwn
+--- beignet.orig/docs/Beignet.mdwn
++++ beignet/docs/Beignet.mdwn
 @@ -24,7 +24,7 @@ Attempting to run Beignet on unsupported
  
  News
@@ -13,7 +13,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Prerequisite
  ------------
-@@ -303,11 +303,11 @@ Please specify your hardware when report
+@@ -276,13 +276,13 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------
@@ -22,11 +22,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -- [[Kernel Optimization Guide|Beignet/optimization-guide]]
 -- [[Libva Buffer Sharing|Beignet/howto/libva-buffer-sharing-howto]]
 -- [[V4l2 Buffer Sharing|Beignet/howto/v4l2-buffer-sharing-howto]]
+-- [[Video Motion Estimation|Beignet/howto/video-motion-estimation-howto]]
+-- [[Stand Alone Unit Test|Beignet/howto/stand-alone-utest-howto]]
 +- [[Cross compile (yocto)|howto/cross-compiler-howto]]
 +- [[Work with old system without c++11|howto/oldgcc-howto]]
 +- [[Kernel Optimization Guide|optimization-guide]]
 +- [[Libva Buffer Sharing|howto/libva-buffer-sharing-howto]]
 +- [[V4l2 Buffer Sharing|howto/v4l2-buffer-sharing-howto]]
++- [[Video Motion Estimation|howto/video-motion-estimation-howto]]
++- [[Stand Alone Unit Test|howto/stand-alone-utest-howto]]
  
  The wiki URL is as below:
  [http://www.freedesktop.org/wiki/Software/Beignet/](http://www.freedesktop.org/wiki/Software/Beignet/)

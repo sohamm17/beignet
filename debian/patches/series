@@ -4,12 +4,6 @@ reduce-notfound-output.patch
 shared-llvm.patch
 update-docs.patch
 allow-+-in-directory.patch
-printf-fix-90472.patch
-std-isnan-isinf.patch
 Enable-test-debug.patch
-llvm38-support.patch
 find-python35.patch
-profiling-32on64.patch
-noassert-missing-function.patch
-gcc6-support.patch
 docs-broken-links.patch

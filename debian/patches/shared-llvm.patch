@@ -5,9 +5,9 @@ probably due to #698247
 
 Author: Rebecca Palmer <rebecca_palmer@zoho.com>
 
---- beignet-1.0.2.orig/CMake/FindLLVM.cmake
-+++ beignet-1.0.2/CMake/FindLLVM.cmake
-@@ -87,20 +87,7 @@ execute_process(
+--- beignet.orig/CMake/FindLLVM.cmake
++++ beignet/CMake/FindLLVM.cmake
+@@ -87,22 +87,7 @@ execute_process(
    OUTPUT_STRIP_TRAILING_WHITESPACE
  )
  
@@ -23,10 +23,11 @@ Author: Rebecca Palmer <rebecca_palmer@zoho.com>
 -  OUTPUT_VARIABLE LLVM_SYSTEM_LIBS_ORIG
 -  OUTPUT_STRIP_TRAILING_WHITESPACE
 -)
+-if (LLVM_SYSTEM_LIBS_ORIG)
 -string(REGEX REPLACE " *\n" "" LLVM_SYSTEM_LIBS ${LLVM_SYSTEM_LIBS_ORIG})
+-endif (LLVM_SYSTEM_LIBS_ORIG)
 -endif (LLVM_VERSION_NODOT VERSION_GREATER 34)
 +set(LLVM_MODULE_LIBS "-lLLVM-${LLVM_VERSION}")
  
  macro(add_one_lib name)
    FIND_LIBRARY(CLANG_LIB
-

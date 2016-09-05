@@ -9,8 +9,8 @@ does not need to stay compatible).
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
---- a/utests/builtin_acos_asin.cpp
-+++ b/utests/builtin_acos_asin.cpp
+--- beignet.orig/utests/builtin_acos_asin.cpp
++++ beignet/utests/builtin_acos_asin.cpp
 @@ -2,12 +2,12 @@
  #include <cmath>
  #include <algorithm>
@@ -26,8 +26,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  status = 1;\
  }
  
- const float input_data[] = {-30, -1, -0.92, -0.5, -0.09, 0, 0.09, 0.5, 0.92, 1, 30};
-@@ -29,6 +29,7 @@ static void builtin_acos_asin(void)
+ namespace {
+@@ -31,6 +31,7 @@ static void builtin_acos_asin(void)
  {
    // Setup kernel and buffers
    int k, i, index_cur;
@@ -35,7 +35,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
  
    OCL_CREATE_KERNEL("builtin_acos_asin");
-@@ -82,6 +83,7 @@ static void builtin_acos_asin(void)
+@@ -85,6 +86,7 @@ static void builtin_acos_asin(void)
  #endif
      }
    }
@@ -43,8 +43,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  }
  
  MAKE_UTEST_FROM_FUNCTION(builtin_acos_asin)
---- a/utests/builtin_exp.cpp
-+++ b/utests/builtin_exp.cpp
+--- beignet.orig/utests/builtin_exp.cpp
++++ beignet/utests/builtin_exp.cpp
 @@ -2,7 +2,7 @@
  #include <cmath>
  #include <algorithm>
@@ -53,7 +53,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +#define udebug 1
  
  #define FLT_MAX 0x1.fffffep127f
- #define FLT_MIN 0x1.0p-126f
+ #define FLT_MIN ldexpf(1.0,-126)
 @@ -10,9 +10,9 @@
  
  #define printf_c(...) \
@@ -65,8 +65,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  status = 1;\
  }
  
- const float input_data[] = {FLT_MAX, -FLT_MAX, FLT_MIN, -FLT_MIN, 80, -80, 3.14, -3.14, -0.5, 0.5, 1, -1, 0.0 };
-@@ -34,6 +34,7 @@ static void builtin_exp(void)
+ namespace{
+@@ -36,6 +36,7 @@ static void builtin_exp(void)
  {
    // Setup kernel and buffers
    int k, i, index_cur;
@@ -74,7 +74,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
    float diff;
    char log[256] = {0};
-@@ -72,19 +73,19 @@ static void builtin_exp(void)
+@@ -75,19 +76,19 @@ static void builtin_exp(void)
  
  #if udebug
        if (std::isinf(cpu_data[index_cur]) && std::isinf(gpu_data[index_cur])){
@@ -99,7 +99,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  #else
        if (std::isinf(cpu_data[index_cur]))
          OCL_ASSERTM(std::isinf(gpu_data[index_cur]), log);
-@@ -97,6 +98,7 @@ static void builtin_exp(void)
+@@ -100,6 +101,7 @@ static void builtin_exp(void)
  #endif
      }
    }
@@ -107,8 +107,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  }
  
  MAKE_UTEST_FROM_FUNCTION(builtin_exp)
---- a/utests/builtin_global_id.cpp
-+++ b/utests/builtin_global_id.cpp
+--- beignet.orig/utests/builtin_global_id.cpp
++++ beignet/utests/builtin_global_id.cpp
 @@ -22,7 +22,7 @@ dimension:3
   9 10 11   21 22 23   33 34 35   45 46 47   57 58 59
  */
@@ -118,8 +118,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  #include "utest_helper.hpp"
  static void builtin_global_id(void)
  {
---- a/utests/builtin_local_id.cpp
-+++ b/utests/builtin_local_id.cpp
+--- beignet.orig/utests/builtin_local_id.cpp
++++ beignet/utests/builtin_local_id.cpp
 @@ -26,7 +26,7 @@ dimension:3
  429 430 431 432 433 434 ... 571 572 573 574 575
  */
@@ -129,8 +129,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  #include "utest_helper.hpp"
  static void builtin_local_id(void)
  {
---- a/utests/builtin_local_size.cpp
-+++ b/utests/builtin_local_size.cpp
+--- beignet.orig/utests/builtin_local_size.cpp
++++ beignet/utests/builtin_local_size.cpp
 @@ -28,7 +28,7 @@ get_local_size(4) = 1 (dimension:3)
  
  */
@@ -140,8 +140,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  static void builtin_local_size(void)
  {
---- a/utests/builtin_num_groups.cpp
-+++ b/utests/builtin_num_groups.cpp
+--- beignet.orig/utests/builtin_num_groups.cpp
++++ beignet/utests/builtin_num_groups.cpp
 @@ -25,7 +25,7 @@ get_num_groups(2) = 3 (dimension:3)
  get_num_groups(3) = 1 (dimension:3)
  */
@@ -151,8 +151,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  #include "utest_helper.hpp"
  static void builtin_num_groups(void)
  {
---- a/utests/builtin_pow.cpp
-+++ b/utests/builtin_pow.cpp
+--- beignet.orig/utests/builtin_pow.cpp
++++ beignet/utests/builtin_pow.cpp
 @@ -3,12 +3,12 @@
  #include <algorithm>
  #include <string.h>
@@ -167,9 +167,9 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -  printf("\033[0m");\
 +  status = 1;\
  }
- const float ori_data[] = {-20.5, -1, -0.9, -0.01, 0, 0.01, 0.9, 1.0, 20.5};
- const int count_input_ori = sizeof(ori_data) / sizeof(ori_data[0]);
-@@ -28,6 +28,7 @@ static void builtin_pow(void)
+ 
+ namespace {
+@@ -31,6 +31,7 @@ static void builtin_pow(void)
  {
    // Setup kernel and buffers
    int k, i, index_cur;
@@ -177,7 +177,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    float ULPSIZE_NO_FAST_MATH = 16.0;
    float gpu_data[max_function * count_input] = {0}, cpu_data[max_function * count_input] = {0};
  
-@@ -80,7 +81,7 @@ static void builtin_pow(void)
+@@ -84,7 +85,7 @@ static void builtin_pow(void)
             && (denormals_supported || gpu_data[index_cur]!=0 || std::fpclassify(cpu_data[index_cur])!=FP_SUBNORMAL) ) )
  
        {
@@ -186,7 +186,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
        }
        else
          printf("%d/%d: x:%f, y:%f -> gpu:%f  cpu:%f\n", k, i, input_data1[k], input_data2[k], gpu_data[index_cur], cpu_data[index_cur]);
-@@ -97,6 +98,7 @@ static void builtin_pow(void)
+@@ -101,6 +102,7 @@ static void builtin_pow(void)
  #endif
      }
    }
@@ -194,17 +194,17 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  }
  
  MAKE_UTEST_FROM_FUNCTION(builtin_pow)
---- a/utests/setenv.sh.in
-+++ b/utests/setenv.sh.in
-@@ -8,3 +8,6 @@ export OCL_PCH_PATH=@LOCAL_OCL_PCH_OBJEC
+--- beignet.orig/utests/setenv.sh.in
++++ beignet/utests/setenv.sh.in
+@@ -8,3 +8,6 @@ export OCL_GBE_PATH=@LOCAL_GBE_OBJECT_DI
  export OCL_INTERP_PATH=@LOCAL_INTERP_OBJECT_DIR@
  #disable self-test so we can get something more precise than "doesn't work"
  export OCL_IGNORE_SELF_TEST=1
 +obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
 +export OCL_STRICT_CONFORMANCE=0
 +obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
---- a/utests/utest_generator.py
-+++ b/utests/utest_generator.py
+--- beignet.orig/utests/utest_generator.py
++++ beignet/utests/utest_generator.py
 @@ -159,6 +159,7 @@ def udebug(ulpSize,returnType,function):
      }
  #endif
@@ -233,7 +233,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  }
  '''
      #########Execute class itself
-@@ -334,6 +335,7 @@ which can print more values and informat
+@@ -341,6 +342,7 @@ which can print more values and informat
  static void %s_%s(void)
  {
    int index;
@@ -241,8 +241,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    %s gpu_data[count_input] = {0}, cpu_data[count_input] = {0}, diff=0.0;
    char log[1024] = {0};
  
---- beignet-1.1.2.orig/utests/profiling_exec.cpp
-+++ beignet-1.1.2/utests/profiling_exec.cpp
+--- beignet.orig/utests/profiling_exec.cpp
++++ beignet/utests/profiling_exec.cpp
 @@ -26,10 +26,10 @@ static void check_profiling_time(cl_ulon
      double submit_to_start = (double)(start - submit)*1e-9;
      double start_to_end = (double)(end - start)*1e-9;
