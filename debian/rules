@@ -16,7 +16,7 @@ SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platf
 # Use the same LLVM version as mesa (build will fail if this version is not available; this is intentional, as mixing versions may cause crashes)
 # http://lists.alioth.debian.org/pipermail/pkg-opencl-devel/Week-of-Mon-20160418/000963.html
 LLVM_VERSION_MESA	:= $(shell dpkg-query -f '$${Depends} \n' -W libgl1-mesa-dri:$(DEB_HOST_ARCH) | sed -r 's/.*libllvm([0-9.]+).*/\1/p;d')
-LLVM_VERSION_DEFAULT	 = 3.7
+LLVM_VERSION_DEFAULT	 = 3.8
 LLVM_VERSION		 = $(or $(LLVM_VERSION_MESA),$(LLVM_VERSION_DEFAULT))
 
 override_dh_auto_configure:
