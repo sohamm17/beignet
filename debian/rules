@@ -24,8 +24,10 @@ override_dh_auto_configure:
 	ls -la include/CL
 	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin
 
+#Include the test suite and the documentation
 override_dh_auto_build:
 	dh_auto_build
+	make -C obj-* utest
 	ikiwiki --verbose --no-usedirs --underlaydir docs --plugin map --rebuild docs docs_build
 	rm -rf docs_build/ikiwiki
 
