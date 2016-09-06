@@ -36,27 +36,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +[[!map pages="* and !ikiwiki/*" show=title]]
 --- beignet.orig/docs/Beignet.mdwn
 +++ beignet/docs/Beignet.mdwn
-@@ -9,6 +9,19 @@ the programs and run them on the GPU. Th
- part of the stack which is included in `backend/`. For more specific information
- about the compiler, please refer to `backend/README.md`
- 
-+Supported Targets
-+-----------------
-+
-+Beignet aims to support Gen7 and later Intel integrated GPUs, i.e:
-+ * Ivy Bridge (ix-3xxx) and later Intel Core processors
-+ * Bay Trail and later Intel Atom processors with Intel HD (not PowerVR) graphics
-+
-+As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within the Kabylake family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
-+
-+Not all processor models have an integrated GPU, and systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
-+
-+Attempting to run Beignet on unsupported hardware should return CL_DEVICE_NOT_FOUND; if it does anything else (especially crashing) please [report a bug](#howtocontribute).
-+
- News
- ----
- [[Beignet project news|Beignet/NEWS]]
-@@ -16,6 +29,8 @@ News
+@@ -16,6 +16,8 @@ News
  Prerequisite
  ------------
  
@@ -65,25 +45,29 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  The project depends on the following external libaries:
  
  - libdrm libraries (libdrm and libdrm\_intel)
-@@ -147,17 +162,6 @@ beignet provides two alternative to run:
- * Run as root without X.
- * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
+@@ -144,14 +144,21 @@
+ Supported Targets
+ -----------------
  
--Supported Targets
-------------------
--
-- * 3rd Generation Intel Core Processors "Ivybridge".
-- * 3rd Generation Intel Atom Processors "BayTrail".
-- * 4th Generation Intel Core Processors "Haswell", need kernel patch if your linux kernel older than 4.2, see the "Known Issues" section.
-- * 5th Generation Intel Core Processors "Broadwell".
-- * 5th Generation Intel Atom Processors "Braswell".
-- * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
-- * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
--
++Beignet aims to support Gen7 and later Intel HD (not PowerVR) integrated GPUs, i.e:
+  * 3rd Generation Intel Core Processors "Ivybridge".
+  * 3rd Generation Intel Atom Processors "BayTrail".
+  * 4th Generation Intel Core Processors "Haswell", need kernel patch if your linux kernel older than 4.2, see the "Known Issues" section.
+  * 5th Generation Intel Core Processors "Broadwell".
+  * 5th Generation Intel Atom Processors "Braswell".
+  * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
+  * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
+ 
++As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within a supported family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
++
++Not all processor models have an integrated GPU (Beignet does _not_ support running OpenCL on the CPU itself - see [pocl-opencl-icd](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) for that).  Systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
++
++Attempting to run Beignet on unsupported hardware should return CL_DEVICE_NOT_FOUND; if it does anything else (especially crashing) please [report a bug](#howtocontribute).
++
  Known Issues
  ------------
  
-@@ -177,7 +181,7 @@ Known Issues
+@@ -177,7 +184,7 @@ Known Issues
    forever until a reboot.
  
  * "Beignet: self-test failed" and almost all unit tests fail.
@@ -92,7 +76,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
    enable the register whitelist by default but miss some registers needed
    for Beignet.
-@@ -191,10 +195,11 @@ Known Issues
+@@ -191,10 +198,11 @@ Known Issues
    Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
    on Linux 4.1.
    
@@ -107,7 +91,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -215,6 +220,11 @@ Known Issues
+@@ -215,6 +223,16 @@ Known Issues
    extension. This feature used to work with a previous mesa git version. But now, it's
    simply broken.
  
@@ -116,10 +100,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  This feature is unreliable on older versions of Linux, including jessie's 3.16.
 +  Upgrading to Linux 3.18+ (e.g. from jessie-backports) should fix this problem.
 +
++* Programs using the cl_intel_accelerator extension fail to compile.
++  
++  Debian uses the Khronos cl_ext.h, which does not yet include this extension.  It is available
++  by including first cl_ext.h then cl_intel.h.
++
  Project repository
  ------------------
  Right now, we host our project on fdo at:
-@@ -260,9 +270,9 @@ The official mail list is as below:
+@@ -260,9 +278,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  

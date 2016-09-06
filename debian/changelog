@@ -5,6 +5,7 @@ beignet (1.2.0-1) UNRELEASED; urgency=medium
   * Move cl_intel_accelerator to cl_intel.h to fix FTBFS with
     system cl_ext.h.
   * Switch to LLVM 3.8 also on x32 and kfreebsd-i386.
+  * Update and improve documentation.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 04 Sep 2016 20:53:34 +0100
 

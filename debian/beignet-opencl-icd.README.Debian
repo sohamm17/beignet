@@ -14,6 +14,9 @@ Discrete GPUs often disable the integrated GPU, preventing this package
 from working.  It may or may not be possible to re-enable it
 (https://nouveau.freedesktop.org/wiki/Optimus/).
 
+Float literals must be in the '2.3f' form; plain '2.3' is a double literal,
+which may not work as not all supported hardware supports double precision.
+
 By default, no single OpenCL kernel is allowed to run for more than
 6 seconds, to prevent accidental hangs: if "dmesg | grep hangcheck"
 finds anything, this limit has been hit.  You can turn it off with
