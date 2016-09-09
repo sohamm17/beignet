@@ -20,7 +20,7 @@ Build-Depends:
  ocl-icd-dev,
  ocl-icd-opencl-dev,
  pkg-config,
- python3,
+ python,
  libdrm-dev,
  libxext-dev,
  libxfixes-dev,

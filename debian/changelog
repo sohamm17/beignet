@@ -8,6 +8,7 @@ beignet (1.2.0-1) UNRELEASED; urgency=medium
   * Update and improve documentation.
   * Re-enable test suite (disabled by default upstream).
   * Skip tests with known issues.
+  * Build with Python 2, as Python 3 silently skips many of the tests.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 04 Sep 2016 20:53:34 +0100
 
