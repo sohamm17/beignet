@@ -200,9 +200,9 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  export OCL_INTERP_PATH=@LOCAL_INTERP_OBJECT_DIR@
  #disable self-test so we can get something more precise than "doesn't work"
  export OCL_IGNORE_SELF_TEST=1
-+obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
++obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run
 +export OCL_STRICT_CONFORMANCE=0
-+obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run -a
++obj-`dpkg-architecture -qDEB_HOST_GNU_TYPE`/utests/utest_run
 --- beignet.orig/utests/utest_generator.py
 +++ beignet/utests/utest_generator.py
 @@ -159,6 +159,7 @@ def udebug(ulpSize,returnType,function):
