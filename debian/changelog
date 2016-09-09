@@ -4,7 +4,7 @@ beignet (1.2.0-1) unstable; urgency=medium
   * Drop patches applied upstream, refresh others.
   * Move cl_intel_accelerator to cl_intel.h to fix FTBFS with
     system cl_ext.h.
-  * Switch to LLVM 3.8 also on x32 and kfreebsd-i386.
+  * Switch to LLVM 3.8 everywhere.
   * Update and improve documentation.
   * Re-enable test suite (disabled by default upstream).
   * Skip tests with known issues.
