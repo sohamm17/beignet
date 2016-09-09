@@ -1,4 +1,4 @@
-Description: Fix broken internal links in documentation
+Description: Fix broken internal links and list syntax in documentation
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
@@ -13,7 +13,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Prerequisite
  ------------
-@@ -276,13 +276,13 @@ Please specify your hardware when report
+@@ -144,6 +144,7 @@ command.
+ 
+ Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
+ beignet provides two alternative to run:
++
+ * Run as root without X.
+ * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
+ 
+@@ -276,13 +278,13 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------

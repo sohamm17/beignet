@@ -1,4 +1,4 @@
-beignet (1.2.0-1) UNRELEASED; urgency=medium
+beignet (1.2.0-1) unstable; urgency=medium
 
   * New upstream release.
   * Drop patches applied upstream, refresh others.
@@ -9,8 +9,9 @@ beignet (1.2.0-1) UNRELEASED; urgency=medium
   * Re-enable test suite (disabled by default upstream).
   * Skip tests with known issues.
   * Build with Python 2, as Python 3 silently skips many of the tests.
+  * Fix broken list syntax in documentation.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 04 Sep 2016 20:53:34 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 09 Sep 2016 14:20:24 +0100
 
 beignet (1.1.2-5) unstable; urgency=medium
 
