@@ -8,3 +8,4 @@ Enable-test-debug.patch
 find-python35.patch
 docs-broken-links.patch
 cl_accelerator_intel.patch
+support-python3.patch
