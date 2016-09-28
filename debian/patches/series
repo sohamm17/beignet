@@ -10,3 +10,4 @@ docs-broken-links.patch
 cl_accelerator_intel.patch
 support-python3.patch
 pow-powr-tests.patch
+llvm39-support.patch
