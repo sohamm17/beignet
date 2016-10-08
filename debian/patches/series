@@ -4,7 +4,7 @@ reduce-notfound-output.patch
 shared-llvm.patch
 update-docs.patch
 allow-+-in-directory.patch
-Enable-test-debug.patch
+ship-test-tool.patch
 find-python35.patch
 docs-broken-links.patch
 cl_accelerator_intel.patch

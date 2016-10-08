@@ -46,18 +46,16 @@ Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
  
  #if defined(_INCLUDED_IMM)
  // #define __AVX__
---- beignet.orig/utests/CMakeLists.txt
-+++ beignet/utests/CMakeLists.txt
-@@ -340,6 +340,12 @@ add_custom_target(utest_generator
-     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-     )
+--- a/utests/CMakeLists.txt
++++ b/utests/CMakeLists.txt
+@@ -26,8 +26,8 @@ if (NOT NOT_BUILD_STAND_ALONE_UTEST)
+   # Threads
+   Find_Package(Threads)
  
-+#the test suite doesn't go into the final package, and compiler_{degrees,radians,function_argument2} use equality comparison of floats
-+if (COMPILER STREQUAL "GCC")
-+  SET(CMAKE_CXX_FLAGS "-msse -mfpmath=sse ${CMAKE_CXX_FLAGS}")
-+  SET(CMAKE_C_FLAGS "-msse -mfpmath=sse ${CMAKE_C_FLAGS}")
-+endif ()
-+
- if (EGL_FOUND AND MESA_SOURCE_FOUND)
-   SET(utests_sources ${utests_sources} compiler_fill_gl_image.cpp)
-   SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
+-  set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
+-  set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
++  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -ffloat-store")
++  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS} -ffloat-store") #compiler_{degrees,radians,function_argument2} use equality comparison of floats
+   set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
+   set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
+   set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")

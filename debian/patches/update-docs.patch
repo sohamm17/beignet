@@ -45,7 +45,47 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  The project depends on the following external libaries:
  
  - libdrm libraries (libdrm and libdrm\_intel)
-@@ -144,14 +144,22 @@
+@@ -91,7 +93,7 @@ The cmake will build the backend firstly. Please refer to:
+ Once built, the run-time produces a shared object libcl.so which basically
+ directly implements the OpenCL API.
+ 
+-`> make`
++`> make utest`
+ 
+ A set of tests are also produced. They may be found in `utests/`.
+ 
+@@ -122,25 +124,17 @@ platform. Beignet also produces various tests to ensure the compiler and the run
+ consistency. This small test framework uses a simple c++ registration system to
+ register all the unit tests.
+ 
+-You need to call setenv.sh in the utests/ directory to set some environment variables
+-firstly as below:
+-
+-`> . setenv.sh`
+-
+-Then in `utests/`:
++In Debian beignet, the testing tool is in the _beignet-dev_ package, and is run with:
+ 
+-`> ./utest_run`
++`> /usr/lib/\`dpkg-architecture -qDEB_HOST_MULTIARCH\`/beignet/utest_run`
+ 
+-will run all the unit tests one after the others
++(this name and path may change in future releases - please do not rely on it).  It will test the first OpenCL GPU device it finds (which does _not_ have to be a Beignet device).  If you want to test a different device, uninstall all other ICDs.  To see more options, pass `-h`.
+ 
+-`> ./utest_run some_unit_test`
++If you compiled Beignet yourself, you will find this tool in `utests`, and will need to set some environment variables to use it (see `setenv.sh`).
+ 
+-will only run `some_unit_test` test.
+ 
+ On all supported target platform, the pass rate should be 100%. If it is not, you may
+-need to refer the "Known Issues" section. Please be noted, the `. setenv.sh` is only
+-required to run unit test cases. For all other OpenCL applications, don't execute that
+-command.
++need to refer the "Known Issues" section.
+ 
+ Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
+ beignet provides two alternative to run:
+@@ -150,14 +144,22 @@
  Supported Targets
  -----------------
  
@@ -92,9 +132,18 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -215,6 +224,16 @@ Known Issues
-   extension. This feature used to work with a previous mesa git version. But now, it's
-   simply broken.
+@@ -210,11 +219,21 @@ Known Issues
+   This would lost some precision but gain performance.
+ 
+ * cl\_khr\_gl\_sharing.
+-  This extension highly depends on mesa support. It seems that mesa would not provide
+-  such type of extensions, we may have to hack with mesa source code to support this
+-  extension. This feature used to work with a previous mesa git version. But now, it's
+-  simply broken.
++  This extension is not supported in this version of Beignet.  It
++  [was recently re-added](https://cgit.freedesktop.org/beignet/commit/?id=a892148ee12cbaa021b680c4d770e53fab511366)
++  to upstream Beignet, but might not be fully working yet.
++
  
 +* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
 +  

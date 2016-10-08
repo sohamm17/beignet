@@ -1,0 +1,118 @@
+Description: Ship utest_run testing tool
+
+Use ICD mode (to allow testing any ICD, not just beignet), but
+include builtin_kernel_block_motion_estimate_intel when testing beignet.
+
+Allow testing CPU devices (the "only GPU device is supported right now"
+comment appears to refer to beignet-the-ICD, not this test tool).
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2bc2100..562a62f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -33,7 +33,6 @@ configure_file (
+   "src/OCLConfig.h"
+ )
+ 
+-set (NOT_BUILD_STAND_ALONE_UTEST 1)
+ 
+ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/include)
+@@ -277,7 +276,7 @@ ENDIF(BUILD_EXAMPLES)
+ ADD_SUBDIRECTORY(include)
+ ADD_SUBDIRECTORY(backend)
+ ADD_SUBDIRECTORY(src)
+-ADD_SUBDIRECTORY(utests EXCLUDE_FROM_ALL)
++ADD_SUBDIRECTORY(utests)
+ 
+ # compile benchmark only if standalone compiler is not provided
+ IF (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
+--- a/utests/utest_helper.cpp
++++ b/utests/utest_helper.cpp
+@@ -219,7 +219,7 @@ cl_do_kiss_path(const char *file, cl_device_id device)
+   sub_path = "";
+ 
+   if (kiss_path == NULL)
+-    clpanic("set OCL_KERNEL_PATH. This is where the kiss kernels are", -1);
++    kiss_path="/usr/share/beignet/test_kernels";
+   sz += strlen(kiss_path) + strlen(sub_path) + 2; /* +1 for end of string, +1 for '/' */
+   if ((ker_path = (char*) malloc(sz)) == NULL)
+     clpanic("Allocation failed", -1);
+@@ -455,7 +455,7 @@ cl_ocl_init(void)
+ 
+   /* Get the device (only GPU device is supported right now) */
+   try {
+-    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
++    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_ALL, 1, &device, NULL);
+     {
+       size_t param_value_size;
+       GET_DEVICE_STR_INFO(profile, PROFILE);
+@@ -891,7 +891,11 @@ int cl_check_subgroups(void)
+     return 0;
+   }
+   if(utestclGetKernelSubGroupInfoKHR == NULL)
+-    utestclGetKernelSubGroupInfoKHR  = (clGetKernelSubGroupInfoKHR_cb*) clGetExtensionFunctionAddress("clGetKernelSubGroupInfoKHR");
++    utestclGetKernelSubGroupInfoKHR  = (clGetKernelSubGroupInfoKHR_cb*) clGetExtensionFunctionAddressForPlatform(platform,"clGetKernelSubGroupInfoKHR");
++  if(utestclGetKernelSubGroupInfoKHR == NULL){
++    printf("Can't find clGetKernelSubGroupInfoKHR");
++    OCL_ASSERT(0);
++  }
+   return 1;
+ }
+ 
+--- a/utests/CMakeLists.txt
++++ b/utests/CMakeLists.txt
+@@ -324,10 +324,8 @@ else(GEN_PCI_ID)
+   DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
+ endif(GEN_PCI_ID)
+ 
+-if (NOT_BUILD_STAND_ALONE_UTEST)
+   SET(utests_sources ${utests_sources} builtin_kernel_block_motion_estimate_intel.cpp)
+   ADD_CUSTOM_TARGET(kernel_bin.bin DEPENDS ${kernel_bin}.bin)
+-endif (NOT_BUILD_STAND_ALONE_UTEST)
+ 
+ add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/generated
+     COMMAND mkdir ${CMAKE_CURRENT_SOURCE_DIR}/generated -p
+@@ -375,6 +373,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
+ endif (NOT_BUILD_STAND_ALONE_UTEST)
+ 
+ ADD_DEPENDENCIES (utests utest_generator)
++set_target_properties(utest_run PROPERTIES INSTALL_RPATH ${BEIGNET_INSTALL_DIR})
++install (TARGETS utests LIBRARY DESTINATION ${BEIGNET_INSTALL_DIR})
++install (TARGETS utest_run RUNTIME DESTINATION ${BEIGNET_INSTALL_DIR})
+ 
+ ADD_EXECUTABLE(flat_address_space runtime_flat_address_space.cpp)
+ TARGET_LINK_LIBRARIES(flat_address_space utests)
+--- a/utests/builtin_kernel_block_motion_estimate_intel.cpp
++++ b/utests/builtin_kernel_block_motion_estimate_intel.cpp
+@@ -8,6 +8,10 @@ OCLRELEASEACCELERATORINTEL * oclReleaseAcceleratorIntel = NULL;
+ 
+ void builtin_kernel_block_motion_estimate_intel(void)
+ {
++  if (!cl_check_beignet()) {
++    printf("Not beignet device , Skip!");
++    return;
++  }
+   char* built_in_kernel_names;
+   size_t built_in_kernels_size;
+   cl_int err = CL_SUCCESS;
+@@ -41,7 +45,7 @@ void builtin_kernel_block_motion_estimate_intel(void)
+ #endif
+   if(!oclCreateAcceleratorIntel){
+     fprintf(stderr, "Failed to get extension clCreateImageFromLibvaIntel\n");
+-    exit(1);
++    OCL_ASSERT(0);
+   }
+   cl_accelerator_intel accel = oclCreateAcceleratorIntel(ctx, CL_ACCELERATOR_TYPE_MOTION_ESTIMATION_INTEL,sizeof(cl_motion_estimation_desc_intel), &vmedesc, &err);
+   OCL_ASSERT(accel != NULL);
+@@ -123,7 +127,7 @@ void builtin_kernel_block_motion_estimate_intel(void)
+ #endif
+   if(!oclReleaseAcceleratorIntel){
+     fprintf(stderr, "Failed to get extension clCreateImageFromLibvaIntel\n");
+-    exit(1);
++    OCL_ASSERT(0);
+   }
+   oclReleaseAcceleratorIntel(accel);
+   clReleaseProgram(built_in_prog);

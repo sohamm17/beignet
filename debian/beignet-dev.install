@@ -1,1 +1,4 @@
 usr/include/CL/cl_intel.h	/usr/include/CL
+kernels/*	/usr/share/beignet/test_kernels
+usr/lib/*/beignet/utest_run
+usr/lib/*/beignet/libutests.so

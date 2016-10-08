@@ -55,11 +55,12 @@ Description: OpenCL library for Intel GPUs
 Package: beignet-dev
 Section: libdevel
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64 hurd-i386 x32
-Multi-Arch: foreign
-Depends:
- beignet-opencl-icd (= ${binary:Version}),
- ocl-icd-opencl-dev,
- ${misc:Depends}
+Multi-Arch: same
+Depends: ${shlibs:Depends}, ${misc:Depends}
+# the testing tool tests the first ICD it finds,
+# so allow removing beignet-opencl-icd to test something else
+Recommends: beignet-opencl-icd (= ${binary:Version}),
+ ocl-icd-opencl-dev
 Suggests: opencl-1.2-html-doc
 Description: OpenCL for Intel GPUs (development files and documentation)
  OpenCL (Open Computing Language) is a multivendor open standard for
@@ -67,7 +68,8 @@ Description: OpenCL for Intel GPUs (development files and documentation)
  CPUs, GPUs and other processors.
  .
  This package contains the documentation specific to the Intel
- implementation, and the development files for Intel OpenCL extensions.
+ implementation, the development files for Intel OpenCL extensions,
+ and an OpenCL testing tool.
 
 Package: beignet
 Section: oldlibs
