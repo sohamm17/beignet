@@ -1,0 +1,31 @@
+Description: Fix FTBFS with drm 2.4.71
+
+beignet started using drm_intel_get_pooled_eu and drm_intel_get_min_eu_in_pool
+if available early in their development, before their interface was finalized.
+
+Author: Armin Krejzi, Rebecca Palmer
+Origin: https://lists.freedesktop.org/archives/beignet/2016-October/008041.html
+Bug-Debian: https://bugs.debian.org/840107
+
+--- beignet-1.2.0.orig/src/intel/intel_driver.c
++++ beignet-1.2.0/src/intel/intel_driver.c
+@@ -890,13 +890,16 @@ intel_update_device_info(cl_device_id de
+ #ifdef HAS_POOLED_EU
+   /* BXT pooled eu, 3*6 to 2*9, like sub slice count is 2 */
+   unsigned int has_pooled_eu = 0;
+-  if(!drm_intel_get_pooled_eu(driver->fd, &has_pooled_eu) && has_pooled_eu)
++  if(drm_intel_get_pooled_eu(driver->fd) > 0) {
+     device->sub_slice_count = 2;
++    has_pooled_eu = 1;
++    }
+ 
+ #ifdef HAS_MIN_EU_IN_POOL
+-  unsigned int min_eu;
++  int min_eu;
+   /* for fused down 2x6 devices, beignet don't support. */
+-  if (has_pooled_eu && !drm_intel_get_min_eu_in_pool(driver->fd, &min_eu)) {
++  if (has_pooled_eu) {
++    min_eu = drm_intel_get_min_eu_in_pool(driver->fd);
+     assert(min_eu == 9); //don't support fuse down device.
+   }
+ #endif //HAS_MIN_EU_IN_POOL

@@ -8,6 +8,7 @@ beignet (1.2.0-2) UNRELEASED; urgency=medium
     for upstream compatibility, and enable PIE.
   * Update documentation, fix spelling and grammar.
   * Add clGetKernelSubGroupInfoKHR to _cl_icd_dispatch table.
+  * Fix FTBFS with drm 2.4.71.  (Closes: #840107)
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 25 Sep 2016 21:58:07 +0100
 

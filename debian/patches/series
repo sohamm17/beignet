@@ -13,3 +13,4 @@ pow-powr-tests.patch
 llvm39-support.patch
 extend_cl_icd_dispatch.patch
 spelling.patch
+drm2471-pooled_eu-fix.patch
