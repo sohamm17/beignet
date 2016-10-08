@@ -1,0 +1,122 @@
+Description: Spelling and grammar fixes
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Forwarded: todo
+
+--- beignet-1.2.0.orig/docs/Beignet.mdwn
++++ beignet-1.2.0/docs/Beignet.mdwn
+@@ -18,7 +18,7 @@ Prerequisite
+ 
+ (for building the upstream source; Debian packages handle this automatically)
+ 
+-The project depends on the following external libaries:
++The project depends on the following external libraries:
+ 
+ - libdrm libraries (libdrm and libdrm\_intel)
+ - Various LLVM components
+@@ -35,7 +35,7 @@ you can still link to the beignet OpenCL
+ in your system's library installation directories.
+ 
+ Note that the compiler depends on LLVM (Low-Level Virtual Machine project), and the
+-project normally support 3 latest LLVM released version.
++project normally supports the 3 latest LLVM released versions.
+ Right now, the code has been compiled with LLVM 3.6, 3.7 and 3.8. With older
+ version LLVM from 3.3, build still support, but no full tests cover.
+ 
+@@ -50,10 +50,10 @@ A simple command to install all the abov
+ 
+ **The recommended LLVM/CLANG version is 3.6 and/or 3.7**
+ 
+-Based on our test result, LLVM 3.6 and 3.7 has best pass rate on all the test suites. Compare
++Based on our test result, LLVM 3.6 and 3.7 has the best pass rate on all the test suites. Compared
+ to LLVM 3.6 and 3.7, if you used LLVM 3.8, you should pay attention to float immediate. For example,
+-if you use 1.0 in the kernel, LLVM 3.6 will treate it as 1.0f, a single float, because the project
+-don't support double float. but LLVM 3.8 will treate it as 1.0, a double foat, at the last it may cause
++if you use 1.0 in the kernel, LLVM 3.6 will treat it as 1.0f, a single float, because the project
++don't support double float. but LLVM 3.8 will treat it as 1.0, a double float, at the last it may cause
+ error. So we recommend use 1.0f instead of 1.0 if you don't need double float.
+ 
+ For LLVM 3.4 and 3.5, Beignet still support them, but it may be limited to support the
+@@ -114,7 +114,7 @@ It installs the OCL icd vendor files to
+ 
+ `> make package`
+ 
+-It packages the driver binaries, you may copy&install the package to another machine with simillar system.
++It packages the driver binaries, you may copy&install the package to another machine with similar system.
+ 
+ How to run
+ ----------
+@@ -176,7 +176,7 @@ Known Issues
+ 
+   `# echo -n 0 > /sys/module/i915/parameters/enable_hangcheck`
+ 
+-  But this command is a little bit dangerous, as if your kernel really hang, then the gpu will lock up
++  But this command is a little bit dangerous, as if your kernel really hangs, then the GPU will lock up
+   forever until a reboot.
+ 
+ * "Beignet: self-test failed" and almost all unit tests fail.
+--- beignet-1.2.0.orig/docs/howto/cross-compiler-howto.mdwn
++++ beignet-1.2.0/docs/howto/cross-compiler-howto.mdwn
+@@ -2,7 +2,7 @@ Cross Compiler HowTo
+ ====================
+ 
+ Beignet supports both PC devices with full profile and embedded/handheld
+-devices with embeded profile. This document describes how to build Beignet
++devices with embedded profile. This document describes how to build Beignet
+ and OpenCL kernels for a target machine (embedded/handheld devices) in a
+ host machine with the help of cross compiler, and also the large-size-reduced
+ Beignet driver package for the target machine.
+@@ -65,7 +65,7 @@ provide only the OpenCL runtime library
+ executable binary kernel is supported on such devices.
+ 
+ It means that just distribute libcl.so and libgbeinterp.so (~320k in total after strip)
+-are enough for OpenCL embeded profile in the target machine. The whole Beignet
++are enough for OpenCL embedded profile in the target machine. The whole Beignet
+ driver set can be separated into several packages for different usage.
+ 
+ 
+--- beignet-1.2.0.orig/docs/howto/stand-alone-utest-howto.mdwn
++++ beignet-1.2.0/docs/howto/stand-alone-utest-howto.mdwn
+@@ -1,14 +1,14 @@
+ Stand Alone Unit Test HowTo
+ ====================
+ 
+-Beignet provides an independent unit test suite covered most OpenCL language feautures,
++Beignet provides an independent unit test suite covering most OpenCL language features,
+ including more than 800 cases which could run in a few minutes, it should be useful for
+ testing and comparing different OpenCL implementations.
+ 
+ Prerequisite
+ ------------
+ 
+-OpenCL ICD. Please check your OpenCL ICD existance by command
++OpenCL ICD. Please check your OpenCL ICD existence by command
+ `pkg-config --libs OpenCL`.
+ 
+ Build Stand Alone Unit Test
+@@ -27,7 +27,7 @@ Basically, from the root directory of th
+ 
+ `> make`
+ 
+-Once built, the 'utest_run' is generated in currenty directory.
++Once built, the 'utest_run' is generated in current directory.
+ 
+ How to run
+ ----------
+@@ -42,4 +42,4 @@ Then in `utests/`:
+ `> ./utest_run`
+ 
+ if the utest_run fail to run, please check /etc/vendors/OpenCL to confirm it calls the expected
+-OpenCL driver, or export LD_LIBRARAY_PATH to establish the correct link.
++OpenCL driver, or export LD_LIBRARY_PATH to establish the correct link.
+--- beignet-1.2.0.orig/utests/builtin_global_linear_id.cpp
++++ beignet-1.2.0/utests/builtin_global_linear_id.cpp
+@@ -61,7 +61,7 @@ static void builtin_global_linear_id(voi
+     err = clEnqueueNDRangeKernel(queue, kernel, dim, offsets, globals, locals, 0, NULL, NULL);
+     if (err != CL_SUCCESS)
+     {
+-      printf("Error: Failed to excute kernel! %d\n", err);
++      printf("Error: Failed to execute kernel! %d\n", err);
+       exit(1);
+     }
+ 
