@@ -12,7 +12,7 @@ beignet (1.2.0-2) unstable; urgency=medium
   * Use backports LLVM in backports, and document that this might
     require also using backports mesa.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 13 Oct 2016 07:53:42 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 13 Oct 2016 19:28:41 +0100
 
 beignet (1.2.0-1) unstable; urgency=medium
 
