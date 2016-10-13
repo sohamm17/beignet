@@ -6,7 +6,7 @@ attempting to call functions that are in ocl-icd-libopencl1's table
 but not the ICD's table will usually crash.
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: todo
+Forwarded: https://lists.freedesktop.org/archives/beignet/2016-October/008055.html
 
 --- a/src/cl_khr_icd.c
 +++ b/src/cl_khr_icd.c

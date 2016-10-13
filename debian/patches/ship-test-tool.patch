@@ -7,6 +7,7 @@ Allow testing CPU devices (the "only GPU device is supported right now"
 comment appears to refer to beignet-the-ICD, not this test tool).
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/008057.html https://lists.freedesktop.org/archives/beignet/2016-October/008059.html
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index 2bc2100..562a62f 100644

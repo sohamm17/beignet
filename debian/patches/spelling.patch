@@ -1,7 +1,7 @@
 Description: Spelling and grammar fixes
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: todo
+Forwarded: accepted https://cgit.freedesktop.org/beignet/commit/?id=cce1b65ed7db2825005b3a8c9e940ca7d05d5167
 
 --- beignet-1.2.0.orig/docs/Beignet.mdwn
 +++ beignet-1.2.0/docs/Beignet.mdwn
