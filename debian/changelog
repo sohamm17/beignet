@@ -9,6 +9,8 @@ beignet (1.2.0-2) UNRELEASED; urgency=medium
   * Update documentation, fix spelling and grammar.
   * Add clGetKernelSubGroupInfoKHR to _cl_icd_dispatch table.
   * Fix FTBFS with drm 2.4.71.  (Closes: #840107)
+  * Use backports LLVM in backports, and document that this might
+    require also using backports mesa.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 25 Sep 2016 21:58:07 +0100
 
