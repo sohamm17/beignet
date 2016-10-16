@@ -24,11 +24,16 @@ override_dh_auto_configure:
 	ls -la include/CL
 	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin
 
-#Include the test suite and the documentation
+#Include the documentation, without timestamps (which break multiarch because debian/patches/update-docs.patch etc are applied at build time - #840678)
 override_dh_auto_build:
 	dh_auto_build
 	ikiwiki --verbose --no-usedirs --underlaydir docs --plugin map --rebuild docs docs_build
 	rm -rf docs_build/ikiwiki
+	for HTMLFILE in `find $(CURDIR)/docs_build/ -name *.html` ; do \
+	  sed -e "s;Last edited <span class=.date.>.*;;" $$HTMLFILE > $$HTMLFILE.tmp ; \
+	  sed -e "s;<!-- Created <span class=.date.>.*;;" $$HTMLFILE.tmp > $$HTMLFILE ; \
+	  rm $$HTMLFILE.tmp ; \
+	done
 
 override_dh_gencontrol:
 	dh_gencontrol -- -VBuilt-Using:clang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-$(LLVM_VERSION)-dev)"
