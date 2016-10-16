@@ -1,8 +1,9 @@
-beignet (1.2.0-3) UNRELEASED; urgency=medium
+beignet (1.2.0-3) unstable; urgency=medium
 
   * Remove multiarch-breaking timestamps.  (Closes: #840768)
+  * Fix nonclickable links in documentation.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 16 Oct 2016 14:28:17 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 16 Oct 2016 14:31:27 +0100
 
 beignet (1.2.0-2) unstable; urgency=medium
 
