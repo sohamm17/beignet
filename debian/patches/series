@@ -8,9 +8,4 @@ ship-test-tool.patch
 find-python35.patch
 docs-broken-links.patch
 cl_accelerator_intel.patch
-support-python3.patch
-pow-powr-tests.patch
 llvm39-support.patch
-extend_cl_icd_dispatch.patch
-spelling.patch
-drm2471-pooled_eu-fix.patch

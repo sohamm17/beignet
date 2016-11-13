@@ -1,3 +1,10 @@
+beignet (1.2.1-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+  * Drop patches applied upstream.
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 13 Nov 2016 21:56:59 +0000
+
 beignet (1.2.0-3) unstable; urgency=medium
 
   * Remove multiarch-breaking timestamps.  (Closes: #840768)
