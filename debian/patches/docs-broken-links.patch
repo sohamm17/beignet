@@ -2,9 +2,9 @@ Description: Fix broken links and list syntax in documentation
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
---- beignet.orig/docs/Beignet.mdwn
-+++ beignet/docs/Beignet.mdwn
-@@ -24,7 +24,7 @@ Attempting to run Beignet on unsupported
+--- a/docs/Beignet.mdwn
++++ b/docs/Beignet.mdwn
+@@ -11,7 +11,7 @@ about the compiler, please refer to `bac
  
  News
  ----
@@ -13,7 +13,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Prerequisite
  ------------
-@@ -144,6 +144,7 @@ command.
+@@ -138,6 +138,7 @@ need to refer the "Known Issues" section
  
  Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
  beignet provides two alternative to run:
@@ -21,7 +21,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  * Run as root without X.
  * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
  
-@@ -276,13 +278,13 @@ Please specify your hardware when report
+@@ -285,13 +286,13 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------

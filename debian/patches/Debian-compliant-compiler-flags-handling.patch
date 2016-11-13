@@ -6,8 +6,6 @@ Disable non-policy-compliant instruction set assumptions (slows the
 OpenCL compiler by ~few%, no effect on OpenCL execution speed)
 
 Author: Simon Richter <sjr@debian.org>,Rebecca Palmer <rebecca_palmer@zoho.com>
-
-Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/008060.html
 --- beignet.orig/CMakeLists.txt
 +++ beignet/CMakeLists.txt
 @@ -41,7 +41,6 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINA
@@ -54,8 +52,8 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
    # Threads
    Find_Package(Threads)
  
--  set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
--  set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
+-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
+-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS}")
 +  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -ffloat-store")
 +  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS} -ffloat-store") #compiler_{degrees,radians,function_argument2} use equality comparison of floats
    set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
