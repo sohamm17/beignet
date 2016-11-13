@@ -1770,13 +1770,15 @@ namespace gbe
   GenRegister Selection::Opaque::getLaneIDReg()
   {
     const GenRegister laneID = GenRegister::immv(0x76543210);
-    ir::Register r = reg(ir::RegisterFamily::FAMILY_WORD);
-    const GenRegister dst = selReg(r, ir::TYPE_U16);
+    GenRegister dst;
 
     uint32_t execWidth = curr.execWidth;
-    if (execWidth == 8)
+    if (execWidth == 8) {
+      // Work around to force the register 32 alignmet
+      dst = selReg(reg(ir::RegisterFamily::FAMILY_DWORD), ir::TYPE_U16);
       MOV(dst, laneID);
-    else {
+    } else {
+      dst = selReg(reg(ir::RegisterFamily::FAMILY_WORD), ir::TYPE_U16);
       push();
       curr.execWidth = 8;
       curr.noMask = 1;
@@ -2086,30 +2088,33 @@ namespace gbe
                                  uint32_t vec_size) {
 
     uint32_t simdWidth = curr.execWidth;
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBREAD, vec_size * simdWidth / 8, 3);
-    SelectionVector *vector = this->appendVector();
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBREAD, vec_size * simdWidth / 8 + 1, 2);
+
+    insn->dst(0) = header;
     for (uint32_t i = 0; i < vec_size; ++i) {
-      insn->dst(i) = dsts[i];
+      insn->dst(i + 1) = dsts[i];
       if(simdWidth == 16)
-        insn->dst(i + vec_size) = tmp[i];
+        insn->dst(i + vec_size + 1) = tmp[i];
     }
     insn->src(0) = coordx;
     insn->src(1) = coordy;
-    insn->src(2) = header;
     insn->setbti(bti);
     insn->extra.elem = vec_size; // vector size
 
-    vector->regNum = vec_size;
-    vector->reg = &insn->dst(0);
-    vector->offsetID = 0;
-    vector->isSrc = 0;
-
+    // Only in simd 8 the data is in vector form
+    if(simdWidth == 8) {
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = vec_size;
+      vector->reg = &insn->dst(1);
+      vector->offsetID = 1;
+      vector->isSrc = 0;
+    }
     if(simdWidth == 16)
     {
       SelectionVector *vectortmp = this->appendVector();
       vectortmp->regNum = vec_size;
-      vectortmp->reg = &insn->dst(vec_size);
-      vectortmp->offsetID = vec_size;
+      vectortmp->reg = &insn->dst(vec_size + 1);
+      vectortmp->offsetID = vec_size + 1;
       vectortmp->isSrc = 0;
     }
   }
@@ -2218,6 +2223,16 @@ namespace gbe
         if (!ld.isAligned())
           return false;
       }
+      //If dst is a bool reg, the insn may modify flag, can't use this flag
+      //as predication, so can't remove if/endif. For example ir:
+      //%or.cond1244 = or i1 %cmp.i338, %cmp2.i403
+      //%or.cond1245 = or i1 %or.cond1244, %cmp3.i405
+      //asm:
+      //(+f1.0) or.ne(16)       g20<1>:W        g9<8,8,1>:W     g1<8,8,1>:W
+      //(+f1.1) or.ne.f1.1(16)  g21<1>:W        g20<8,8,1>:W    g30<8,8,1>:W
+      //The second insn is error.
+      if(insn.getDstNum() && getRegisterFamily(insn.getDst(0)) == ir::FAMILY_BOOL)
+          return false;
     }
 
     // there would generate a extra CMP instruction for predicated BRA with extern flag,
@@ -2783,17 +2798,12 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     static ir::Type getType(const ir::Opcode opcode, const ir::Type insnType, bool isSrc = false) {
       if (opcode == ir::OP_CBIT)
         return isSrc ? insnType : ir::TYPE_U32;
-      if (insnType == ir::TYPE_S64 || insnType == ir::TYPE_U64 || insnType == ir::TYPE_S8 || insnType == ir::TYPE_U8)
-        return insnType;
-      if (opcode == ir::OP_FBH || opcode == ir::OP_FBL || opcode == ir::OP_LZD)
-        return ir::TYPE_U32;
-      if (opcode == ir::OP_SIMD_ANY || opcode == ir::OP_SIMD_ALL)
-        return ir::TYPE_S32;
-      if (insnType == ir::TYPE_S16 || insnType == ir::TYPE_U16)
-        return insnType;
       if (insnType == ir::TYPE_BOOL)
         return ir::TYPE_U16;
-      return ir::TYPE_FLOAT;
+      else if (opcode == ir::OP_MOV && (insnType == ir::TYPE_U32 || insnType == ir::TYPE_S32))
+        return ir::TYPE_FLOAT;
+      else
+        return insnType;
     }
 
     INLINE bool emitOne(Selection::Opaque &sel, const ir::UnaryInstruction &insn, bool &markChildren) const {
@@ -6166,13 +6176,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       uint32_t totalSize = 0;
       bool isContinue = false;
       GBE_ASSERT(sel.ctx.getSimdWidth() == 16 || sel.ctx.getSimdWidth() == 8);
-      if (sel.ctx.getSimdWidth() == 16) {
-        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
-        tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
-      } else {
-        tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), GEN_TYPE_UD);
-        tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_QWORD)), GEN_TYPE_UD);
-      }
+      tmp0 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
+      tmp1 = GenRegister::retype(sel.selReg(sel.reg(FAMILY_DWORD)), GEN_TYPE_UD);
 
       /* Get the total size for one printf statement. */
       for (i = 0; i < srcNum; i++) {
@@ -6713,11 +6718,11 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       for (uint32_t i = 0; i < vec_size; ++i) {
         valuesVec.push_back(sel.selReg(insn.getDst(i), TYPE_U32));
         if(simdWidth == 16)
-          tmpVec.push_back(sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32));
+          tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
       }
       const GenRegister coordx = sel.selReg(insn.getSrc(0), TYPE_U32);
       const GenRegister coordy = sel.selReg(insn.getSrc(1), TYPE_U32);
-      const GenRegister header = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
       GenRegister *tmp = NULL;
       if(simdWidth == 16)
         tmp = &tmpVec[0];

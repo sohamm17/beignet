@@ -1230,6 +1230,10 @@ namespace gbe
     }
     MDNode *typeNameNode = NULL;
     MDNode *typeBaseNameNode = NULL;
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 9
+    typeNameNode = F.getMetadata("kernel_arg_type");
+    typeBaseNameNode = F.getMetadata("kernel_arg_base_type");
+#else
     MDNode *node = getKernelFunctionMetadata(&F);
     for(uint j = 0;node && j < node->getNumOperands() - 1; j++) {
       MDNode *attrNode = dyn_cast_or_null<MDNode>(node->getOperand(1 + j));
@@ -1243,15 +1247,21 @@ namespace gbe
         typeBaseNameNode = attrNode;
       }
     }
+#endif
 
     unsigned argID = 0;
     ir::FunctionArgument::InfoFromLLVM llvmInfo;
     for (Function::arg_iterator I = F.arg_begin(), E = F.arg_end(); I != E; ++I, argID++) {
+      unsigned opID = argID;
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR < 9
+      opID += 1;
+#endif
+
       if(typeNameNode) {
-        llvmInfo.typeName= (cast<MDString>(typeNameNode->getOperand(1 + argID)))->getString();
+        llvmInfo.typeName= (cast<MDString>(typeNameNode->getOperand(opID)))->getString();
       }
       if(typeBaseNameNode) {
-        llvmInfo.typeBaseName= (cast<MDString>(typeBaseNameNode->getOperand(1 + argID)))->getString();
+        llvmInfo.typeBaseName= (cast<MDString>(typeBaseNameNode->getOperand(opID)))->getString();
       }
       bool isImage = llvmInfo.isImageType();
       if (I->getType()->isPointerTy() || isImage) {
@@ -1974,6 +1984,92 @@ namespace gbe
 
     std::string functionAttributes;
 
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 9
+    /* LLVM 3.9 change kernel arg info as function metadata */
+    addrSpaceNode = F.getMetadata("kernel_arg_addr_space");
+    accessQualNode = F.getMetadata("kernel_arg_access_qual");
+    typeNameNode = F.getMetadata("kernel_arg_type");
+    typeBaseNameNode = F.getMetadata("kernel_arg_base_type");
+    typeQualNode = F.getMetadata("kernel_arg_type_qual");
+    argNameNode = F.getMetadata("kernel_arg_name");
+    MDNode *attrNode;
+    if ((attrNode = F.getMetadata("vec_type_hint"))) {
+      GBE_ASSERT(attrNode->getNumOperands() == 2);
+      functionAttributes += "vec_type_hint";
+      auto *Op1 = cast<ValueAsMetadata>(attrNode->getOperand(0));
+      Value *V = Op1 ? Op1->getValue() : NULL;
+      ConstantInt *sign =
+          mdconst::extract<ConstantInt>(attrNode->getOperand(1));
+      size_t signValue = sign->getZExtValue();
+      Type *vtype = V->getType();
+      Type *stype = vtype;
+      uint32_t elemNum = 0;
+      if (vtype->isVectorTy()) {
+        VectorType *vectorType = cast<VectorType>(vtype);
+        stype = vectorType->getElementType();
+        elemNum = vectorType->getNumElements();
+      }
+
+      std::string typeName = getTypeName(ctx, stype, signValue);
+
+      std::stringstream param;
+      char buffer[100] = {0};
+      param << "(";
+      param << typeName;
+      if (vtype->isVectorTy())
+        param << elemNum;
+      param << ")";
+      param >> buffer;
+      functionAttributes += buffer;
+      functionAttributes += " ";
+    }
+    if ((attrNode = F.getMetadata("reqd_work_group_size"))) {
+      GBE_ASSERT(attrNode->getNumOperands() == 3);
+      ConstantInt *x = mdconst::extract<ConstantInt>(attrNode->getOperand(0));
+      ConstantInt *y = mdconst::extract<ConstantInt>(attrNode->getOperand(1));
+      ConstantInt *z = mdconst::extract<ConstantInt>(attrNode->getOperand(2));
+      GBE_ASSERT(x && y && z);
+      reqd_wg_sz[0] = x->getZExtValue();
+      reqd_wg_sz[1] = y->getZExtValue();
+      reqd_wg_sz[2] = z->getZExtValue();
+      functionAttributes += "reqd_work_group_size";
+      std::stringstream param;
+      char buffer[100] = {0};
+      param << "(";
+      param << reqd_wg_sz[0];
+      param << ",";
+      param << reqd_wg_sz[1];
+      param << ",";
+      param << reqd_wg_sz[2];
+      param << ")";
+      param >> buffer;
+      functionAttributes += buffer;
+      functionAttributes += " ";
+    }
+    if ((attrNode = F.getMetadata("work_group_size_hint"))) {
+      GBE_ASSERT(attrNode->getNumOperands() == 3);
+      ConstantInt *x = mdconst::extract<ConstantInt>(attrNode->getOperand(0));
+      ConstantInt *y = mdconst::extract<ConstantInt>(attrNode->getOperand(1));
+      ConstantInt *z = mdconst::extract<ConstantInt>(attrNode->getOperand(2));
+      GBE_ASSERT(x && y && z);
+      hint_wg_sz[0] = x->getZExtValue();
+      hint_wg_sz[1] = y->getZExtValue();
+      hint_wg_sz[2] = z->getZExtValue();
+      functionAttributes += "work_group_size_hint";
+      std::stringstream param;
+      char buffer[100] = {0};
+      param << "(";
+      param << hint_wg_sz[0];
+      param << ",";
+      param << hint_wg_sz[1];
+      param << ",";
+      param << hint_wg_sz[2];
+      param << ")";
+      param >> buffer;
+      functionAttributes += buffer;
+      functionAttributes += " ";
+    }
+#else
     /* First find the meta data belong to this function. */
     MDNode *node = getKernelFunctionMetadata(&F);
 
@@ -2095,6 +2191,7 @@ namespace gbe
         functionAttributes += " ";
       }
     }
+#endif /* LLVM 3.9 Function metadata */
 
     ctx.getFunction().setCompileWorkGroupSize(reqd_wg_sz[0], reqd_wg_sz[1], reqd_wg_sz[2]);
 
@@ -2110,29 +2207,33 @@ namespace gbe
       const AttrListPtr &PAL = F.getAttributes();
 #endif /* LLVM_VERSION_MINOR <= 1 */
       for (; I != E; ++I, ++argID) {
+        uint32_t opID = argID;
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR < 9
+        opID += 1;
+#endif
         const std::string &argName = I->getName().str();
         Type *type = I->getType();
         if(addrSpaceNode) {
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 5
-          llvmInfo.addrSpace = (cast<ConstantInt>(addrSpaceNode->getOperand(1 + argID)))->getZExtValue();
+          llvmInfo.addrSpace = (cast<ConstantInt>(addrSpaceNode->getOperand(opID)))->getZExtValue();
 #else
-          llvmInfo.addrSpace = (mdconst::extract<ConstantInt>(addrSpaceNode->getOperand(1 + argID)))->getZExtValue();
+          llvmInfo.addrSpace = (mdconst::extract<ConstantInt>(addrSpaceNode->getOperand(opID)))->getZExtValue();
 #endif
         }
         if(typeNameNode) {
-          llvmInfo.typeName = (cast<MDString>(typeNameNode->getOperand(1 + argID)))->getString();
+          llvmInfo.typeName = (cast<MDString>(typeNameNode->getOperand(opID)))->getString();
         }
         if(typeBaseNameNode){
-          llvmInfo.typeBaseName = (cast<MDString>(typeBaseNameNode->getOperand(1 + argID)))->getString();
+          llvmInfo.typeBaseName = (cast<MDString>(typeBaseNameNode->getOperand(opID)))->getString();
         }
         if(accessQualNode) {
-          llvmInfo.accessQual = (cast<MDString>(accessQualNode->getOperand(1 + argID)))->getString();
+          llvmInfo.accessQual = (cast<MDString>(accessQualNode->getOperand(opID)))->getString();
         }
         if(typeQualNode) {
-          llvmInfo.typeQual = (cast<MDString>(typeQualNode->getOperand(1 + argID)))->getString();
+          llvmInfo.typeQual = (cast<MDString>(typeQualNode->getOperand(opID)))->getString();
         }
         if(argNameNode){
-          llvmInfo.argName = (cast<MDString>(argNameNode->getOperand(1 + argID)))->getString();
+          llvmInfo.argName = (cast<MDString>(argNameNode->getOperand(opID)))->getString();
         }
 
         // function arguments are uniform values.
@@ -4195,13 +4296,14 @@ namespace gbe
               ir::Register tmp1 = ctx.reg(getFamily(tmpType));
               ir::Register tmp2 = ctx.reg(getFamily(tmpType));
               ctx.CVT(tmpType, srcType, tmp0, src);
-              ctx.ALU1(ir::OP_LZD, tmpType, tmp1, tmp0);
+              ctx.ALU1(ir::OP_LZD, ir::TYPE_U32, tmp1, tmp0);
               ctx.SUB(tmpType, tmp2, tmp1, immReg);
               ctx.CVT(dstType, tmpType, dst, tmp2);
             }
             else
             {
-              ctx.ALU1(ir::OP_LZD, dstType, dst, src);
+              GBE_ASSERT(srcType == ir::TYPE_U32);
+              ctx.ALU1(ir::OP_LZD, srcType, dst, src);
             }
           }
           break;
@@ -4258,8 +4360,8 @@ namespace gbe
 #endif /* GBE_DEBUG */
 
         switch (genIntrinsicID) {
-          case GEN_OCL_FBH: this->emitUnaryCallInst(I,CS,ir::OP_FBH); break;
-          case GEN_OCL_FBL: this->emitUnaryCallInst(I,CS,ir::OP_FBL); break;
+          case GEN_OCL_FBH: this->emitUnaryCallInst(I,CS,ir::OP_FBH, ir::TYPE_U32); break;
+          case GEN_OCL_FBL: this->emitUnaryCallInst(I,CS,ir::OP_FBL, ir::TYPE_U32); break;
           case GEN_OCL_CBIT: this->emitUnaryCallInst(I,CS,ir::OP_CBIT, getUnsignedType(ctx, (*AI)->getType())); break;
           case GEN_OCL_ABS:
           {

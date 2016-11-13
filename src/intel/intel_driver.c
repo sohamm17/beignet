@@ -464,6 +464,16 @@ intel_driver_get_ver(struct intel_driver *drv)
 }
 
 static void
+intel_driver_enlarge_stack_size(struct intel_driver *drv, int32_t *stack_size)
+{
+    if (drv->gen_ver == 75)
+      *stack_size = *stack_size * 4;
+    else if (drv->device_id == PCI_CHIP_BROXTON_1 || drv->device_id == PCI_CHIP_BROXTON_3 ||
+             IS_CHERRYVIEW(drv->device_id))
+      *stack_size = *stack_size * 2;
+}
+
+static void
 intel_driver_set_atomic_flag(intel_driver_t *drv, int atomic_flag)
 {
   drv->atomic_test_result = atomic_flag;
@@ -891,14 +901,14 @@ intel_update_device_info(cl_device_id device)
 
 #ifdef HAS_POOLED_EU
   /* BXT pooled eu, 3*6 to 2*9, like sub slice count is 2 */
-  unsigned int has_pooled_eu = 0;
-  if(!drm_intel_get_pooled_eu(driver->fd, &has_pooled_eu) && has_pooled_eu)
+  int has_pooled_eu;
+  if((has_pooled_eu = drm_intel_get_pooled_eu(driver->fd)) > 0)
     device->sub_slice_count = 2;
 
 #ifdef HAS_MIN_EU_IN_POOL
-  unsigned int min_eu;
+  int min_eu;
   /* for fused down 2x6 devices, beignet don't support. */
-  if (has_pooled_eu && !drm_intel_get_min_eu_in_pool(driver->fd, &min_eu)) {
+  if (has_pooled_eu > 0 && (min_eu = drm_intel_get_min_eu_in_pool(driver->fd)) > 0) {
     assert(min_eu == 9); //don't support fuse down device.
   }
 #endif //HAS_MIN_EU_IN_POOL
@@ -921,6 +931,7 @@ intel_setup_callbacks(void)
   cl_driver_new = (cl_driver_new_cb *) cl_intel_driver_new;
   cl_driver_delete = (cl_driver_delete_cb *) cl_intel_driver_delete;
   cl_driver_get_ver = (cl_driver_get_ver_cb *) intel_driver_get_ver;
+  cl_driver_enlarge_stack_size = (cl_driver_enlarge_stack_size_cb *) intel_driver_enlarge_stack_size;
   cl_driver_set_atomic_flag = (cl_driver_set_atomic_flag_cb *) intel_driver_set_atomic_flag;
   cl_driver_get_bufmgr = (cl_driver_get_bufmgr_cb *) intel_driver_get_bufmgr;
   cl_driver_get_device_id = (cl_driver_get_device_id_cb *) intel_get_device_id;

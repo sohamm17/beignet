@@ -199,11 +199,21 @@ static struct _cl_device_id intel_skl_gt4_device = {
 #include "cl_gen9_device.h"
 };
 
-static struct _cl_device_id intel_bxt_device = {
+static struct _cl_device_id intel_bxt18eu_device = {
   INIT_ICD(dispatch)
   .max_compute_unit = 18,
   .max_thread_per_unit = 6,
   .sub_slice_count = 3,
+  .max_work_item_sizes = {512, 512, 512},
+  .max_work_group_size = 512,
+  .max_clock_frequency = 1000,
+#include "cl_gen9_device.h"
+};
+
+static struct _cl_device_id intel_bxt12eu_device = {
+  .max_compute_unit = 12,
+  .max_thread_per_unit = 6,
+  .sub_slice_count = 2,
   .max_work_item_sizes = {512, 512, 512},
   .max_work_group_size = 512,
   .max_clock_frequency = 1000,
@@ -434,6 +444,7 @@ ivb_gt1_break:
       intel_ivb_gt1_device.platform = cl_get_platform_default();
       ret = &intel_ivb_gt1_device;
       cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_intel_motion_estimation_ext_id);
       break;
 
     case PCI_CHIP_IVYBRIDGE_GT2:
@@ -447,6 +458,7 @@ ivb_gt2_break:
       intel_ivb_gt2_device.platform = cl_get_platform_default();
       ret = &intel_ivb_gt2_device;
       cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_intel_motion_estimation_ext_id);
       break;
 
     case PCI_CHIP_BAYTRAIL_T:
@@ -456,6 +468,7 @@ baytrail_t_device_break:
       intel_baytrail_t_device.platform = cl_get_platform_default();
       ret = &intel_baytrail_t_device;
       cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_intel_motion_estimation_ext_id);
       break;
 
     case PCI_CHIP_BROADWLL_M_GT1:
@@ -625,12 +638,26 @@ skl_gt4_break:
       cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
 
-    case PCI_CHIP_BROXTON_P:
-      DECL_INFO_STRING(bxt_break, intel_bxt_device, name, "Intel(R) HD Graphics Broxton-P");
-bxt_break:
-      intel_bxt_device.device_id = device_id;
-      intel_bxt_device.platform = cl_get_platform_default();
-      ret = &intel_bxt_device;
+    case PCI_CHIP_BROXTON_0:
+      DECL_INFO_STRING(bxt18eu_break, intel_bxt18eu_device, name, "Intel(R) HD Graphics Broxton 0");
+    case PCI_CHIP_BROXTON_2:
+      DECL_INFO_STRING(bxt18eu_break, intel_bxt18eu_device, name, "Intel(R) HD Graphics Broxton 2");
+bxt18eu_break:
+      intel_bxt18eu_device.device_id = device_id;
+      intel_bxt18eu_device.platform = cl_get_platform_default();
+      ret = &intel_bxt18eu_device;
+      cl_intel_platform_get_default_extension(ret);
+      cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
+      break;
+
+    case PCI_CHIP_BROXTON_1:
+      DECL_INFO_STRING(bxt12eu_break, intel_bxt12eu_device, name, "Intel(R) HD Graphics Broxton 1");
+    case PCI_CHIP_BROXTON_3:
+      DECL_INFO_STRING(bxt12eu_break, intel_bxt12eu_device, name, "Intel(R) HD Graphics Broxton 3");
+bxt12eu_break:
+      intel_bxt12eu_device.device_id = device_id;
+      intel_bxt12eu_device.platform = cl_get_platform_default();
+      ret = &intel_bxt12eu_device;
       cl_intel_platform_get_default_extension(ret);
       cl_intel_platform_enable_extension(ret, cl_khr_fp16_ext_id);
       break;
@@ -757,7 +784,7 @@ kbl_gt4_break:
   /* Apply any driver-dependent updates to the device info */
   cl_driver_update_device_info(ret);
 
-  #define toMB(size) (size)&(0xfffffffffffffff<<20)
+  #define toMB(size) (size)&(UINT64_MAX<<20)
   /* Get the global_mem_size and max_mem_alloc size from
    * driver, system ram and hardware*/
   struct sysinfo info;
@@ -949,7 +976,8 @@ LOCAL cl_bool is_gen_device(cl_device_id device) {
          device == &intel_skl_gt2_device ||
          device == &intel_skl_gt3_device ||
          device == &intel_skl_gt4_device ||
-         device == &intel_bxt_device     ||
+         device == &intel_bxt18eu_device ||
+         device == &intel_bxt12eu_device ||
          device == &intel_kbl_gt1_device ||
          device == &intel_kbl_gt15_device ||
          device == &intel_kbl_gt2_device ||
@@ -1080,7 +1108,7 @@ cl_device_get_version(cl_device_id device, cl_int *ver)
     *ver = 8;
   } else if (device == &intel_skl_gt1_device || device == &intel_skl_gt2_device
         || device == &intel_skl_gt3_device || device == &intel_skl_gt4_device
-        || device == &intel_bxt_device || device == &intel_kbl_gt1_device
+        || device == &intel_bxt18eu_device || device == &intel_bxt12eu_device || device == &intel_kbl_gt1_device
         || device == &intel_kbl_gt2_device || device == &intel_kbl_gt3_device
         || device == &intel_kbl_gt4_device || device == &intel_kbl_gt15_device) {
     *ver = 9;
@@ -1157,10 +1185,12 @@ cl_get_kernel_workgroup_info(cl_kernel kernel,
 {
   int err = CL_SUCCESS;
   int dimension = 0;
+  CHECK_KERNEL(kernel);
+  if (device == NULL)
+    device = kernel->program->ctx->device;
   if (UNLIKELY(is_gen_device(device) == CL_FALSE))
     return CL_INVALID_DEVICE;
 
-  CHECK_KERNEL(kernel);
   switch (param_name) {
     case CL_KERNEL_WORK_GROUP_SIZE:
     {

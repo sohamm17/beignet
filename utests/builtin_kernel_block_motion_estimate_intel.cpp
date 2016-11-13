@@ -8,6 +8,9 @@ OCLRELEASEACCELERATORINTEL * oclReleaseAcceleratorIntel = NULL;
 
 void builtin_kernel_block_motion_estimate_intel(void)
 {
+  if (!cl_check_motion_estimation()) {
+    return;
+  }
   char* built_in_kernel_names;
   size_t built_in_kernels_size;
   cl_int err = CL_SUCCESS;
@@ -21,7 +24,8 @@ void builtin_kernel_block_motion_estimate_intel(void)
   if (strstr(built_in_kernel_names, "block_motion_estimate_intel") == NULL)
   {
         free(built_in_kernel_names);
-        return;
+        fprintf(stderr, "Can't find block_motion_estimate_intel built-in kernel");
+        OCL_ASSERT(0);
   }
 
   cl_program built_in_prog = clCreateProgramWithBuiltInKernels(ctx, 1, &device, built_in_kernel_names, &err);
@@ -41,7 +45,7 @@ void builtin_kernel_block_motion_estimate_intel(void)
 #endif
   if(!oclCreateAcceleratorIntel){
     fprintf(stderr, "Failed to get extension clCreateImageFromLibvaIntel\n");
-    exit(1);
+    OCL_ASSERT(0);
   }
   cl_accelerator_intel accel = oclCreateAcceleratorIntel(ctx, CL_ACCELERATOR_TYPE_MOTION_ESTIMATION_INTEL,sizeof(cl_motion_estimation_desc_intel), &vmedesc, &err);
   OCL_ASSERT(accel != NULL);
@@ -123,7 +127,7 @@ void builtin_kernel_block_motion_estimate_intel(void)
 #endif
   if(!oclReleaseAcceleratorIntel){
     fprintf(stderr, "Failed to get extension clCreateImageFromLibvaIntel\n");
-    exit(1);
+    OCL_ASSERT(0);
   }
   oclReleaseAcceleratorIntel(accel);
   clReleaseProgram(built_in_prog);
