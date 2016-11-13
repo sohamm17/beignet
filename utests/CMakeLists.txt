@@ -26,8 +26,8 @@ if (NOT NOT_BUILD_STAND_ALONE_UTEST)
   # Threads
   Find_Package(Threads)
 
-  set (CMAKE_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
-  set (CMAKE_C_FLAGS "${CMAKE_C_CXX_FLAGS}")
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
+  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS}")
   set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
   set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
   set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
@@ -255,7 +255,6 @@ set (utests_sources
   compiler_double_div.cpp
   compiler_double_convert.cpp
   load_program_from_gen_bin.cpp
-  load_program_from_spir.cpp
   get_arg_info.cpp
   profiling_exec.cpp
   enqueue_copy_buf.cpp
@@ -284,7 +283,8 @@ set (utests_sources
   builtin_local_linear_id.cpp
   compiler_mix.cpp
   compiler_math_3op.cpp
-  compiler_bsort.cpp)
+  compiler_bsort.cpp
+  builtin_kernel_block_motion_estimate_intel.cpp)
 
 if (LLVM_VERSION_NODOT VERSION_GREATER 34)
   SET(utests_sources
@@ -325,7 +325,6 @@ else(GEN_PCI_ID)
 endif(GEN_PCI_ID)
 
 if (NOT_BUILD_STAND_ALONE_UTEST)
-  SET(utests_sources ${utests_sources} builtin_kernel_block_motion_estimate_intel.cpp)
   ADD_CUSTOM_TARGET(kernel_bin.bin DEPENDS ${kernel_bin}.bin)
 endif (NOT_BUILD_STAND_ALONE_UTEST)
 

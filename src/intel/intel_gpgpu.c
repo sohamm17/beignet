@@ -1215,12 +1215,15 @@ intel_get_surface_type(cl_mem_object_type type)
 static uint32_t get_surface_type(intel_gpgpu_t *gpgpu, int index, cl_mem_object_type type)
 {
   uint32_t surface_type;
-  if (((IS_IVYBRIDGE(gpgpu->drv->device_id) ||
+   //Now all platforms need it, so disable platform, re-enable it
+   //when some platform don't need this workaround
+  if (/*((IS_IVYBRIDGE(gpgpu->drv->device_id) ||
         IS_HASWELL(gpgpu->drv->device_id) ||
         IS_BROADWELL(gpgpu->drv->device_id) ||
         IS_CHERRYVIEW(gpgpu->drv->device_id) ||
         IS_SKYLAKE(gpgpu->drv->device_id) ||
-        IS_BROXTON(gpgpu->drv->device_id))) &&
+        IS_BROXTON(gpgpu->drv->device_id) ||
+        IS_KABYLAKE(gpgpu->drv_device_id))) && */
       index >= BTI_WORKAROUND_IMAGE_OFFSET + BTI_RESERVED_NUM &&
       type == CL_MEM_OBJECT_IMAGE1D_ARRAY)
     surface_type = I965_SURFACE_2D;
@@ -1537,8 +1540,9 @@ intel_gpgpu_set_scratch(intel_gpgpu_t * gpgpu, uint32_t per_thread_size)
   drm_intel_bufmgr *bufmgr = gpgpu->drv->bufmgr;
   drm_intel_bo* old = gpgpu->scratch_b.bo;
   uint32_t total = per_thread_size * gpgpu->max_threads;
-  /* Per Bspec, scratch should 2X the desired size, otherwise luxmark may hang */
-  if (IS_HASWELL(gpgpu->drv->device_id) || IS_CHERRYVIEW(gpgpu->drv->device_id))
+  /* Per Bspec, scratch should 2X the desired size when EU index is not continuous */
+  if (IS_HASWELL(gpgpu->drv->device_id) || IS_CHERRYVIEW(gpgpu->drv->device_id) ||
+      PCI_CHIP_BROXTON_1 == gpgpu->drv->device_id  || PCI_CHIP_BROXTON_3 == gpgpu->drv->device_id)
       total *= 2;
 
   gpgpu->per_thread_scratch = per_thread_size;

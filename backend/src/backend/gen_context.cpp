@@ -702,7 +702,7 @@ namespace gbe
     assert(insn.opcode == SEL_OP_SIMD_SHUFFLE);
     assert (src1.file != GEN_IMMEDIATE_VALUE);
 
-    uint32_t base = src0.nr * 32 + src0.subnr * 4;
+    uint32_t base = src0.nr * 32 + src0.subnr;
     GenRegister baseReg = GenRegister::immuw(base);
     const GenRegister a0 = GenRegister::addr8(0);
     uint32_t simd = p->curr.execWidth;
@@ -3113,7 +3113,7 @@ namespace gbe
        wg_op == ir::WORKGROUP_OP_REDUCE_MIN ||
        wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
    {
-     p->curr.execWidth = 16;
+     p->curr.execWidth = simd;
      /* value exchanged with other threads */
      p->MOV(threadExchangeData, result[0]);
      /* partial result thread */
@@ -3123,7 +3123,7 @@ namespace gbe
        wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN ||
        wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX)
    {
-     p->curr.execWidth = 16;
+     p->curr.execWidth = simd;
      /* value exchanged with other threads */
      p->MOV(threadExchangeData, result[simd - 1]);
      /* partial result thread */
@@ -3137,7 +3137,7 @@ namespace gbe
      /* set result[0] to min/max/null */
      wgOpInitValue(p, result[0], wg_op);
 
-     p->curr.execWidth = 16;
+     p->curr.execWidth = simd;
      /* value exchanged with other threads */
      wgOpPerform(threadExchangeData, result[simd - 1], input[simd - 1], wg_op, p);
      /* partial result thread */
@@ -3198,7 +3198,7 @@ namespace gbe
     /* do some calculation within each thread */
     wgOpPerformThread(dst, theVal, threadData, tmp, simd, wg_op, p);
 
-    p->curr.execWidth = 16;
+    p->curr.execWidth = simd;
     p->MOV(theVal, dst);
     threadData = GenRegister::toUniform(threadData, dst.type);
 
@@ -3313,13 +3313,13 @@ namespace gbe
       wg_op == ir::WORKGROUP_OP_REDUCE_MAX)
     {
       /* save result to final register location dst */
-      p->curr.execWidth = 16;
+      p->curr.execWidth = simd;
       p->MOV(dst, partialData);
     }
     else
     {
       /* save result to final register location dst */
-      p->curr.execWidth = 16;
+      p->curr.execWidth = simd;
 
       if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_ADD
           || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_ADD)
@@ -3368,7 +3368,7 @@ namespace gbe
         p->CMP(GEN_CONDITIONAL_EQ, threadId, GenRegister::immd(0x0));
         p->curr.predicate = GEN_PREDICATE_NORMAL;
 
-        p->curr.execWidth = 16;
+        p->curr.execWidth = simd;
         p->MOV(dst, theVal);
       } p->pop();
     }
@@ -3411,13 +3411,14 @@ namespace gbe
   void GenContext::emitPrintfInstruction(const SelectionInstruction &insn) {
     const GenRegister dst = ra->genReg(insn.dst(0));
     const GenRegister tmp0 = ra->genReg(insn.dst(1));
+    const GenRegister tmp1 = ra->genReg(insn.dst(2));
     GenRegister src;
     uint32_t srcNum = insn.srcNum;
     if (insn.extra.continueFlag)
       srcNum--;
 
     GenRegister addr = GenRegister::retype(tmp0, GEN_TYPE_UD);
-    GenRegister data = GenRegister::offset(addr, 2);
+    GenRegister data = GenRegister::retype(tmp1, GEN_TYPE_UD);
 
     if (!insn.extra.continueFlag) {
       p->push(); {
@@ -3507,7 +3508,7 @@ namespace gbe
 
       // Update the header with the current address
       p->curr.execWidth = 1;
-      p->SHR(headeraddr, addr, GenRegister::immud(4));
+      p->MOV(headeraddr, addr);
 
       // Put zero in the general state base address
       p->MOV(GenRegister::offset(header, 0, 5 * 4), GenRegister::immud(0));
@@ -3540,7 +3541,7 @@ namespace gbe
             {
               // Update the address in header
               p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(128));
             }
             p->pop();
           }
@@ -3561,7 +3562,7 @@ namespace gbe
             {
               // Update the address in header
               p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
+              p->ADD(headeraddr, headeraddr, GenRegister::immud(128));
             }
             p->pop();
           }
@@ -3661,18 +3662,13 @@ namespace gbe
   }
 
   void GenContext::emitMBReadInstruction(const SelectionInstruction &insn) {
-    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister dst = ra->genReg(insn.dst(1));
     const GenRegister coordx = GenRegister::toUniform(ra->genReg(insn.src(0)),GEN_TYPE_D);
     const GenRegister coordy = GenRegister::toUniform(ra->genReg(insn.src(1)),GEN_TYPE_D);
-    GenRegister header, offsetx, offsety, blocksizereg;
-    if (simdWidth == 8)
-      header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
-    else
-      header = GenRegister::retype(GenRegister::Qn(ra->genReg(insn.src(2)),1), GEN_TYPE_UD);
-
-    offsetx = GenRegister::offset(header, 0, 0*4);
-    offsety = GenRegister::offset(header, 0, 1*4);
-    blocksizereg = GenRegister::offset(header, 0, 2*4);
+    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
+    const GenRegister offsetx = GenRegister::offset(header, 0, 0*4);
+    const GenRegister offsety = GenRegister::offset(header, 0, 1*4);
+    const GenRegister blocksizereg = GenRegister::offset(header, 0, 2*4);
     size_t vec_size = insn.extra.elem;
     uint32_t blocksize = 0x1F | (vec_size-1) << 16;
 
@@ -3699,7 +3695,7 @@ namespace gbe
     }
     else if (simdWidth == 16)
     {
-      const GenRegister tmp = ra->genReg(insn.dst(vec_size));
+      const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(vec_size + 1)), GEN_TYPE_UD);
       p->push();
         // Copy r0 into the header first
         p->curr.execWidth = 8;
@@ -3717,23 +3713,22 @@ namespace gbe
         // Now read the data
         p->curr.execWidth = 8;
         p->MBREAD(tmp, header, insn.getbti(), vec_size);
+        for (uint32_t i = 0; i < vec_size; i++)
+          p->MOV(ra->genReg(insn.dst(i + 1)), GenRegister::offset(tmp, i));
 
         // Second half
         // Update the header with the coord
         p->curr.execWidth = 1;
         p->ADD(offsetx, offsetx, GenRegister::immud(32));
 
-        const GenRegister tmp2 = GenRegister::offset(tmp, vec_size);
         // Now read the data
         p->curr.execWidth = 8;
-        p->MBREAD(tmp2, header, insn.getbti(), vec_size);
+        p->MBREAD(tmp, header, insn.getbti(), vec_size);
 
         // Move the reg to fit vector rule.
-        for (uint32_t i = 0; i < vec_size; i++) {
-          p->MOV(GenRegister::offset(dst, i * 2), GenRegister::offset(tmp, i));
-          p->MOV(GenRegister::offset(dst, i * 2 + 1),
-                 GenRegister::offset(tmp2, i));
-        }
+        for (uint32_t i = 0; i < vec_size; i++)
+          p->MOV(GenRegister::offset(ra->genReg(insn.dst(i + 1)), 1),
+                 GenRegister::offset(tmp, i));
       p->pop();
     } else NOT_IMPLEMENTED;
   }
