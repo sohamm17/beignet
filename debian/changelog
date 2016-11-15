@@ -1,9 +1,9 @@
-beignet (1.2.1-1) UNRELEASED; urgency=medium
+beignet (1.2.1-1) unstable; urgency=medium
 
-  * New upstream release.
+  * New upstream release.  (Closes: #844370)
   * Drop patches applied upstream, refresh others.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 13 Nov 2016 21:56:59 +0000
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Tue, 15 Nov 2016 07:21:49 +0000
 
 beignet (1.2.0-3) unstable; urgency=medium
 
