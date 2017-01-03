@@ -1,0 +1,40 @@
+Description: Return error, don't assert-fail, on failed context_create
+
+As this function is used in the "check whether this is supported
+hardware" stage, it needs to not crash on failure.
+
+(The bug reporter's hardware was much too old for this package
+to actually work, but I don't know whether that is also the trigger
+for the bug.)
+
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Bug-Debian: https://bugs.debian.org/848792
+Forwarded: todo
+
+--- beignet-1.2.1.orig/src/intel/intel_driver.c
++++ beignet-1.2.1/src/intel/intel_driver.c
+@@ -133,11 +133,13 @@ intel_driver_memman_init(intel_driver_t
+   return 1;
+ }
+ 
+-static void
++static int
+ intel_driver_context_init(intel_driver_t *driver)
+ {
+   driver->ctx = drm_intel_gem_context_create(driver->bufmgr);
+-  assert(driver->ctx);
++  if (!driver->ctx)
++    return 0;
++  return 1;
+ }
+ 
+ static void
+@@ -156,7 +158,7 @@ intel_driver_init(intel_driver_t *driver
+   pthread_mutex_init(&driver->ctxmutex, NULL);
+ 
+   if (!intel_driver_memman_init(driver)) return 0;
+-  intel_driver_context_init(driver);
++  if (!intel_driver_context_init(driver)) return 0;
+ 
+ #if EMULATE_GEN
+   driver->gen_ver = EMULATE_GEN;
