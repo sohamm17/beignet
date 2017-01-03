@@ -1,0 +1,24 @@
+Description: Avoid possible invalid pointer by vector iterator
+
+Elements may be added to the std::vector "revisit" in
+findPointerEscape(), possibly invalidating iterators on it.
+When compiling huge kernel like blender, it will cause random
+segment fault crash.
+[] operator will be more safe.
+
+Origin: upstream https://cgit.freedesktop.org/beignet/commit/?id=2de87cd63a80dbd4ea4e8e4ce3af8e0535b910cb
+Author: Yan Wang
+
+--- a/backend/src/llvm/llvm_gen_backend.cpp
++++ b/backend/src/llvm/llvm_gen_backend.cpp
+@@ -1390,8 +1390,8 @@ namespace gbe
+       }
+     }
+     // storing/loading pointer would introduce revisit
+-    for (std::vector<Value *>::iterator iter = revisit.begin(); iter != revisit.end(); ++iter) {
+-      findPointerEscape(*iter, mixedPtr, true, revisit);
++    for (size_t i = 0; i < revisit.size(); ++i) {
++      findPointerEscape(revisit[i], mixedPtr, true, revisit);
+     }
+ 
+     // the second pass starts from mixed pointer

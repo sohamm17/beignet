@@ -1,3 +1,9 @@
+beignet (1.2.1-2) UNRELEASED; urgency=medium
+
+  * Fix invalid-iterator crash when compiling large kernels.
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Tue, 03 Jan 2017 21:52:36 +0000
+
 beignet (1.2.1-1) unstable; urgency=medium
 
   * New upstream release.  (Closes: #844370)
