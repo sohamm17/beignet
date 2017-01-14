@@ -100,7 +100,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
 +As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within a supported family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
 +
-+Not all processor models have an integrated GPU (Beignet does _not_ support running OpenCL on the CPU itself - see [pocl-opencl-icd](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) for that).  Systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
++Not all processor models have an integrated GPU (Beignet does _not_ support running OpenCL on the CPU itself - see [pocl-opencl-icd](https://packages.debian.org/search?keywords=pocl-opencl-icd&searchon=names&exact=1&suite=all&section=all) for that).  Systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
 +
 +Attempting to run Beignet on unsupported hardware should return CL_DEVICE_NOT_FOUND; if it does anything else (especially crashing) please [report a bug](#howtocontribute).
 +
@@ -143,12 +143,12 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  [was recently re-added](https://cgit.freedesktop.org/beignet/commit/?id=a892148ee12cbaa021b680c4d770e53fab511366)
 +  to upstream Beignet, but might not be fully working yet.
 +
-+* Crash when the same program uses both Beignet and OpenGL (mesa).
++* Crash when the same program (e.g. Blender) uses both OpenCL and graphics.
 +  
-+  This has been reported to happen if Beignet and Mesa use different LLVM versions,
-+  but I don't know the details: if you see this, please report a bug.
-+  Because of this, the Debian packages use matching versions: if you installed this
-+  package from -backports, try also installing mesa from -backports.
++  This [can happen](https://bugs.debian.org/848368) if Beignet and Mesa use different
++  LLVM versions.
++  To avoid this, the Debian packages use matching versions: if you installed this
++  package from -backports, try also installing libgl1-mesa-dri from -backports.
 +
 +* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
 +  

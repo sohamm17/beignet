@@ -10,6 +10,10 @@ for Debian stable, these can be found in -backports
 In particular, if you have Haswell hardware and installed this package
 from jessie-backports, you probably also need a jessie-backports kernel.
 
+If you installed this from -backports and are using OpenCL and graphics
+in the same program (e.g. Blender), you may also need to install
+libgl1-mesa-dri from -backports to avoid a crash.
+
 Discrete GPUs often disable the integrated GPU, preventing this package
 from working.  It may or may not be possible to re-enable it
 (https://nouveau.freedesktop.org/wiki/Optimus/).
