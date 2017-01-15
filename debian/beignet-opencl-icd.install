@@ -5,3 +5,4 @@ usr/lib/*/beignet/libcl.so
 usr/lib/*/beignet/include
 usr/lib/*/beignet/beignet.pch
 usr/lib/*/beignet/beignet.bc
+usr/share/metainfo/*.metainfo.xml
