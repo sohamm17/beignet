@@ -12,3 +12,4 @@ llvm39-support.patch
 avoid-invalid-iterator.patch
 noassert-failed-context.patch
 add-appstream-metadata.patch
+fix-llvm39-hang.patch
