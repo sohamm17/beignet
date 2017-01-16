@@ -9,7 +9,7 @@ for the bug.)
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 Bug-Debian: https://bugs.debian.org/848792
-Forwarded: todo
+Forwarded: accepted https://cgit.freedesktop.org/beignet/commit/?id=81f0205ca922c086999c7a0b648a58a1eed71f40
 
 --- beignet-1.2.1.orig/src/intel/intel_driver.c
 +++ beignet-1.2.1/src/intel/intel_driver.c
