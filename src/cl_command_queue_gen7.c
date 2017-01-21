@@ -23,12 +23,15 @@
 #include "cl_kernel.h"
 #include "cl_device_id.h"
 #include "cl_mem.h"
+#include "cl_event.h"
 #include "cl_utils.h"
 #include "cl_alloc.h"
+#include "cl_device_enqueue.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MAX_GROUP_SIZE_IN_HALFSLICE   512
 static INLINE size_t cl_kernel_compute_batch_sz(cl_kernel k) { return 256+256; }
@@ -123,12 +126,24 @@ error:
 }
 
 static int
-cl_upload_constant_buffer(cl_command_queue queue, cl_kernel ker)
+cl_upload_constant_buffer(cl_command_queue queue, cl_kernel ker, cl_gpgpu gpgpu)
 {
-  /* calculate constant buffer size
-   * we need raw_size & aligned_size
-   */
-  GET_QUEUE_THREAD_GPGPU(queue);
+  if (interp_kernel_get_ocl_version(ker->opaque) >= 200) {
+    // pass the starting of constant address space
+    int32_t constant_addrspace = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_CONSTANT_ADDRSPACE, 0);
+    if (constant_addrspace >= 0) {
+      size_t global_const_size = interp_program_get_global_constant_size(ker->program->opaque);
+      if (global_const_size > 0) {
+        *(char **)(ker->curbe + constant_addrspace) = ker->program->global_data_ptr;
+        cl_gpgpu_bind_buf(gpgpu, ker->program->global_data, constant_addrspace, 0, ALIGN(global_const_size, getpagesize()), BTI_CONSTANT);
+      }
+    }
+    return 0;
+  }
+  // TODO this is only valid for OpenCL 1.2,
+  // under ocl1.2 we gather all constant into one dedicated surface.
+  // but in 2.0 we put program global into one surface, but constants
+  // pass through kernel argument in each separate buffer
   int32_t arg;
   size_t offset = 0;
   uint32_t raw_size = 0, aligned_size =0;
@@ -207,6 +222,7 @@ cl_curbe_fill(cl_kernel ker,
               const size_t *global_wk_off,
               const size_t *global_wk_sz,
               const size_t *local_wk_sz,
+              const size_t *enqueued_local_wk_sz,
               size_t thread_n)
 {
   int32_t offset;
@@ -216,15 +232,18 @@ cl_curbe_fill(cl_kernel ker,
   UPLOAD(GBE_CURBE_LOCAL_SIZE_X, local_wk_sz[0]);
   UPLOAD(GBE_CURBE_LOCAL_SIZE_Y, local_wk_sz[1]);
   UPLOAD(GBE_CURBE_LOCAL_SIZE_Z, local_wk_sz[2]);
+  UPLOAD(GBE_CURBE_ENQUEUED_LOCAL_SIZE_X, enqueued_local_wk_sz[0]);
+  UPLOAD(GBE_CURBE_ENQUEUED_LOCAL_SIZE_Y, enqueued_local_wk_sz[1]);
+  UPLOAD(GBE_CURBE_ENQUEUED_LOCAL_SIZE_Z, enqueued_local_wk_sz[2]);
   UPLOAD(GBE_CURBE_GLOBAL_SIZE_X, global_wk_sz[0]);
   UPLOAD(GBE_CURBE_GLOBAL_SIZE_Y, global_wk_sz[1]);
   UPLOAD(GBE_CURBE_GLOBAL_SIZE_Z, global_wk_sz[2]);
   UPLOAD(GBE_CURBE_GLOBAL_OFFSET_X, global_wk_off[0]);
   UPLOAD(GBE_CURBE_GLOBAL_OFFSET_Y, global_wk_off[1]);
   UPLOAD(GBE_CURBE_GLOBAL_OFFSET_Z, global_wk_off[2]);
-  UPLOAD(GBE_CURBE_GROUP_NUM_X, global_wk_sz[0]/local_wk_sz[0]);
-  UPLOAD(GBE_CURBE_GROUP_NUM_Y, global_wk_sz[1]/local_wk_sz[1]);
-  UPLOAD(GBE_CURBE_GROUP_NUM_Z, global_wk_sz[2]/local_wk_sz[2]);
+  UPLOAD(GBE_CURBE_GROUP_NUM_X, global_wk_sz[0] / enqueued_local_wk_sz[0] + (global_wk_sz[0]%enqueued_local_wk_sz[0]?1:0));
+  UPLOAD(GBE_CURBE_GROUP_NUM_Y, global_wk_sz[1] / enqueued_local_wk_sz[1] + (global_wk_sz[1]%enqueued_local_wk_sz[1]?1:0));
+  UPLOAD(GBE_CURBE_GROUP_NUM_Z, global_wk_sz[2] / enqueued_local_wk_sz[2] + (global_wk_sz[2]%enqueued_local_wk_sz[2]?1:0));
   UPLOAD(GBE_CURBE_THREAD_NUM, thread_n);
   UPLOAD(GBE_CURBE_WORK_DIM, work_dim);
 #undef UPLOAD
@@ -255,11 +274,11 @@ static void
 cl_bind_stack(cl_gpgpu gpgpu, cl_kernel ker)
 {
   cl_context ctx = ker->program->ctx;
-  cl_device_id device = ctx->device;
+  cl_device_id device = ctx->devices[0];
   const int32_t per_lane_stack_sz = ker->stack_size;
   const int32_t value = GBE_CURBE_EXTRA_ARGUMENT;
   const int32_t sub_value = GBE_STACK_BUFFER;
-  const int32_t offset = interp_kernel_get_curbe_offset(ker->opaque, value, sub_value);
+  const int32_t offset_stack_buffer = interp_kernel_get_curbe_offset(ker->opaque, value, sub_value);
   int32_t stack_sz = per_lane_stack_sz;
 
   /* No stack required for this kernel */
@@ -269,9 +288,9 @@ cl_bind_stack(cl_gpgpu gpgpu, cl_kernel ker)
   /* The stack size is given for *each* SIMD lane. So, we accordingly compute
    * the size we need for the complete machine
    */
-  assert(offset >= 0);
+  assert(offset_stack_buffer >= 0);
   stack_sz *= interp_kernel_get_simd_width(ker->opaque);
-  stack_sz *= device->max_compute_unit * ctx->device->max_thread_per_unit;
+  stack_sz *= device->max_compute_unit * ctx->devices[0]->max_thread_per_unit;
 
   /* for some hardware, part of EUs are disabled with EU id reserved,
    * it makes the active EU id larger than count of EUs within a subslice,
@@ -279,7 +298,12 @@ cl_bind_stack(cl_gpgpu gpgpu, cl_kernel ker)
    */
   cl_driver_enlarge_stack_size(ctx->drv, &stack_sz);
 
-  cl_gpgpu_set_stack(gpgpu, offset, stack_sz, BTI_PRIVATE);
+  const int32_t offset_stack_size = interp_kernel_get_curbe_offset(ker->opaque, GBE_CURBE_STACK_SIZE, 0);
+  if (offset_stack_size >= 0) {
+    *(uint64_t *)(ker->curbe + offset_stack_size) = stack_sz;
+  }
+
+  cl_gpgpu_set_stack(gpgpu, offset_stack_buffer, stack_sz, BTI_PRIVATE);
 }
 
 static int
@@ -331,24 +355,36 @@ cl_alloc_printf(cl_gpgpu gpgpu, cl_kernel ker, void* printf_info, int printf_num
 LOCAL cl_int
 cl_command_queue_ND_range_gen7(cl_command_queue queue,
                                cl_kernel ker,
+                               cl_event event,
                                const uint32_t work_dim,
                                const size_t *global_wk_off,
+                               const size_t *global_dim_off,
                                const size_t *global_wk_sz,
-                               const size_t *local_wk_sz)
+                               const size_t *global_wk_sz_use,
+                               const size_t *local_wk_sz,
+                               const size_t *local_wk_sz_use)
 {
-  GET_QUEUE_THREAD_GPGPU(queue);
+  cl_gpgpu gpgpu = cl_gpgpu_new(queue->ctx->drv);
   cl_context ctx = queue->ctx;
   char *final_curbe = NULL;  /* Includes them and one sub-buffer per group */
   cl_gpgpu_kernel kernel;
   const uint32_t simd_sz = cl_kernel_get_simd_width(ker);
   size_t i, batch_sz = 0u, local_sz = 0u;
-  size_t cst_sz = ker->curbe_sz= interp_kernel_get_curbe_size(ker->opaque);
+  size_t cst_sz = interp_kernel_get_curbe_size(ker->opaque);
   int32_t scratch_sz = interp_kernel_get_scratch_size(ker->opaque);
   size_t thread_n = 0u;
   int printf_num = 0;
   cl_int err = CL_SUCCESS;
   size_t global_size = global_wk_sz[0] * global_wk_sz[1] * global_wk_sz[2];
   void* printf_info = NULL;
+  uint32_t max_bti = 0;
+
+  if (ker->exec_info_n > 0) {
+    cst_sz += ker->exec_info_n * sizeof(void *);
+    cst_sz = (cst_sz + 31) / 32 * 32;   //align to register size, hard code here.
+    ker->curbe = cl_realloc(ker->curbe, cst_sz);
+  }
+  ker->curbe_sz = cst_sz;
 
   /* Setup kernel */
   kernel.name = interp_kernel_get_name(ker->opaque);
@@ -359,21 +395,21 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   kernel.use_slm = interp_kernel_use_slm(ker->opaque);
 
   /* Compute the number of HW threads we need */
-  if(UNLIKELY(err = cl_kernel_work_group_sz(ker, local_wk_sz, 3, &local_sz) != CL_SUCCESS)) {
+  if(UNLIKELY(err = cl_kernel_work_group_sz(ker, local_wk_sz_use, 3, &local_sz) != CL_SUCCESS)) {
     DEBUGP(DL_ERROR, "Work group size exceed Kernel's work group size.");
     return err;
   }
   kernel.thread_n = thread_n = (local_sz + simd_sz - 1) / simd_sz;
   kernel.curbe_sz = cst_sz;
 
-  if (scratch_sz > ker->program->ctx->device->scratch_mem_size) {
+  if (scratch_sz > ker->program->ctx->devices[0]->scratch_mem_size) {
     DEBUGP(DL_ERROR, "Out of scratch memory %d.", scratch_sz);
     return CL_OUT_OF_RESOURCES;
   }
   /* Curbe step 1: fill the constant urb buffer data shared by all threads */
   if (ker->curbe) {
-    kernel.slm_sz = cl_curbe_fill(ker, work_dim, global_wk_off, global_wk_sz, local_wk_sz, thread_n);
-    if (kernel.slm_sz > ker->program->ctx->device->local_mem_size) {
+    kernel.slm_sz = cl_curbe_fill(ker, work_dim, global_wk_off, global_wk_sz,local_wk_sz_use ,local_wk_sz, thread_n);
+    if (kernel.slm_sz > ker->program->ctx->devices[0]->local_mem_size) {
       DEBUGP(DL_ERROR, "Out of shared local memory %d.", kernel.slm_sz);
       return CL_OUT_OF_RESOURCES;
     }
@@ -384,9 +420,9 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
 
   /* Setup the kernel */
   if (queue->props & CL_QUEUE_PROFILING_ENABLE)
-    err = cl_gpgpu_state_init(gpgpu, ctx->device->max_compute_unit * ctx->device->max_thread_per_unit, cst_sz / 32, 1);
+    err = cl_gpgpu_state_init(gpgpu, ctx->devices[0]->max_compute_unit * ctx->devices[0]->max_thread_per_unit, cst_sz / 32, 1);
   else
-    err = cl_gpgpu_state_init(gpgpu, ctx->device->max_compute_unit * ctx->device->max_thread_per_unit, cst_sz / 32, 0);
+    err = cl_gpgpu_state_init(gpgpu, ctx->devices[0]->max_compute_unit * ctx->devices[0]->max_thread_per_unit, cst_sz / 32, 0);
   if (err != 0)
     goto error;
   printf_num = interp_get_printf_num(printf_info);
@@ -403,10 +439,14 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   }
 
   /* Bind user buffers */
-  cl_command_queue_bind_surface(queue, ker);
+  cl_command_queue_bind_surface(queue, ker, gpgpu, &max_bti);
   /* Bind user images */
-  if(UNLIKELY(err = cl_command_queue_bind_image(queue, ker) != CL_SUCCESS))
+  if(UNLIKELY(err = cl_command_queue_bind_image(queue, ker, gpgpu, &max_bti) != CL_SUCCESS))
     return err;
+  /* Bind all exec infos */
+  cl_command_queue_bind_exec_info(queue, ker, gpgpu, &max_bti);
+  /* Bind device enqueue buffer */
+  cl_device_enqueue_bind_buffer(gpgpu, ker, &max_bti, &kernel);
   /* Bind all samplers */
   if (ker->vme)
     cl_gpgpu_bind_vme_state(gpgpu, ker->accel);
@@ -419,7 +459,7 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   /* Bind a stack if needed */
   cl_bind_stack(gpgpu, ker);
 
-  if (cl_upload_constant_buffer(queue, ker) != 0)
+  if (cl_upload_constant_buffer(queue, ker, gpgpu) != 0)
     goto error;
 
   cl_gpgpu_states_setup(gpgpu, &kernel);
@@ -431,7 +471,7 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
     for (i = 0; i < thread_n; ++i) {
         memcpy(final_curbe + cst_sz * i, ker->curbe, cst_sz);
     }
-    TRY (cl_set_varying_payload, ker, final_curbe, local_wk_sz, simd_sz, cst_sz, thread_n);
+    TRY (cl_set_varying_payload, ker, final_curbe, local_wk_sz_use, simd_sz, cst_sz, thread_n);
     if (cl_gpgpu_upload_curbes(gpgpu, final_curbe, thread_n*cst_sz) != 0)
       goto error;
   }
@@ -440,14 +480,19 @@ cl_command_queue_ND_range_gen7(cl_command_queue queue,
   batch_sz = cl_kernel_compute_batch_sz(ker);
   if (cl_gpgpu_batch_reset(gpgpu, batch_sz) != 0)
     goto error;
-  cl_set_thread_batch_buf(queue, cl_gpgpu_ref_batch_buf(gpgpu));
+  //cl_set_thread_batch_buf(queue, cl_gpgpu_ref_batch_buf(gpgpu));
   cl_gpgpu_batch_start(gpgpu);
 
   /* Issue the GPGPU_WALKER command */
-  cl_gpgpu_walker(gpgpu, simd_sz, thread_n, global_wk_off, global_wk_sz, local_wk_sz);
+  cl_gpgpu_walker(gpgpu, simd_sz, thread_n, global_wk_off,global_dim_off, global_wk_sz_use, local_wk_sz_use);
 
   /* Close the batch buffer and submit it */
   cl_gpgpu_batch_end(gpgpu, 0);
+
+  event->exec_data.queue = queue;
+  event->exec_data.gpgpu = gpgpu;
+  event->exec_data.type = EnqueueNDRangeKernel;
+
   return CL_SUCCESS;
 
 error:

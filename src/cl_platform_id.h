@@ -23,12 +23,12 @@
 #include "CL/cl.h"
 #include "cl_internals.h"
 #include "cl_extensions.h"
-#include "cl_khr_icd.h"
+#include "cl_base_object.h"
 #include "src/OCLConfig.h"
 #include "src/git_sha1.h"
 
 struct _cl_platform_id {
-  DEFINE_ICD(dispatch)
+  _cl_base_object base;
   const char *profile;
   const char *version;
   const char *name;
@@ -44,6 +44,11 @@ struct _cl_platform_id {
   struct cl_extensions *internal_extensions;
 };
 
+#define CL_OBJECT_PLATFORM_MAGIC 0xaacdbb00123ccd85LL
+#define CL_OBJECT_IS_PLATFORM(obj) ((obj &&                           \
+         ((cl_base_object)obj)->magic == CL_OBJECT_PLATFORM_MAGIC &&  \
+         CL_OBJECT_GET_REF(obj) >= 1))
+
 /* Return the default platform */
 extern cl_platform_id cl_get_platform_default(void);
 
@@ -51,13 +56,6 @@ extern cl_platform_id cl_get_platform_default(void);
 extern cl_int cl_get_platform_ids(cl_uint          num_entries,
                                   cl_platform_id * platforms,
                                   cl_uint *        num_platforms);
-
-/* Return information for the current platform */
-extern cl_int cl_get_platform_info(cl_platform_id    platform,
-                                   cl_platform_info  param_name,
-                                   size_t            param_value_size,
-                                   void *            param_value,
-                                   size_t *          param_value_size_ret);
 
 #define _STR(x) #x
 #define _JOINT(x, y) _STR(x) "." _STR(y)

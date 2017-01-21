@@ -23,9 +23,12 @@
 #include "cl_internals.h"
 #include "cl_driver_type.h"
 #include "CL/cl.h"
-#include "cl_khr_icd.h"
+#include "cl_base_object.h"
 #include <assert.h>
 #include <pthread.h>
+#if defined(HAS_GL_EGL)
+#include "EGL/egl.h"
+#endif
 
 #ifndef CL_VERSION_1_2
 #define CL_MEM_OBJECT_IMAGE1D                       0x10F4
@@ -61,15 +64,18 @@ typedef struct _cl_mapped_ptr {
 }cl_mapped_ptr;
 
 typedef struct _cl_mem_dstr_cb {
-  struct _cl_mem_dstr_cb * next;
-  void (CL_CALLBACK *pfn_notify)(cl_mem memobj, void *user_data);
+  list_node node; /* Mem callback list node */
+  void(CL_CALLBACK *pfn_notify)(cl_mem memobj, void *user_data);
   void *user_data;
-}cl_mem_dstr_cb;
+} _cl_mem_dstr_cb;
+typedef _cl_mem_dstr_cb* cl_mem_dstr_cb;
 
 /* Used for buffers and images */
 enum cl_mem_type {
   CL_MEM_BUFFER_TYPE,
   CL_MEM_SUBBUFFER_TYPE,
+  CL_MEM_PIPE_TYPE,
+  CL_MEM_SVM_TYPE,
   CL_MEM_IMAGE_TYPE,
   CL_MEM_GL_IMAGE_TYPE,
   CL_MEM_BUFFER1D_IMAGE_TYPE
@@ -78,11 +84,8 @@ enum cl_mem_type {
 #define IS_GL_IMAGE(mem) (mem->type == CL_MEM_GL_IMAGE_TYPE)
 
 typedef  struct _cl_mem {
-  DEFINE_ICD(dispatch)
-  uint64_t magic;           /* To identify it as a memory object */
-  cl_mem prev, next;        /* We chain the memory buffers together */
+  _cl_base_object base;
   enum cl_mem_type type;
-  volatile int ref_n;       /* This object is reference counted */
   cl_buffer bo;             /* Data in GPU memory */
   size_t size;              /* original request size, not alignment size, used in constant buffer */
   cl_context ctx;           /* Context it belongs to */
@@ -92,19 +95,45 @@ typedef  struct _cl_mem {
   int mapped_ptr_sz;        /* The array size of mapped_ptr. */
   int map_ref;              /* The mapped count. */
   uint8_t mapped_gtt;       /* This object has mapped gtt, for unmap. */
-  cl_mem_dstr_cb *dstr_cb;  /* The destroy callback. */
-  uint8_t is_userptr;       /* CL_MEM_USE_HOST_PTR is enabled*/
+  list_head dstr_cb_head;   /* All destroy callbacks. */
+  uint8_t is_userptr;       /* CL_MEM_USE_HOST_PTR is enabled */
+  cl_bool is_svm;           /* This object  is svm */
   size_t offset;            /* offset of host_ptr to the page beginning, only for CL_MEM_USE_HOST_PTR*/
 
   uint8_t cmrt_mem_type;    /* CmBuffer, CmSurface2D, ... */
   void* cmrt_mem;
 } _cl_mem;
 
+#define CL_OBJECT_MEM_MAGIC 0x381a27b9ee6504dfLL
+#define CL_OBJECT_IS_MEM(obj) ((obj &&                           \
+         ((cl_base_object)obj)->magic == CL_OBJECT_MEM_MAGIC &&  \
+         CL_OBJECT_GET_REF(obj) >= 1))
+#define CL_OBJECT_IS_IMAGE(mem) ((mem &&                           \
+         ((cl_base_object)mem)->magic == CL_OBJECT_MEM_MAGIC &&    \
+         CL_OBJECT_GET_REF(mem) >= 1 &&                            \
+         mem->type >= CL_MEM_IMAGE_TYPE))
+#define CL_OBJECT_IS_BUFFER(mem) ((mem &&                          \
+         ((cl_base_object)mem)->magic == CL_OBJECT_MEM_MAGIC &&    \
+         CL_OBJECT_GET_REF(mem) >= 1 &&                            \
+         mem->type < CL_MEM_IMAGE_TYPE))
+
+typedef struct _cl_mem_pipe {
+  _cl_mem base;
+  cl_svm_mem_flags flags;                 /* Flags specified at the creation time */
+  uint32_t packet_size;
+  uint32_t max_packets;
+} _cl_mem_pipe;
+
+typedef struct _cl_mem_svm {
+  _cl_mem base;
+  cl_svm_mem_flags flags;                 /* Flags specified at the creation time */
+} _cl_mem_svm;
+
 struct _cl_mem_image {
   _cl_mem base;
   cl_image_format fmt;            /* only for images */
   uint32_t intel_fmt;             /* format to provide in the surface state */
-  uint32_t bpp;                   /* number of bytes per pixel */
+  size_t bpp;                     /* number of bytes per pixel */
   cl_mem_object_type image_type;  /* only for images 1D/2D...*/
   size_t w, h, depth;             /* only for images (depth is only for 3D images) */
   size_t row_pitch, slice_pitch;
@@ -118,15 +147,29 @@ struct _cl_mem_image {
 
 struct _cl_mem_gl_image {
   struct _cl_mem_image base;
-  uint32_t target;
-  int      miplevel;
-  uint32_t texture;
+  int fd;
+#if defined(HAS_GL_EGL)
+  EGLImage egl_image;
+#endif
 };
 
 struct _cl_mem_buffer1d_image {
   struct _cl_mem_image base;
   uint32_t size;
+  _cl_mem * descbuffer;
 };
+
+#define IS_1D_IMAGE(image) (image->image_type == CL_MEM_OBJECT_IMAGE1D ||        \
+                                image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ||  \
+                                image->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
+
+#define IS_2D_IMAGE(image) (image->image_type == CL_MEM_OBJECT_IMAGE2D ||        \
+                                image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY)
+
+#define IS_3D_IMAGE(image) (image->image_type == CL_MEM_OBJECT_IMAGE3D)
+
+#define IS_IMAGE_ARRAY(image) (image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY || \
+                                   image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY)
 
 inline static void
 cl_mem_image_init(struct _cl_mem_image *image, size_t w, size_t h,
@@ -176,27 +219,31 @@ cl_mem_gl_image(cl_mem mem)
   return (struct _cl_mem_gl_image*)mem;
 }
 
-inline static struct _cl_mem_buffer *
-cl_mem_buffer(cl_mem mem)
+inline static struct _cl_mem_pipe *
+cl_mem_pipe(cl_mem mem)
 {
-  assert(!IS_IMAGE(mem));
-  return (struct _cl_mem_buffer *)mem;
+  assert(mem->type == CL_MEM_PIPE_TYPE);
+  return (struct _cl_mem_pipe *)mem;
 }
 
 /* Query information about a memory object */
-extern cl_int cl_get_mem_object_info(cl_mem, cl_mem_info, size_t, void *, size_t *);
-
-/* Query information about an image */
-extern cl_int cl_get_image_info(cl_mem, cl_image_info, size_t, void *, size_t *);
+extern cl_mem_object_type cl_get_mem_object_type(cl_mem mem);
 
 /* Query whether mem is in buffers */
-extern cl_int is_valid_mem(cl_mem mem, cl_mem buffers);
+extern cl_int cl_mem_is_valid(cl_mem mem, cl_context ctx);
 
 /* Create a new memory object and initialize it with possible user data */
 extern cl_mem cl_mem_new_buffer(cl_context, cl_mem_flags, size_t, void*, cl_int*);
 
 /* Create a new sub memory object */
 extern cl_mem cl_mem_new_sub_buffer(cl_mem, cl_mem_flags, cl_buffer_create_type, const void *, cl_int *);
+
+extern cl_mem cl_mem_new_pipe(cl_context, cl_mem_flags, cl_uint, cl_uint, cl_int *);
+/* Query information about a pipe object */
+extern cl_int cl_get_pipe_info(cl_mem, cl_mem_info, size_t, void *, size_t *);
+
+void* cl_mem_svm_allocate(cl_context, cl_svm_mem_flags, size_t, unsigned int);
+void cl_mem_svm_delete(cl_context, void *svm_pointer);
 
 /* Idem but this is an image */
 extern cl_mem
@@ -217,30 +264,30 @@ extern void cl_mem_gl_delete(struct _cl_mem_gl_image *);
 extern void cl_mem_add_ref(cl_mem);
 
 /* api clEnqueueCopyBuffer help function */
-extern cl_int cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
+extern cl_int cl_mem_copy(cl_command_queue queue, cl_event event, cl_mem src_buf, cl_mem dst_buf,
               size_t src_offset, size_t dst_offset, size_t cb);
 
-extern cl_int cl_mem_fill(cl_command_queue queue, const void * pattern, size_t pattern_size,
+extern cl_int cl_mem_fill(cl_command_queue queue, cl_event e, const void * pattern, size_t pattern_size,
               cl_mem buffer, size_t offset, size_t size);
 
-extern cl_int cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image*,
+extern cl_int cl_image_fill(cl_command_queue queue, cl_event e, const void * pattern, struct _cl_mem_image*,
                                     const size_t *, const size_t *);
 
 /* api clEnqueueCopyBufferRect help function */
-extern cl_int cl_mem_copy_buffer_rect(cl_command_queue, cl_mem, cl_mem,
+extern cl_int cl_mem_copy_buffer_rect(cl_command_queue, cl_event event, cl_mem, cl_mem,
                                      const size_t *, const size_t *, const size_t *,
                                      size_t, size_t, size_t, size_t);
 
 /* api clEnqueueCopyImage help function */
-extern cl_int cl_mem_kernel_copy_image(cl_command_queue, struct _cl_mem_image*, struct _cl_mem_image*,
-                                       const size_t *, const size_t *, const size_t *);
+extern cl_int cl_mem_kernel_copy_image(cl_command_queue, cl_event event, struct _cl_mem_image*,
+                                       struct _cl_mem_image*, const size_t *, const size_t *, const size_t *);
 
 /* api clEnqueueCopyImageToBuffer help function */
-extern cl_int cl_mem_copy_image_to_buffer(cl_command_queue, struct _cl_mem_image*, cl_mem,
+extern cl_int cl_mem_copy_image_to_buffer(cl_command_queue, cl_event, struct _cl_mem_image*, cl_mem,
                                           const size_t *, const size_t, const size_t *);
 
 /* api clEnqueueCopyBufferToImage help function */
-extern cl_int cl_mem_copy_buffer_to_image(cl_command_queue, cl_mem, struct _cl_mem_image*,
+extern cl_int cl_mem_copy_buffer_to_image(cl_command_queue, cl_event, cl_mem, struct _cl_mem_image*,
                                           const size_t, const size_t *, const size_t *);
 
 /* Directly map a memory object */
@@ -314,5 +361,10 @@ extern cl_mem cl_mem_new_image_from_fd(cl_context ctx,
                                        size_t row_pitch,
                                        cl_int *errcode);
 
+extern cl_int cl_mem_record_map_mem(cl_mem mem, void *ptr, void **mem_ptr, size_t offset,
+                      size_t size, const size_t *origin, const size_t *region);
+
+extern cl_int cl_mem_set_destructor_callback(cl_mem memobj,
+                      void(CL_CALLBACK *pfn_notify)(cl_mem, void *), void *user_data);
 #endif /* __CL_MEM_H__ */
 

@@ -73,15 +73,34 @@ namespace gbe
     Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
     const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
     setMessageDescriptor(insn, sfid, msg_length, response_length);
-    gen8_insn->bits3.gen7_untyped_rw.msg_type = msg_type;
-    gen8_insn->bits3.gen7_untyped_rw.bti = bti;
-    gen8_insn->bits3.gen7_untyped_rw.rgba = rgba;
+    gen8_insn->bits3.gen8_untyped_rw_a64.msg_type = msg_type;
+    gen8_insn->bits3.gen8_untyped_rw_a64.bti = bti;
+    gen8_insn->bits3.gen8_untyped_rw_a64.rgba = rgba;
     if (curr.execWidth == 8)
-      gen8_insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD8;
+      gen8_insn->bits3.gen8_untyped_rw_a64.simd_mode = GEN_UNTYPED_SIMD8;
     else if (curr.execWidth == 16)
-      gen8_insn->bits3.gen7_untyped_rw.simd_mode = GEN_UNTYPED_SIMD16;
+      gen8_insn->bits3.gen8_untyped_rw_a64.simd_mode = GEN_UNTYPED_SIMD16;
     else
       NOT_SUPPORTED;
+  }
+
+  static void setDPByteScatterGatherA64(GenEncoder *p,
+                                     GenNativeInstruction *insn,
+                                     uint32_t bti,
+                                     uint32_t block_size,
+                                     uint32_t data_size,
+                                     uint32_t msg_type,
+                                     uint32_t msg_length,
+                                     uint32_t response_length)
+  {
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    p->setMessageDescriptor(insn, sfid, msg_length, response_length);
+    gen8_insn->bits3.gen8_scatter_rw_a64.msg_type = msg_type;
+    gen8_insn->bits3.gen8_scatter_rw_a64.bti = bti;
+    gen8_insn->bits3.gen8_scatter_rw_a64.data_sz = data_size;
+    gen8_insn->bits3.gen8_scatter_rw_a64.block_sz = block_size;
+    GBE_ASSERT(p->curr.execWidth == 8);
   }
 
   void Gen8Encoder::setTypedWriteMessage(GenNativeInstruction *insn, unsigned char bti,
@@ -134,7 +153,7 @@ namespace gbe
     return gen8_insn->bits3.ud;
   }
 
-  void Gen8Encoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum) {
+  void Gen8Encoder::ATOMIC(GenRegister dst, uint32_t function, GenRegister src, GenRegister data, GenRegister bti, uint32_t srcNum, bool useSends) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
 
     this->setHeader(insn);
@@ -150,6 +169,48 @@ namespace gbe
       this->setSrc1(insn, bti);
     }
   }
+
+  unsigned Gen8Encoder::setAtomicA64MessageDesc(GenNativeInstruction *insn, unsigned function, unsigned bti, unsigned srcNum, int type_long) {
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    uint32_t msg_length = 0;
+    uint32_t response_length = 0;
+    assert(srcNum <= 3);
+
+    if (this->curr.execWidth == 8) {
+      msg_length = srcNum + 1 + type_long;
+      if(srcNum == 3 && type_long)
+        msg_length++;
+      response_length = 1 + type_long;
+    } else if (this->curr.execWidth == 16) {
+      msg_length = 2 * (srcNum + 1);
+      response_length = 2;
+    } else
+      NOT_IMPLEMENTED;
+
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
+    setMessageDescriptor(insn, sfid, msg_length, response_length);
+    gen8_insn->bits3.gen8_atomic_a64.msg_type = GEN8_P1_UNTYPED_ATOMIC_A64;
+    gen8_insn->bits3.gen8_atomic_a64.bti = bti;
+    gen8_insn->bits3.gen8_atomic_a64.return_data = 1;
+    gen8_insn->bits3.gen8_atomic_a64.aop_type = function;
+    gen8_insn->bits3.gen8_atomic_a64.data_size = type_long;
+
+    return gen8_insn->bits3.ud;
+  }
+
+  void Gen8Encoder::ATOMICA64(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+
+    this->setHeader(insn);
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT_DATA;
+
+    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    int type_long = (dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L) ? 1: 0;
+    setAtomicA64MessageDesc(insn, function, bti.value.ud, srcNum, type_long);
+  }
+
   unsigned Gen8Encoder::setUntypedReadMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum) {
     uint32_t msg_length = 0;
     uint32_t response_length = 0;
@@ -207,7 +268,7 @@ namespace gbe
     return insn->bits3.ud;
   }
 
-  void Gen8Encoder::UNTYPED_WRITE(GenRegister msg, GenRegister bti, uint32_t elemNum) {
+  void Gen8Encoder::UNTYPED_WRITE(GenRegister msg, GenRegister data, GenRegister bti, uint32_t elemNum, bool useSends) {
     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
     assert(elemNum >= 1 || elemNum <= 4);
     this->setHeader(insn);
@@ -227,6 +288,101 @@ namespace gbe
     } else {
       this->setSrc1(insn, bti);
     }
+  }
+
+  void Gen8Encoder::UNTYPED_READA64(GenRegister dst, GenRegister src, uint32_t elemNum) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    assert(elemNum >= 1 || elemNum <= 4);
+    uint32_t msg_length = 0;
+    uint32_t response_length = 0;
+    assert(this->curr.execWidth == 8);
+
+    if (this->curr.execWidth == 8) {
+      msg_length = 2;
+      response_length = elemNum;
+    } else
+      NOT_IMPLEMENTED;
+
+    this->setHeader(insn);
+    this->setDst(insn,  GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setDPUntypedRW(insn,
+                   255, // stateless bti
+                   untypedRWMask[elemNum],
+                   GEN8_P1_UNTYPED_READ_A64,
+                   msg_length,
+                   response_length);
+  }
+
+  void Gen8Encoder::UNTYPED_WRITEA64(GenRegister msg, uint32_t elemNum) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    assert(elemNum >= 1 || elemNum <= 4);
+    uint32_t msg_length = 0;
+    uint32_t response_length = 0;
+    this->setHeader(insn);
+    if (this->curr.execWidth == 8) {
+      this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+      msg_length = 2 + elemNum;
+    } else
+      NOT_IMPLEMENTED;
+
+    this->setSrc0(insn, GenRegister::ud8grf(msg.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setDPUntypedRW(insn,
+                   255, //stateless bti
+                   untypedRWMask[elemNum],
+                   GEN8_P1_UNTYPED_WRITE_A64,
+                   msg_length,
+                   response_length);
+  }
+
+  void Gen8Encoder::BYTE_GATHERA64(GenRegister dst, GenRegister src, uint32_t elemSize) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    this->setHeader(insn);
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT1_DATA;
+
+    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(src.nr, 0));
+
+    this->setSrc1(insn, GenRegister::immud(0));
+    //setByteGatherMessageDesc(insn, bti.value.ud, elemSize);
+    GBE_ASSERT(this->curr.execWidth == 8);
+    const uint32_t msg_length = 2;
+    const uint32_t response_length = 1;
+    setDPByteScatterGatherA64(this,
+                           insn,
+                           0xff,
+                           0x0,
+                           elemSize,
+                           GEN8_P1_BYTE_GATHER_A64,
+                           msg_length,
+                           response_length);
+  }
+
+  void Gen8Encoder::BYTE_SCATTERA64(GenRegister msg, uint32_t elemSize) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+
+    this->setHeader(insn);
+    insn->header.destreg_or_condmod = GEN_SFID_DATAPORT1_DATA;
+
+    // only support simd8
+    GBE_ASSERT(this->curr.execWidth == 8);
+    this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
+
+    this->setSrc0(insn, GenRegister::ud8grf(msg.nr, 0));
+
+    this->setSrc1(insn, GenRegister::immud(0));
+    const uint32_t msg_length = 3;
+    const uint32_t response_length = 0;
+    setDPByteScatterGatherA64(this,
+                           insn,
+                           0xff,
+                           0x0,
+                           elemSize,
+                           GEN8_P1_BYTE_SCATTER_A64,
+                           msg_length,
+                           response_length);
   }
 
   void Gen8Encoder::LOAD_INT64_IMM(GenRegister dest, GenRegister value) {
@@ -274,6 +430,30 @@ namespace gbe
     }
 
     this->setSrc1(&insn, GenRegister::immd(jip*8));
+  }
+  void Gen8Encoder::FENCE(GenRegister dst, bool flushRWCache) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+    this->setHeader(insn);
+    this->setDst(insn, dst);
+    this->setSrc0(insn, dst);
+    setMessageDescriptor(insn, GEN_SFID_DATAPORT_DATA, 1, 1, 1);
+    gen8_insn->bits3.gen7_memory_fence.msg_type = GEN_MEM_FENCE;
+    gen8_insn->bits3.gen7_memory_fence.commit_enable = 0x1;
+    gen8_insn->bits3.gen7_memory_fence.flush_rw = flushRWCache ? 1 : 0;
+  }
+
+  void Gen8Encoder::FLUSH_SAMPLERCACHE(GenRegister dst) {
+     GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+     this->setHeader(insn);
+     this->setDst(insn, dst);
+     this->setSrc0(insn, GenRegister::ud8grf(0,0));
+     unsigned msg_type = GEN_SAMPLER_MESSAGE_CACHE_FLUSH;
+     unsigned simd_mode = GEN_SAMPLER_SIMD_MODE_SIMD32_64;
+     setSamplerMessage(insn, 0, 0, msg_type,
+                       1, 1,
+                       true,
+                       simd_mode, 0);
   }
 
   void Gen8Encoder::setDst(GenNativeInstruction *insn, GenRegister dest) {
@@ -406,9 +586,10 @@ namespace gbe
 
     assert(gen8_insn->bits1.da1.src0_reg_file != GEN_IMMEDIATE_VALUE);
 
-    if (reg.file == GEN_IMMEDIATE_VALUE)
+    if (reg.file == GEN_IMMEDIATE_VALUE) {
+      assert(!((reg.type == GEN_TYPE_L || reg.type == GEN_TYPE_UL || reg.type == GEN_TYPE_DF_IMM) && reg.value.u64 > 0xFFFFFFFFl));
       gen8_insn->bits3.ud = reg.value.ud;
-    else {
+    } else {
       assert (reg.address_mode == GEN_ADDRESS_DIRECT);
       if (gen8_insn->header.access_mode == GEN_ALIGN_1) {
         gen8_insn->bits3.da1.src1_subreg_nr = reg.subnr;
@@ -637,4 +818,69 @@ namespace gbe
     gen8_insn->bits1.da3srcacc.src2_abs = src2.absolute;
     gen8_insn->bits1.da3srcacc.src2_negate = src2.negation;
   }
+
+  static void setOBlockRWA64(GenEncoder *p,
+                             GenNativeInstruction *insn,
+                             uint32_t bti,
+                             uint32_t size,
+                             uint32_t msg_type,
+                             uint32_t msg_length,
+                             uint32_t response_length)
+  {
+    const GenMessageTarget sfid = GEN_SFID_DATAPORT1_DATA;
+    p->setMessageDescriptor(insn, sfid, msg_length, response_length);
+    Gen8NativeInstruction *gen8_insn = &insn->gen8_insn;
+
+    gen8_insn->bits3.gen8_block_rw_a64.msg_type = msg_type;
+    gen8_insn->bits3.gen8_block_rw_a64.bti = bti;
+    // For OWord Block read, we use unaligned read
+    gen8_insn->bits3.gen8_block_rw_a64.msg_sub_type = msg_type == GEN8_P1_BLOCK_READ_A64 ? 1 : 0;
+    gen8_insn->bits3.gen8_block_rw_a64.block_size = size;
+    gen8_insn->bits3.gen8_block_rw_a64.header_present = 1;
+  }
+
+  void Gen8Encoder::OBREADA64(GenRegister dst, GenRegister header, uint32_t bti, uint32_t ow_size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    const uint32_t msg_length = 1;
+    uint32_t sizeinreg = ow_size / 2;
+    // half reg should also have size 1
+    sizeinreg = sizeinreg == 0 ? 1 : sizeinreg;
+    const uint32_t block_size = getOBlockSize(ow_size, dst.subnr == 0);
+    const uint32_t response_length = sizeinreg; // Size is in reg
+
+    this->setHeader(insn);
+    this->setDst(insn, GenRegister::uw16grf(dst.nr, 0));
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    setOBlockRWA64(this,
+                   insn,
+                   bti,
+                   block_size,
+                   GEN8_P1_BLOCK_READ_A64,
+                   msg_length,
+                   response_length);
+
+  }
+
+  void Gen8Encoder::OBWRITEA64(GenRegister header, uint32_t bti, uint32_t ow_size) {
+    GenNativeInstruction *insn = this->next(GEN_OPCODE_SEND);
+    uint32_t sizeinreg = ow_size / 2;
+    // half reg should also have size 1
+    sizeinreg = sizeinreg == 0 ? 1 : sizeinreg;
+    const uint32_t msg_length = 1 + sizeinreg; // Size is in reg and header
+    const uint32_t response_length = 0;
+    const uint32_t block_size = getOBlockSize(ow_size);
+
+    this->setHeader(insn);
+    this->setSrc0(insn, GenRegister::ud8grf(header.nr, 0));
+    this->setSrc1(insn, GenRegister::immud(0));
+    this->setDst(insn, GenRegister::retype(GenRegister::null(), GEN_TYPE_UW));
+    setOBlockRWA64(this,
+                   insn,
+                   bti,
+                   block_size,
+                   GEN8_P1_BLOCK_WRITE_A64,
+                   msg_length,
+                   response_length);
+   }
 } /* End of the name space. */

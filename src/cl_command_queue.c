@@ -25,7 +25,6 @@
 #include "cl_device_id.h"
 #include "cl_mem.h"
 #include "cl_utils.h"
-#include "cl_thread.h"
 #include "cl_alloc.h"
 #include "cl_driver.h"
 #include "cl_khr_icd.h"
@@ -37,80 +36,71 @@
 #include <stdio.h>
 #include <string.h>
 
-LOCAL cl_command_queue
+static cl_command_queue
 cl_command_queue_new(cl_context ctx)
 {
   cl_command_queue queue = NULL;
 
   assert(ctx);
-  TRY_ALLOC_NO_ERR (queue, CALLOC(struct _cl_command_queue));
-  SET_ICD(queue->dispatch)
-  queue->magic = CL_MAGIC_QUEUE_HEADER;
-  queue->ref_n = 1;
-  queue->ctx = ctx;
-  queue->cmrt_event = NULL;
-  if ((queue->thread_data = cl_thread_data_create()) == NULL) {
-    goto error;
+  queue = cl_calloc(1, sizeof(_cl_command_queue));
+  if (queue == NULL)
+    return NULL;
+
+  CL_OBJECT_INIT_BASE(queue, CL_OBJECT_COMMAND_QUEUE_MAGIC);
+  if (cl_command_queue_init_enqueue(queue) != CL_SUCCESS) {
+    cl_free(queue);
+    return NULL;
   }
 
   /* Append the command queue in the list */
-  pthread_mutex_lock(&ctx->queue_lock);
-    queue->next = ctx->queues;
-    if (ctx->queues != NULL)
-      ctx->queues->prev = queue;
-    ctx->queues = queue;
-  pthread_mutex_unlock(&ctx->queue_lock);
-
-  /* The queue also belongs to its context */
-  cl_context_add_ref(ctx);
-
-exit:
+  cl_context_add_queue(ctx, queue);
   return queue;
-error:
-  cl_command_queue_delete(queue);
-  queue = NULL;
-  goto exit;
+}
+
+LOCAL cl_command_queue
+cl_create_command_queue(cl_context ctx, cl_device_id device, cl_command_queue_properties properties,
+                        cl_uint queue_size, cl_int *errcode_ret)
+{
+  cl_command_queue queue = cl_command_queue_new(ctx);
+  if (queue == NULL) {
+    *errcode_ret = CL_OUT_OF_HOST_MEMORY;
+    return NULL;
+  }
+
+  queue->props = properties;
+  queue->device = device;
+  queue->size = queue_size;
+
+  *errcode_ret = CL_SUCCESS;
+  return queue;
 }
 
 LOCAL void
 cl_command_queue_delete(cl_command_queue queue)
 {
   assert(queue);
-  if (atomic_dec(&queue->ref_n) != 1) return;
+  if (CL_OBJECT_DEC_REF(queue) > 1)
+    return;
 
-#ifdef HAS_CMRT
-  if (queue->cmrt_event != NULL)
-    cmrt_destroy_event(queue);
-#endif
+  /* Before we destroy the queue, we should make sure all
+     the commands in the queue are finished. */
+  cl_command_queue_wait_finish(queue);
+  cl_context_remove_queue(queue->ctx, queue);
 
-  // If there is a list of valid events, we need to give them
-  // a chance to call the call-back function.
-  cl_event_update_last_events(queue,1);
-  /* Remove it from the list */
-  assert(queue->ctx);
-  pthread_mutex_lock(&queue->ctx->queue_lock);
-    if (queue->prev)
-      queue->prev->next = queue->next;
-    if (queue->next)
-      queue->next->prev = queue->prev;
-    if (queue->ctx->queues == queue)
-      queue->ctx->queues = queue->next;
-  pthread_mutex_unlock(&queue->ctx->queue_lock);
+  cl_command_queue_destroy_enqueue(queue);
 
-  cl_thread_data_destroy(queue);
-  queue->thread_data = NULL;
   cl_mem_delete(queue->perf);
-  cl_context_delete(queue->ctx);
-  cl_free(queue->wait_events);
-  cl_free(queue->barrier_events);
-  queue->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+  if (queue->barrier_events) {
+    cl_free(queue->barrier_events);
+  }
+  CL_OBJECT_DESTROY_BASE(queue);
   cl_free(queue);
 }
 
 LOCAL void
 cl_command_queue_add_ref(cl_command_queue queue)
 {
-  atomic_inc(&queue->ref_n);
+  CL_OBJECT_INC_REF(queue);
 }
 
 static void
@@ -131,10 +121,9 @@ set_image_info(char *curbe,
 }
 
 LOCAL cl_int
-cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
+cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k, cl_gpgpu gpgpu, uint32_t *max_bti)
 {
   uint32_t i;
-  GET_QUEUE_THREAD_GPGPU(queue);
 
   for (i = 0; i < k->image_sz; i++) {
     int id = k->images[i].arg_idx;
@@ -143,6 +132,8 @@ cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
 
     image = cl_mem_image(k->args[id].mem);
     set_image_info(k->curbe, &k->images[i], image);
+    if(*max_bti < k->images[i].idx)
+      *max_bti = k->images[i].idx;
     if(k->vme){
       if( (image->fmt.image_channel_order != CL_R) || (image->fmt.image_channel_data_type != CL_UNORM_INT8) )
         return CL_IMAGE_FORMAT_NOT_SUPPORTED;
@@ -168,33 +159,71 @@ cl_command_queue_bind_image(cl_command_queue queue, cl_kernel k)
 }
 
 LOCAL cl_int
-cl_command_queue_bind_surface(cl_command_queue queue, cl_kernel k)
+cl_command_queue_bind_surface(cl_command_queue queue, cl_kernel k, cl_gpgpu gpgpu, uint32_t *max_bti)
 {
-  GET_QUEUE_THREAD_GPGPU(queue);
-
   /* Bind all user buffers (given by clSetKernelArg) */
-  uint32_t i;
+  uint32_t i, bti;
+  uint32_t ocl_version = interp_kernel_get_ocl_version(k->opaque);
   enum gbe_arg_type arg_type; /* kind of argument */
   for (i = 0; i < k->arg_n; ++i) {
     int32_t offset; // location of the address in the curbe
     arg_type = interp_kernel_get_arg_type(k->opaque, i);
-    if (arg_type != GBE_ARG_GLOBAL_PTR || !k->args[i].mem)
+    if (!(arg_type == GBE_ARG_GLOBAL_PTR ||
+          (arg_type == GBE_ARG_CONSTANT_PTR && ocl_version >= 200) ||
+          arg_type == GBE_ARG_PIPE) ||
+        !k->args[i].mem)
       continue;
     offset = interp_kernel_get_curbe_offset(k->opaque, GBE_CURBE_KERNEL_ARGUMENT, i);
     if (offset < 0)
       continue;
+    bti = interp_kernel_get_arg_bti(k->opaque, i);
+    if(*max_bti < bti)
+      *max_bti = bti;
     if (k->args[i].mem->type == CL_MEM_SUBBUFFER_TYPE) {
       struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)k->args[i].mem;
-      cl_gpgpu_bind_buf(gpgpu, k->args[i].mem->bo, offset, k->args[i].mem->offset + buffer->sub_offset, k->args[i].mem->size, interp_kernel_get_arg_bti(k->opaque, i));
+      cl_gpgpu_bind_buf(gpgpu, k->args[i].mem->bo, offset, k->args[i].mem->offset + buffer->sub_offset, k->args[i].mem->size, bti);
     } else {
-      cl_gpgpu_bind_buf(gpgpu, k->args[i].mem->bo, offset, k->args[i].mem->offset, k->args[i].mem->size, interp_kernel_get_arg_bti(k->opaque, i));
+      size_t mem_offset = 0; //
+      if(k->args[i].is_svm) {
+        mem_offset = (size_t)k->args[i].ptr - (size_t)k->args[i].mem->host_ptr;
+      }
+      cl_gpgpu_bind_buf(gpgpu, k->args[i].mem->bo, offset, k->args[i].mem->offset + mem_offset, k->args[i].mem->size, bti);
     }
   }
+  return CL_SUCCESS;
+}
+
+LOCAL cl_int
+cl_command_queue_bind_exec_info(cl_command_queue queue, cl_kernel k, cl_gpgpu gpgpu, uint32_t *max_bti)
+{
+  uint32_t i;
+  size_t mem_offset, bti = *max_bti;
+  cl_mem mem;
+  int32_t offset = interp_kernel_get_curbe_size(k->opaque);
+
+  for (i = 0; i < k->exec_info_n; i++) {
+    void *ptr = k->exec_info[i];
+    mem = cl_context_get_svm_from_ptr(k->program->ctx, ptr);
+    if(mem == NULL)
+      mem = cl_context_get_mem_from_ptr(k->program->ctx, ptr);
+
+    if (mem) {
+      mem_offset = (size_t)ptr - (size_t)mem->host_ptr;
+      /* only need realloc in surface state, don't need realloc in curbe */
+      cl_gpgpu_bind_buf(gpgpu, mem->bo, offset + i * sizeof(ptr), mem->offset + mem_offset, mem->size, bti++);
+      if(bti == BTI_WORKAROUND_IMAGE_OFFSET)
+        bti = *max_bti + BTI_WORKAROUND_IMAGE_OFFSET;
+      assert(bti < BTI_MAX_ID);
+    }
+  }
+  *max_bti = bti;
 
   return CL_SUCCESS;
 }
 
-extern cl_int cl_command_queue_ND_range_gen7(cl_command_queue, cl_kernel, uint32_t, const size_t *, const size_t *, const size_t *);
+extern cl_int cl_command_queue_ND_range_gen7(cl_command_queue, cl_kernel, cl_event, 
+                                             uint32_t, const size_t *, const size_t *,const size_t *,
+                                             const size_t *, const size_t *, const size_t *);
 
 static cl_int
 cl_kernel_check_args(cl_kernel k)
@@ -209,10 +238,14 @@ cl_kernel_check_args(cl_kernel k)
 LOCAL cl_int
 cl_command_queue_ND_range(cl_command_queue queue,
                           cl_kernel k,
+                          cl_event event,
                           const uint32_t work_dim,
                           const size_t *global_wk_off,
+                          const size_t *global_dim_off,
                           const size_t *global_wk_sz,
-                          const size_t *local_wk_sz)
+                          const size_t *global_wk_sz_use,
+                          const size_t *local_wk_sz,
+                          const size_t *local_wk_sz_use)
 {
   if(b_output_kernel_perf)
     time_start(queue->ctx, cl_kernel_get_name(k), queue);
@@ -222,8 +255,13 @@ cl_command_queue_ND_range(cl_command_queue queue,
   /* Check that the user did not forget any argument */
   TRY (cl_kernel_check_args, k);
 
+
   if (ver == 7 || ver == 75 || ver == 8 || ver == 9)
-    TRY (cl_command_queue_ND_range_gen7, queue, k, work_dim, global_wk_off, global_wk_sz, local_wk_sz);
+    //TRY (cl_command_queue_ND_range_gen7, queue, k, work_dim, global_wk_off, global_wk_sz, local_wk_sz);
+    TRY (cl_command_queue_ND_range_gen7, queue, k, event, work_dim,
+                                global_wk_off, global_dim_off, global_wk_sz,
+                                global_wk_sz_use, local_wk_sz, local_wk_sz_use);
+
   else
     FATAL ("Unknown Gen Device");
 
@@ -232,7 +270,7 @@ error:
 }
 
 LOCAL int
-cl_command_queue_flush_gpgpu(cl_command_queue queue, cl_gpgpu gpgpu)
+cl_command_queue_flush_gpgpu(cl_gpgpu gpgpu)
 {
   void* printf_info = cl_gpgpu_get_printf_info(gpgpu);
   void* profiling_info;
@@ -257,171 +295,73 @@ cl_command_queue_flush_gpgpu(cl_command_queue queue, cl_gpgpu gpgpu)
     interp_output_profiling(profiling_info, cl_gpgpu_map_profiling_buffer(gpgpu));
     cl_gpgpu_unmap_profiling_buffer(gpgpu);
   }
+
   return CL_SUCCESS;
 }
 
-LOCAL cl_int
-cl_command_queue_flush(cl_command_queue queue)
-{
-  int err;
-  GET_QUEUE_THREAD_GPGPU(queue);
-  err = cl_command_queue_flush_gpgpu(queue, gpgpu);
-  // We now keep a list of uncompleted events and check if they compelte
-  // every flush. This can make sure all events created have chance to be
-  // update status, so the callback functions or reference can be handled.
-  cl_event_update_last_events(queue,0);
-
-  cl_event current_event = get_current_event(queue);
-  if (current_event && err == CL_SUCCESS) {
-    err = cl_event_flush(current_event);
-    set_current_event(queue, NULL);
-  }
-  cl_invalid_thread_gpgpu(queue);
-  return err;
-}
-
-LOCAL cl_int
-cl_command_queue_finish(cl_command_queue queue)
-{
-  cl_gpgpu_sync(cl_get_thread_batch_buf(queue));
-  cl_event_update_last_events(queue,1);
-  return CL_SUCCESS;
-}
-
-#define DEFAULT_WAIT_EVENTS_SIZE  16
-LOCAL void
-cl_command_queue_insert_event(cl_command_queue queue, cl_event event)
-{
-  cl_int i=0;
-  cl_event *new_list;
-
-  assert(queue != NULL);
-  if(queue->wait_events == NULL) {
-    queue->wait_events_size = DEFAULT_WAIT_EVENTS_SIZE;
-    TRY_ALLOC_NO_ERR (queue->wait_events, CALLOC_ARRAY(cl_event, queue->wait_events_size));
-  }
-
-  for(i=0; i<queue->wait_events_num; i++) {
-    if(queue->wait_events[i] == event)
-      return;   //is in the wait_events, need to insert
-  }
-
-  if(queue->wait_events_num < queue->wait_events_size) {
-    queue->wait_events[queue->wait_events_num++] = event;
-    return;
-  }
-
-  //wait_events_num == wait_events_size, array is full
-  queue->wait_events_size *= 2;
-  TRY_ALLOC_NO_ERR (new_list, CALLOC_ARRAY(cl_event, queue->wait_events_size));
-  memcpy(new_list, queue->wait_events, sizeof(cl_event)*queue->wait_events_num);
-  cl_free(queue->wait_events);
-  queue->wait_events = new_list;
-  queue->wait_events[queue->wait_events_num++] = event;
-  return;
-
-exit:
-  return;
-error:
-  if(queue->wait_events)
-    cl_free(queue->wait_events);
-  queue->wait_events = NULL;
-  queue->wait_events_size = 0;
-  queue->wait_events_num = 0;
-  goto exit;
-
-}
-
-LOCAL void
-cl_command_queue_remove_event(cl_command_queue queue, cl_event event)
-{
-  cl_int i=0;
-
-  assert(queue->wait_events);
-  for(i=0; i<queue->wait_events_num; i++) {
-    if(queue->wait_events[i] == event)
-      break;
-  }
-
-  if(i == queue->wait_events_num)
-    return;
-
-  if(i == queue->wait_events_num - 1) {
-    queue->wait_events[i] = NULL;
-  } else {
-    for(; i<queue->wait_events_num-1; i++) {
-      queue->wait_events[i] = queue->wait_events[i+1];
-    }
-  }
-  queue->wait_events_num -= 1;
-}
-
-#define DEFAULT_WAIT_EVENTS_SIZE  16
 LOCAL void
 cl_command_queue_insert_barrier_event(cl_command_queue queue, cl_event event)
 {
-  cl_int i=0;
-  cl_event *new_list;
+  cl_int i = 0;
+
+  cl_event_add_ref(event);
 
   assert(queue != NULL);
-  if(queue->barrier_events == NULL) {
-    queue->barrier_events_size = DEFAULT_WAIT_EVENTS_SIZE;
-    TRY_ALLOC_NO_ERR (queue->barrier_events, CALLOC_ARRAY(cl_event, queue->barrier_events_size));
+  CL_OBJECT_LOCK(queue);
+
+  if (queue->barrier_events == NULL) {
+    queue->barrier_events_size = 4;
+    queue->barrier_events = cl_calloc(queue->barrier_events_size, sizeof(cl_event));
+    assert(queue->barrier_events);
   }
 
-  for(i=0; i<queue->barrier_events_num; i++) {
-    if(queue->barrier_events[i] == event)
-      return;   //is in the barrier_events, need to insert
+  for (i = 0; i<queue->barrier_events_num; i++) {
+    assert(queue->barrier_events[i] != event);
   }
 
   if(queue->barrier_events_num < queue->barrier_events_size) {
     queue->barrier_events[queue->barrier_events_num++] = event;
+    CL_OBJECT_UNLOCK(queue);
     return;
   }
 
-  //barrier_events_num == barrier_events_size, array is full
+  /* Array is full, double expand. */
   queue->barrier_events_size *= 2;
-  TRY_ALLOC_NO_ERR (new_list, CALLOC_ARRAY(cl_event, queue->barrier_events_size));
-  memcpy(new_list, queue->barrier_events, sizeof(cl_event)*queue->barrier_events_num);
-  cl_free(queue->barrier_events);
-  queue->barrier_events = new_list;
+  queue->barrier_events = cl_realloc(queue->barrier_events,
+                                     queue->barrier_events_size * sizeof(cl_event));
+  assert(queue->barrier_events);
+
   queue->barrier_events[queue->barrier_events_num++] = event;
+  CL_OBJECT_UNLOCK(queue);
   return;
-
-exit:
-  return;
-error:
-  if(queue->barrier_events)
-    cl_free(queue->barrier_events);
-  queue->barrier_events = NULL;
-  queue->barrier_events_size = 0;
-  queue->barrier_events_num = 0;
-  goto exit;
-
 }
 
 LOCAL void
 cl_command_queue_remove_barrier_event(cl_command_queue queue, cl_event event)
 {
-  cl_int i=0;
+  cl_int i = 0;
+  assert(queue != NULL);
 
-  if(queue->barrier_events_num == 0)
-    return;
+  CL_OBJECT_LOCK(queue);
 
-  for(i=0; i<queue->barrier_events_num; i++) {
+  assert(queue->barrier_events_num > 0);
+  assert(queue->barrier_events);
+
+  for(i = 0; i < queue->barrier_events_num; i++) {
     if(queue->barrier_events[i] == event)
       break;
   }
+  assert(i < queue->barrier_events_num); // Must find it.
 
-  if(i == queue->barrier_events_num)
-    return;
-
-  if(i == queue->barrier_events_num - 1) {
+  if(i == queue->barrier_events_num - 1) { // The last one.
     queue->barrier_events[i] = NULL;
   } else {
-    for(; i<queue->barrier_events_num-1; i++) {
+    for(; i < queue->barrier_events_num - 1; i++) { // Move forward.
       queue->barrier_events[i] = queue->barrier_events[i+1];
     }
   }
   queue->barrier_events_num -= 1;
+  CL_OBJECT_UNLOCK(queue);
+  
+  cl_event_delete(event);
 }

@@ -20,6 +20,11 @@
 
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#define DISABLE_ATOMIC_INT64
+#ifndef DISABLE_ATOMIC_INT64
+#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
+#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
+#endif
 #include "ocl_defines.h"
 
 #define NULL 0
@@ -32,8 +37,6 @@
 #define PURE __attribute__((pure))
 #define CONST __attribute__((const))
 #define INLINE_OVERLOADABLE inline __attribute__((overloadable,always_inline))
-// FIXME, clang's opencl FE doesn't support static.
-#define static
 
 /////////////////////////////////////////////////////////////////////////////
 // OpenCL built-in scalar data types
@@ -44,8 +47,12 @@ typedef unsigned int uint;
 typedef unsigned long ulong;
 typedef __typeof__(sizeof(int)) size_t;
 typedef __typeof__((int *)0-(int *)0) ptrdiff_t;
-typedef signed int intptr_t;
-typedef unsigned int uintptr_t;
+#define __int_t_type(a,b,c) a##b##c
+#define __int_type(type,n) __int_t_type(type,n,_TYPE__)
+typedef __int_type(__INT,__INTPTR_WIDTH__) intptr_t;
+typedef __int_type(__UINT,__INTPTR_WIDTH__) uintptr_t;
+#undef __int_type
+#undef __int_t_type
 
 /////////////////////////////////////////////////////////////////////////////
 // OpenCL address space
@@ -82,6 +89,34 @@ DEF(float);
 DEF(double);
 DEF(half);
 #undef DEF
+
+/////////////////////////////////////////////////////////////////////////////
+// OpenCL atomic related types
+/////////////////////////////////////////////////////////////////////////////
+//atomic flags
+#define CLK_LOCAL_MEM_FENCE  (1 << 0)
+#define CLK_GLOBAL_MEM_FENCE (1 << 1)
+#define  CLK_IMAGE_MEM_FENCE (1 << 2)
+
+typedef uint cl_mem_fence_flags;
+
+//memory order
+typedef enum {
+	memory_order_relaxed,
+	memory_order_acquire,
+	memory_order_release,
+	memory_order_acq_rel,
+	memory_order_seq_cst
+} memory_order;
+
+//memory scope
+typedef enum {
+	memory_scope_work_item,
+	memory_scope_work_group,
+	memory_scope_device,
+	memory_scope_all_svm_devices,
+	memory_scope_sub_group,
+} memory_scope;
 
 /////////////////////////////////////////////////////////////////////////////
 // OpenCL built-in event types

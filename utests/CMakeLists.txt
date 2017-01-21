@@ -40,7 +40,10 @@ endif (NOT NOT_BUILD_STAND_ALONE_UTEST)
 ###################################################################################
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+                    ${OPENGL_INCLUDE_DIRS}
+                    ${EGL_INCLUDE_DIRS})
+
 
 ##### Math Function Part:
 EXECUTE_PROCESS(COMMAND mkdir generated -p WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -58,7 +61,7 @@ configure_file (
   )
 
 #XXX only need GL if required
-link_directories (${LLVM_LIBRARY_DIR} ${OPENGL_LIBDIR} ${DRM_LIBDIR})
+link_directories (${LLVM_LIBRARY_DIR} ${OPENGL_LIBDIR} ${EGL_LIBDIR} ${X11_LIBDIR} ${DRM_LIBDIR})
 
 set (utests_basic_sources
   utest_error.c
@@ -159,6 +162,7 @@ set (utests_sources
   compiler_switch.cpp
   compiler_bswap.cpp
   compiler_clz.cpp
+  compiler_ctz.cpp
   compiler_math.cpp
   compiler_atomic_functions.cpp
   compiler_async_copy.cpp
@@ -281,6 +285,7 @@ set (utests_sources
   compiler_sub_group_shuffle_xor.cpp
   builtin_global_linear_id.cpp
   builtin_local_linear_id.cpp
+  multi_queue_events.cpp
   compiler_mix.cpp
   compiler_math_3op.cpp
   compiler_bsort.cpp
@@ -291,6 +296,19 @@ if (LLVM_VERSION_NODOT VERSION_GREATER 34)
       ${utests_sources}
       compiler_overflow.cpp)
 endif (LLVM_VERSION_NODOT VERSION_GREATER 34)
+
+if (ENABLE_OPENCL_20)
+  SET(utests_sources
+      ${utests_sources}
+      compiler_program_global.cpp
+      compiler_generic_atomic.cpp
+      compiler_atomic_functions_20.cpp
+      compiler_sampler.cpp
+      compiler_generic_pointer.cpp
+      runtime_pipe_query.cpp
+      compiler_pipe_builtin.cpp
+      compiler_device_enqueue.cpp)
+endif (ENABLE_OPENCL_20)
 
 if (NOT_BUILD_STAND_ALONE_UTEST)
   if (X11_FOUND)
@@ -339,13 +357,12 @@ add_custom_target(utest_generator
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-if (EGL_FOUND AND MESA_SOURCE_FOUND)
+#compiler_fill_gl_image test case also need xlib
+if (OPENGL_FOUND AND EGL_FOUND AND X11_FOUND)
   SET(utests_sources ${utests_sources} compiler_fill_gl_image.cpp)
-  SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
-  SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
-  SET(UTESTS_REQUIRED_EGL_LIB ${EGL_LIBRARIES})
-else()
-  SET(UTESTS_REQUIRED_EGL_LIB "")
+  SET(CMAKE_CXX_FLAGS "-DHAS_GL_EGL_X11 ${CMAKE_CXX_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
+  SET(CMAKE_C_FLAGS "-DHAS_GL_EGL_X11 ${CMAKE_C_FLAGS} ${DEF_OCL_PCH_PCM_PATH}")
+  SET(UTESTS_REQUIRED_GL_EGL_X11_LIB ${OPENGL_LIBRARIES} ${EGL_LIBRARIES} ${X11_LIBRARIES})
 endif()
 
 if (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
@@ -357,13 +374,15 @@ endif ()
 if (COMPILER STREQUAL "CLANG")
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
 endif ()
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-deprecated-declarations" )
 
 ADD_LIBRARY(utests SHARED ${utests_sources})
 
 if (NOT_BUILD_STAND_ALONE_UTEST)
-  TARGET_LINK_LIBRARIES(utests cl m ${OPENGL_LIBRARIES} ${UTESTS_REQUIRED_EGL_LIB} ${CMAKE_THREAD_LIBS_INIT} ${UTESTS_REQUIRED_X11_LIB})
+  TARGET_LINK_LIBRARIES(utests cl m ${UTESTS_REQUIRED_GL_EGL_X11_LIB} ${CMAKE_THREAD_LIBS_INIT} ${UTESTS_REQUIRED_X11_LIB})
 else()
-  TARGET_LINK_LIBRARIES(utests ${OPENCL_LIBRARIES} m ${OPENGL_LIBRARIES} ${UTESTS_REQUIRED_EGL_LIB} ${CMAKE_THREAD_LIBS_INIT} ${UTESTS_REQUIRED_X11_LIB})
+  TARGET_LINK_LIBRARIES(utests ${OPENCL_LIBRARIES} m ${UTESTS_REQUIRED_GL_EGL_X11_LIB} ${CMAKE_THREAD_LIBS_INIT} ${UTESTS_REQUIRED_X11_LIB})
 endif()
 
 ADD_EXECUTABLE(utest_run utest_run.cpp)

@@ -144,6 +144,7 @@ namespace gbe
       case GEN_TYPE_UL: return TYPE_U64;
       case GEN_TYPE_F: return TYPE_FLOAT;
       case GEN_TYPE_DF: return TYPE_DOUBLE;
+      case GEN_TYPE_HF : return TYPE_HALF;
       default: NOT_SUPPORTED; return TYPE_FLOAT;
     }
   }
@@ -168,7 +169,7 @@ namespace gbe
   SelectionInstruction::SelectionInstruction(SelectionOpcode op, uint32_t dst, uint32_t src) :
     parent(NULL), opcode(op), dstNum(dst), srcNum(src)
   {
-    extra.function = 0;
+    extra = { 0 };
   }
 
   void SelectionInstruction::prepend(SelectionInstruction &other) {
@@ -183,9 +184,13 @@ namespace gbe
 
   bool SelectionInstruction::isRead(void) const {
     return this->opcode == SEL_OP_UNTYPED_READ ||
+           this->opcode == SEL_OP_UNTYPED_READA64 ||
            this->opcode == SEL_OP_READ64       ||
+           this->opcode == SEL_OP_READ64A64       ||
            this->opcode == SEL_OP_ATOMIC       ||
+           this->opcode == SEL_OP_ATOMICA64       ||
            this->opcode == SEL_OP_BYTE_GATHER  ||
+           this->opcode == SEL_OP_BYTE_GATHERA64  ||
            this->opcode == SEL_OP_SAMPLE ||
            this->opcode == SEL_OP_VME ||
            this->opcode == SEL_OP_DWORD_GATHER ||
@@ -209,9 +214,13 @@ namespace gbe
 
   bool SelectionInstruction::isWrite(void) const {
     return this->opcode == SEL_OP_UNTYPED_WRITE ||
+           this->opcode == SEL_OP_UNTYPED_WRITEA64 ||
            this->opcode == SEL_OP_WRITE64       ||
+           this->opcode == SEL_OP_WRITE64A64       ||
            this->opcode == SEL_OP_ATOMIC        ||
+           this->opcode == SEL_OP_ATOMICA64        ||
            this->opcode == SEL_OP_BYTE_SCATTER  ||
+           this->opcode == SEL_OP_BYTE_SCATTERA64  ||
            this->opcode == SEL_OP_TYPED_WRITE ||
            this->opcode == SEL_OP_OBWRITE ||
            this->opcode == SEL_OP_MBWRITE;
@@ -223,6 +232,50 @@ namespace gbe
 
   bool SelectionInstruction::isLabel(void) const {
     return this->opcode == SEL_OP_LABEL;
+  }
+
+  bool SelectionInstruction::sameAsDstRegion(uint32_t srcID) {
+    assert(srcID < srcNum);
+    if (dstNum == 0)
+      return true;
+    GenRegister &srcReg = this->src(srcID);
+    for (uint32_t dstID = 0; dstID < dstNum; ++dstID) {
+      const GenRegister &dstReg = this->dst(dstID);
+      if (!dstReg.isSameRegion(srcReg))
+        return false;
+    }
+    return true;
+  }
+
+  bool SelectionInstruction::isNative(void) const {
+    return this->opcode == SEL_OP_NOT         || /* ALU1 */
+           this->opcode == SEL_OP_LZD         ||
+           this->opcode == SEL_OP_RNDZ        ||
+           this->opcode == SEL_OP_RNDE        ||
+           this->opcode == SEL_OP_RNDD        ||
+           this->opcode == SEL_OP_RNDU        ||
+           this->opcode == SEL_OP_FRC         ||
+           this->opcode == SEL_OP_F16TO32     ||
+           this->opcode == SEL_OP_F32TO16     ||
+           this->opcode == SEL_OP_CBIT        ||
+           this->opcode == SEL_OP_SEL         || /* ALU2 */
+           this->opcode == SEL_OP_AND         ||
+           this->opcode == SEL_OP_OR          ||
+           this->opcode == SEL_OP_XOR         ||
+           this->opcode == SEL_OP_SHR         ||
+           this->opcode == SEL_OP_SHL         ||
+           this->opcode == SEL_OP_RSR         ||
+           this->opcode == SEL_OP_RSL         ||
+           this->opcode == SEL_OP_ASR         ||
+           this->opcode == SEL_OP_SEL         ||
+           this->opcode == SEL_OP_ADD         ||
+           this->opcode == SEL_OP_MUL         ||
+           this->opcode == SEL_OP_FBH         ||
+           this->opcode == SEL_OP_FBL         ||
+           this->opcode == SEL_OP_MACH        ||
+           this->opcode == SEL_OP_MATH        ||
+           this->opcode == SEL_OP_LRP         || /* ALU3 */
+           this->opcode == SEL_OP_MAD;
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -237,7 +290,7 @@ namespace gbe
   // SelectionBlock
   ///////////////////////////////////////////////////////////////////////////
 
-  SelectionBlock::SelectionBlock(const ir::BasicBlock *bb) : bb(bb), isLargeBlock(false), endifLabel( (ir::LabelIndex) 0), removeSimpleIfEndif(false){}
+  SelectionBlock::SelectionBlock(const ir::BasicBlock *bb) : bb(bb), endifLabel( (ir::LabelIndex) 0), removeSimpleIfEndif(false){}
 
   void SelectionBlock::append(ir::Register reg) { tmp.push_back(reg); }
 
@@ -364,7 +417,9 @@ namespace gbe
     /*! spill a register (insert spill/unspill instructions) */
     INLINE bool spillRegs(const SpilledRegs &spilledRegs, uint32_t registerPool);
     bool has32X32Mul() const { return bHas32X32Mul; }
+    bool hasSends() const { return bHasSends; }
     void setHas32X32Mul(bool b) { bHas32X32Mul = b; }
+    void setHasSends(bool b) { bHasSends = b; }
     bool hasLongType() const { return bHasLongType; }
     bool hasDoubleType() const { return bHasDoubleType; }
     bool hasHalfType() const { return bHasHalfType; }
@@ -570,6 +625,7 @@ namespace gbe
     I64Shift(I64SHL)
     I64Shift(I64SHR)
     I64Shift(I64ASR)
+    ALU1(BFREV)
 #undef ALU1
 #undef ALU1WithTemp
 #undef ALU2
@@ -632,10 +688,16 @@ namespace gbe
     void WAIT(uint32_t n = 0);
     /*! Atomic instruction */
     void ATOMIC(Reg dst, uint32_t function, uint32_t srcNum, Reg src0, Reg src1, Reg src2, GenRegister bti, vector<GenRegister> temps);
+    /*! AtomicA64 instruction */
+    void ATOMICA64(Reg dst, uint32_t function, uint32_t srcNum, vector<GenRegister> src, GenRegister bti, vector<GenRegister> temps);
     /*! Read 64 bits float/int array */
     void READ64(Reg addr, const GenRegister *dst, const GenRegister *tmp, uint32_t elemNum, const GenRegister bti, bool native_long, vector<GenRegister> temps);
     /*! Write 64 bits float/int array */
     void WRITE64(Reg addr, const GenRegister *src, const GenRegister *tmp, uint32_t srcNum, GenRegister bti, bool native_long, vector<GenRegister> temps);
+    /*! Read64 A64 */
+    void READ64A64(Reg addr, const GenRegister *dst, const GenRegister *tmp, uint32_t elemNum);
+    /*! write64 a64 */
+    void WRITE64A64(Reg addr, const GenRegister *src, const GenRegister *tmp, uint32_t srcNum);
     /*! Untyped read (up to 4 elements) */
     void UNTYPED_READ(Reg addr, const GenRegister *dst, uint32_t elemNum, GenRegister bti, vector<GenRegister> temps);
     /*! Untyped write (up to 4 elements) */
@@ -644,6 +706,14 @@ namespace gbe
     void BYTE_GATHER(Reg dst, Reg addr, uint32_t elemSize, GenRegister bti, vector<GenRegister> temps);
     /*! Byte scatter (for unaligned bytes, shorts and ints) */
     void BYTE_SCATTER(Reg addr, Reg src, uint32_t elemSize, GenRegister bti, vector <GenRegister> temps);
+    /*! Byte gather a64 (for unaligned bytes, shorts and ints) */
+    void BYTE_GATHERA64(Reg dst, Reg addr, uint32_t elemSize);
+    /*! Byte scatter (for unaligned bytes, shorts and ints) */
+    void BYTE_SCATTERA64(GenRegister *msg, unsigned msgNum, uint32_t elemSize);
+    /*! Untyped read (up to 4 elements) */
+    void UNTYPED_READA64(Reg addr, const GenRegister *dst, uint32_t dstNum, uint32_t elemNum);
+    /*! Untyped write (up to 4 elements) */
+    void UNTYPED_WRITEA64(const GenRegister *msgs, uint32_t msgNum, uint32_t elemNum);
     /*! DWord scatter (for constant cache read) */
     void DWORD_GATHER(Reg dst, Reg addr, uint32_t bti);
     /*! Unpack the uint to charN */
@@ -681,7 +751,7 @@ namespace gbe
     /*! Store the profiling info */
     void STORE_PROFILING(uint32_t profilingType, uint32_t bti, GenRegister tmp0, GenRegister tmp1, GenRegister ts[5], int tsNum);
     /*! Printf */
-    void PRINTF(GenRegister dst, uint8_t bti, GenRegister tmp0, GenRegister tmp1, GenRegister src[8],
+    void PRINTF(uint8_t bti, GenRegister tmp0, GenRegister tmp1, GenRegister src[8],
                 int srcNum, uint16_t num, bool isContinue, uint32_t totalSize);
     /*! Multiply 64-bit integers */
     void I64MUL(Reg dst, Reg src0, Reg src1, GenRegister *tmp, bool native_long);
@@ -696,19 +766,19 @@ namespace gbe
                       GenRegister tmpData1,
                       GenRegister localThreadID, GenRegister localThreadNUM,
                       GenRegister tmpData2, GenRegister slmOff,
-                      vector<GenRegister> msg, uint32_t msgSizeReq,
+                      vector<GenRegister> msg,
                       GenRegister localBarrier);
     /*! Sub Group Operations */
     void SUBGROUP_OP(uint32_t wg_op, Reg dst, GenRegister src,
                       GenRegister tmpData1, GenRegister tmpData2);
     /*! Oblock read */
-    void OBREAD(GenRegister* dsts, uint32_t vec_size, GenRegister addr, GenRegister header, uint32_t bti, GenRegister* tmp, uint32_t tmp_size);
+    void OBREAD(GenRegister* dsts, uint32_t tmp_size, GenRegister header, uint32_t bti, uint32_t ow_size);
     /*! Oblock write */
-    void OBWRITE(GenRegister addr, GenRegister* values, uint32_t vec_size, GenRegister header, uint32_t bti, GenRegister* tmp, uint32_t tmp_size);
+    void OBWRITE(GenRegister header, GenRegister* values, uint32_t tmp_size, uint32_t bti, uint32_t ow_size);
     /*! Media block read */
-    void MBREAD(GenRegister* dsts, GenRegister coordx, GenRegister coordy, GenRegister header, GenRegister* tmp, uint32_t bti, uint32_t vec_size);
+    void MBREAD(GenRegister* dsts, uint32_t tmp_size, GenRegister header, uint32_t bti, uint32_t response_size);
     /*! Media block write */
-    void MBWRITE(GenRegister coordx, GenRegister coordy, GenRegister* values, GenRegister header, GenRegister* tmp, uint32_t bti, uint32_t vec_size);
+    void MBWRITE(GenRegister header, GenRegister* values, uint32_t tmp_size, uint32_t bti, uint32_t data_size);
 
     /* common functions for both binary instruction and sel_cmp and compare instruction.
        It will handle the IMM or normal register assignment, and will try to avoid LOADI
@@ -777,9 +847,9 @@ namespace gbe
             GenRegister::retype(GenRegister::null(), GEN_TYPE_UD));
     }
 
-    INLINE vector<GenRegister> getBTITemps(const ir::BTI &bti) {
+    INLINE vector<GenRegister> getBTITemps(const ir::AddressMode &AM) {
       vector<GenRegister> temps;
-      if (!bti.isConst) {
+      if (AM == ir::AM_DynamicBti) {
         temps.push_back(selReg(reg(ir::FAMILY_WORD, true), ir::TYPE_U16));
         temps.push_back(selReg(reg(ir::FAMILY_DWORD, true), ir::TYPE_U32));
       }
@@ -798,6 +868,7 @@ namespace gbe
     bool bHasDoubleType;
     bool bHasHalfType;
     bool bLongRegRestrict;
+    bool bHasSends;
     uint32_t ldMsgOrder;
     bool slowByteGather;
     INLINE ir::LabelIndex newAuxLabel()
@@ -840,7 +911,7 @@ namespace gbe
     maxInsnNum(ctx.getFunction().getLargestBlockSize()), dagPool(maxInsnNum),
     stateNum(0), vectorNum(0), bwdCodeGeneration(false), storeThreadMap(false),
     currAuxLabel(ctx.getFunction().labelNum()), bHas32X32Mul(false), bHasLongType(false),
-    bHasDoubleType(false), bHasHalfType(false), bLongRegRestrict(false),
+    bHasDoubleType(false), bHasHalfType(false), bLongRegRestrict(false), bHasSends(false),
     ldMsgOrder(LD_MSG_ORDER_IVB), slowByteGather(false)
   {
     const ir::Function &fn = ctx.getFunction();
@@ -1094,7 +1165,7 @@ namespace gbe
       if(this->block->removeSimpleIfEndif){
         mov->state.predicate = GEN_PREDICATE_NORMAL;
         mov->state.flag = 0;
-        mov->state.subFlag = 0;
+        mov->state.subFlag = 1;
       }
       if (this->isScalarReg(insn->src(regID).reg()))
         mov->state.noMask = 1;
@@ -1128,7 +1199,7 @@ namespace gbe
       if(this->block->removeSimpleIfEndif){
         mov->state.predicate = GEN_PREDICATE_NORMAL;
         mov->state.flag = 0;
-        mov->state.subFlag = 0;
+        mov->state.subFlag = 1;
       }
       if (simdWidth == 1) {
         mov->state.noMask = 1;
@@ -1318,6 +1389,48 @@ namespace gbe
     insn->extra.function = function;
     insn->extra.elem = msgPayload;
 
+    if (hasSends() && msgPayload > 1) {
+      insn->extra.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 1;
+      vector->offsetID = 0;
+      vector->reg = &insn->src(0);
+      vector->isSrc = 1;
+
+      vector = this->appendVector();
+      vector->regNum = msgPayload - 1;
+      vector->offsetID = 1;
+      vector->reg = &insn->src(1);
+      vector->isSrc = 1;
+    } else {
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = msgPayload; //bti not included in SelectionVector
+      vector->offsetID = 0;
+      vector->reg = &insn->src(0);
+      vector->isSrc = 1;
+    }
+  }
+
+  void Selection::Opaque::ATOMICA64(Reg dst, uint32_t function,
+                                 uint32_t msgPayload, vector<GenRegister> src,
+                                 GenRegister bti,
+                                 vector<GenRegister> temps) {
+    unsigned dstNum = 1 + temps.size();
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_ATOMICA64, dstNum, msgPayload + 1);
+
+    insn->dst(0) = dst;
+    if(temps.size()) {
+      insn->dst(1) = temps[0];
+      insn->dst(2) = temps[1];
+    }
+
+    for (uint32_t elemID = 0; elemID < msgPayload; ++elemID)
+      insn->src(elemID) = src[elemID];
+    insn->src(msgPayload) = bti;
+
+    insn->extra.function = function;
+    insn->extra.elem = msgPayload;
+
     SelectionVector *vector = this->appendVector();
     vector->regNum = msgPayload; //bti not included in SelectionVector
     vector->offsetID = 0;
@@ -1399,6 +1512,39 @@ namespace gbe
     srcVector->reg = &insn->src(0);
   }
 
+  void Selection::Opaque::READ64A64(Reg addr,
+                                 const GenRegister *dst,
+                                 const GenRegister *tmp,
+                                 uint32_t elemNum)
+  {
+    SelectionInstruction *insn = NULL;
+    SelectionVector *srcVector = NULL;
+    SelectionVector *dstVector = NULL;
+    insn = this->appendInsn(SEL_OP_READ64A64,elemNum*2, 1);
+    srcVector = this->appendVector();
+    dstVector = this->appendVector();
+
+    for (uint32_t elemID = 0; elemID < elemNum; ++elemID)
+      insn->dst(elemID) = tmp[elemID];
+
+    for (uint32_t elemID = 0; elemID < elemNum; ++elemID)
+      insn->dst(elemID + elemNum) = dst[elemID];
+
+    insn->src(0) = addr;
+
+    insn->extra.elem = elemNum;
+
+    dstVector->regNum = elemNum;
+    dstVector->isSrc = 0;
+    dstVector->offsetID = 0;
+    dstVector->reg = &insn->dst(0);
+
+    srcVector->regNum = 1;
+    srcVector->offsetID = 0;
+    srcVector->isSrc = 1;
+    srcVector->reg = &insn->src(0);
+  }
+
   void Selection::Opaque::UNTYPED_READ(Reg addr,
                                        const GenRegister *dst,
                                        uint32_t elemNum,
@@ -1430,6 +1576,34 @@ namespace gbe
 
     // Sends require contiguous allocation
     dstVector->regNum = elemNum;
+    dstVector->isSrc = 0;
+    dstVector->offsetID = 0;
+    dstVector->reg = &insn->dst(0);
+
+    srcVector->regNum = 1;
+    srcVector->isSrc = 1;
+    srcVector->offsetID = 0;
+    srcVector->reg = &insn->src(0);
+  }
+  void Selection::Opaque::UNTYPED_READA64(Reg addr,
+                                       const GenRegister *dst,
+                                       uint32_t dstNum,
+                                       uint32_t elemNum)
+  {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_READA64, dstNum, 1);
+    SelectionVector *srcVector = this->appendVector();
+    SelectionVector *dstVector = this->appendVector();
+    if (this->isScalarReg(dst[0].reg()))
+      insn->state.noMask = 1;
+    // Regular instruction to encode
+    for (uint32_t id = 0; id < dstNum; ++id)
+      insn->dst(id) = dst[id];
+
+    insn->src(0) = addr;
+    insn->extra.elem = elemNum;
+
+    // Sends require contiguous allocation
+    dstVector->regNum = dstNum;
     dstVector->isSrc = 0;
     dstVector->offsetID = 0;
     dstVector->reg = &insn->dst(0);
@@ -1479,7 +1653,6 @@ namespace gbe
       // dst: srcNum, (flagTemp)
       // src: srcNum, addr, srcNum, bti.
       insn = this->appendInsn(SEL_OP_WRITE64, dstNum, srcNum*2 + 2);
-      vector = this->appendVector();
 
       for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
         insn->src(elemID) = src[elemID];
@@ -1500,16 +1673,67 @@ namespace gbe
       }
       insn->extra.elem = srcNum;
 
-      vector->regNum = srcNum + 1;
-      vector->offsetID = srcNum;
-      vector->reg = &insn->src(srcNum);
-      vector->isSrc = 1;
+      if (hasSends()) {
+        insn->extra.splitSend = 1;
+
+        //addr regs
+        vector = this->appendVector();
+        vector->regNum = 1;
+        vector->offsetID = srcNum;
+        vector->reg = &insn->src(srcNum);
+        vector->isSrc = 1;
+
+        //data regs
+        vector = this->appendVector();
+        vector->regNum = srcNum;
+        vector->offsetID = srcNum+1;
+        vector->reg = &insn->src(srcNum+1);
+        vector->isSrc = 1;
+      } else {
+        vector = this->appendVector();
+        vector->regNum = srcNum + 1;
+        vector->offsetID = srcNum;
+        vector->reg = &insn->src(srcNum);
+        vector->isSrc = 1;
+      }
     }
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
       insn->state.flag = 0;
       insn->state.subFlag = 1;
     }
+  }
+
+  void Selection::Opaque::WRITE64A64(Reg addr,
+                                  const GenRegister *src,
+                                  const GenRegister *tmp,
+                                  uint32_t srcNum)
+  {
+    SelectionVector *vector = NULL;
+    SelectionInstruction *insn = NULL;
+
+    const uint32_t dstNum = srcNum;
+    insn = this->appendInsn(SEL_OP_WRITE64A64, dstNum, srcNum*2 + 1);
+    vector = this->appendVector();
+
+    for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
+      insn->src(elemID) = src[elemID];
+
+    insn->src(srcNum) = addr;
+    for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
+      insn->src(srcNum + 1 + elemID) = tmp[elemID];
+
+    /* We also need to add the tmp reigster to dst, in order
+       to avoid the post schedule error . */
+    for (uint32_t elemID = 0; elemID < srcNum; ++elemID)
+      insn->dst(elemID) = tmp[elemID];
+
+    insn->extra.elem = srcNum;
+
+    vector->regNum = srcNum + 1;
+    vector->offsetID = srcNum;
+    vector->reg = &insn->src(srcNum);
+    vector->isSrc = 1;
   }
 
   void Selection::Opaque::UNTYPED_WRITE(Reg addr,
@@ -1521,7 +1745,6 @@ namespace gbe
     unsigned dstNum = temps.size();
     unsigned srcNum = elemNum + 2 + temps.size();
     SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_WRITE, dstNum, srcNum);
-    SelectionVector *vector = this->appendVector();
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
       insn->state.flag = 0;
@@ -1541,8 +1764,42 @@ namespace gbe
     }
     insn->extra.elem = elemNum;
 
+    if (hasSends()) {
+      insn->extra.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = elemNum;
+      vector->reg = &insn->src(1);
+      vector->offsetID = 1;
+      vector->isSrc = 1;
+      vector = this->appendVector();
+      vector->regNum = 1;
+      vector->reg = &insn->src(0);
+      vector->offsetID = 0;
+      vector->isSrc = 1;
+    } else {
     // Sends require contiguous allocation for the sources
+      SelectionVector *vector = this->appendVector();
     vector->regNum = elemNum+1;
+    vector->reg = &insn->src(0);
+    vector->offsetID = 0;
+    vector->isSrc = 1;
+    }
+  }
+
+  void Selection::Opaque::UNTYPED_WRITEA64(const GenRegister *src,
+                                        uint32_t msgNum,
+                                        uint32_t elemNum)
+  {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_UNTYPED_WRITEA64, 0, msgNum);
+    SelectionVector *vector = this->appendVector();
+
+    // Regular instruction to encode
+    for (uint32_t id = 0; id < msgNum; ++id)
+      insn->src(id) = src[id];
+    insn->extra.elem = elemNum;
+
+    // Sends require contiguous allocation for the sources
+    vector->regNum = msgNum;
     vector->reg = &insn->src(0);
     vector->offsetID = 0;
     vector->isSrc = 1;
@@ -1591,7 +1848,6 @@ namespace gbe
                                        GenRegister bti, vector<GenRegister> temps) {
     unsigned dstNum = temps.size();
     SelectionInstruction *insn = this->appendInsn(SEL_OP_BYTE_SCATTER, dstNum, 3);
-    SelectionVector *vector = this->appendVector();
 
     if (bti.file != GEN_IMMEDIATE_VALUE) {
       insn->state.flag = 0;
@@ -1608,8 +1864,59 @@ namespace gbe
     insn->src(2) = bti;
     insn->extra.elem = elemSize;
 
-    // value and address are contiguous in the send
-    vector->regNum = 2;
+    if (hasSends()) {
+      insn->extra.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 1;
+      vector->isSrc = 1;
+      vector->offsetID = 0;
+      vector->reg = &insn->src(0);
+
+      vector = this->appendVector();
+      vector->regNum = 1;
+      vector->isSrc = 1;
+      vector->offsetID = 1;
+      vector->reg = &insn->src(1);
+    } else {
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 2;
+      vector->isSrc = 1;
+      vector->offsetID = 0;
+      vector->reg = &insn->src(0);
+    }
+  }
+
+  void Selection::Opaque::BYTE_GATHERA64(Reg dst, Reg addr, uint32_t elemSize) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_BYTE_GATHERA64, 1, 1);
+    SelectionVector *srcVector = this->appendVector();
+    SelectionVector *dstVector = this->appendVector();
+
+    if (this->isScalarReg(dst.reg()))
+      insn->state.noMask = 1;
+
+    insn->src(0) = addr;
+    insn->dst(0) = dst;
+    insn->extra.elem = elemSize;
+
+    dstVector->regNum = 1;
+    dstVector->isSrc = 0;
+    dstVector->offsetID = 0;
+    dstVector->reg = &insn->dst(0);
+    srcVector->regNum = 1;
+    srcVector->isSrc = 1;
+    srcVector->offsetID = 0;
+    srcVector->reg = &insn->src(0);
+  }
+
+  void Selection::Opaque::BYTE_SCATTERA64(GenRegister *msg, uint32_t msgNum, uint32_t elemSize) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_BYTE_SCATTERA64, 0, msgNum);
+    SelectionVector *vector = this->appendVector();
+    for (unsigned i = 0; i < msgNum; i++)
+      insn->src(i) = msg[i];
+
+    insn->extra.elem = elemSize;
+
+    vector->regNum = msgNum;
     vector->isSrc = 1;
     vector->offsetID = 0;
     vector->reg = &insn->src(0);
@@ -1930,51 +2237,41 @@ namespace gbe
     }
   }
 
-  void Selection::Opaque::PRINTF(GenRegister dst, uint8_t bti, GenRegister tmp0, GenRegister tmp1,
+  void Selection::Opaque::PRINTF(uint8_t bti, GenRegister tmp0, GenRegister tmp1,
                GenRegister src[8], int srcNum, uint16_t num, bool isContinue, uint32_t totalSize) {
-    if (isContinue) {
-      SelectionInstruction *insn = this->appendInsn(SEL_OP_PRINTF, 3, srcNum + 1);
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_PRINTF, 2, srcNum);
+
+    for (int i = 0; i < srcNum; i++)
+      insn->src(i) = src[i];
+
+    insn->dst(0) = tmp0;
+    insn->dst(1) = tmp1;
+
+    if (hasSends()) {
+      insn->extra.printfSplitSend = 1;
       SelectionVector *vector = this->appendVector();
-
-      for (int i = 0; i < srcNum; i++)
-        insn->src(i) = src[i];
-
-      insn->src(srcNum) = tmp0;
-
-      insn->dst(0) = dst;
-      insn->dst(1) = tmp0;
-      insn->dst(2) = tmp1;
-
-      vector->regNum = 2;
-      vector->reg = &insn->dst(1);
+      vector->regNum = 1;
+      vector->reg = &insn->dst(0);
       vector->offsetID = 0;
       vector->isSrc = 0;
 
-      insn->extra.printfSize = static_cast<uint16_t>(totalSize);
-      insn->extra.continueFlag = isContinue;
-      insn->extra.printfBTI = bti;
-      insn->extra.printfNum = num;
+      vector = this->appendVector();
+      vector->regNum = 1;
+      vector->reg = &insn->dst(1);
+      vector->offsetID = 1;
+      vector->isSrc = 0;
     } else {
-      SelectionInstruction *insn = this->appendInsn(SEL_OP_PRINTF, 3, srcNum);
       SelectionVector *vector = this->appendVector();
-
-      for (int i = 0; i < srcNum; i++)
-        insn->src(i) = src[i];
-
-      insn->dst(0) = dst;
-      insn->dst(1) = tmp0;
-      insn->dst(2) = tmp1;
-
       vector->regNum = 2;
-      vector->reg = &insn->dst(1);
+      vector->reg = &insn->dst(0);
       vector->offsetID = 0;
       vector->isSrc = 0;
-
-      insn->extra.printfSize = static_cast<uint16_t>(totalSize);
-      insn->extra.continueFlag = isContinue;
-      insn->extra.printfBTI = bti;
-      insn->extra.printfNum = num;
     }
+
+    insn->extra.printfSize = static_cast<uint16_t>(totalSize);
+    insn->extra.continueFlag = isContinue;
+    insn->extra.printfBTI = bti;
+    insn->extra.printfNum = num;
   }
 
   void Selection::Opaque::WORKGROUP_OP(uint32_t wg_op,
@@ -1986,19 +2283,11 @@ namespace gbe
                                        GenRegister tmpData2,
                                        GenRegister slmOff,
                                        vector<GenRegister> msg,
-                                       uint32_t msgSizeReq,
                                        GenRegister localBarrier)
   {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_WORKGROUP_OP, 2 + msg.size(), 6);
-    SelectionVector *vector = this->appendVector();
 
-    /* allocate continuous GRF registers for READ/WRITE to SLM */
-    GBE_ASSERT(msg.size() >= msgSizeReq);
-    vector->regNum = msg.size();
-    vector->offsetID = 0;
-    vector->reg = &insn->dst(2);
-    vector->isSrc = 0;
-    insn->extra.workgroupOp = wg_op;
+    insn->extra.wgop.workgroupOp = wg_op;
 
     insn->dst(0) = dst;
     insn->dst(1) = tmpData1;
@@ -2011,6 +2300,29 @@ namespace gbe
     insn->src(3) = tmpData2;
     insn->src(4) = slmOff;
     insn->src(5) = localBarrier;
+
+    if (hasSends()) {
+      insn->extra.wgop.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+
+      vector->regNum = 1;
+      vector->offsetID = 2;
+      vector->reg = &insn->dst(2);
+      vector->isSrc = 0;
+
+      vector = this->appendVector();
+      vector->regNum = msg.size() - 1;
+      vector->offsetID = 3;
+      vector->reg = &insn->dst(3);
+      vector->isSrc = 0;
+    } else {
+      /* allocate continuous GRF registers for READ/WRITE to SLM */
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = msg.size();
+      vector->offsetID = 2;
+      vector->reg = &insn->dst(2);
+      vector->isSrc = 0;
+    }
   }
 
   void Selection::Opaque::SUBGROUP_OP(uint32_t wg_op,
@@ -2021,7 +2333,7 @@ namespace gbe
   {
     SelectionInstruction *insn = this->appendInsn(SEL_OP_SUBGROUP_OP, 2, 2);
 
-    insn->extra.workgroupOp = wg_op;
+    insn->extra.wgop.workgroupOp = wg_op;
 
     insn->dst(0) = dst;
     insn->dst(1) = tmpData1;
@@ -2031,119 +2343,115 @@ namespace gbe
   }
   void Selection::Opaque::OBREAD(GenRegister* dsts,
                                  uint32_t vec_size,
-                                 GenRegister addr,
                                  GenRegister header,
                                  uint32_t bti,
-                                 GenRegister* tmp,
-                                 uint32_t tmp_size) {
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBREAD, 1 + vec_size + tmp_size, 1);
+                                 uint32_t ow_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBREAD, vec_size, 1);
     SelectionVector *vector = this->appendVector();
-    insn->dst(0) = header;
+    insn->src(0) = header;
     for (uint32_t i = 0; i < vec_size; ++i)
-      insn->dst(1 + i) = dsts[i];
-    for (uint32_t i = 0; i < tmp_size; ++i)
-      insn->dst(1 + i + vec_size) = tmp[i];
-    insn->src(0) = addr;
+      insn->dst(i) = dsts[i];
     insn->setbti(bti);
-    insn->extra.elem = vec_size; // number of vector size
+    insn->extra.elem = ow_size; // number of OWord size
 
     // tmp regs for OWORD read dst
-    vector->regNum = tmp_size;
-    vector->reg = &insn->dst(1 + vec_size);
-    vector->offsetID = 1 + vec_size;
-    vector->isSrc = 0;
-  }
-
-  void Selection::Opaque::OBWRITE(GenRegister addr,
-                                  GenRegister* values,
-                                  uint32_t vec_size,
-                                  GenRegister header,
-                                  uint32_t bti,
-                                  GenRegister* tmp,
-                                  uint32_t tmp_size) {
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBWRITE, tmp_size + 1, vec_size + 1);
-    SelectionVector *vector = this->appendVector();
-    insn->src(0) = addr;
-    for (uint32_t i = 0; i < vec_size; ++i)
-      insn->src(i + 1) = values[i];
-    insn->dst(0) = header;
-    for (uint32_t i = 0; i < tmp_size; ++i)
-      insn->dst(i + 1) = tmp[i];
-    insn->setbti(bti);
-    insn->extra.elem = vec_size; // number of vector_size
-
-    // tmp regs for OWORD read dst
-    vector->regNum = tmp_size + 1;
+    vector->regNum = vec_size;
     vector->reg = &insn->dst(0);
     vector->offsetID = 0;
     vector->isSrc = 0;
+  }
+
+  void Selection::Opaque::OBWRITE(GenRegister header,
+                                  GenRegister* values,
+                                  uint32_t vec_size,
+                                  uint32_t bti,
+                                  uint32_t ow_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_OBWRITE, 0, vec_size + 1);
+    insn->src(0) = header;
+    for (uint32_t i = 0; i < vec_size; ++i)
+      insn->src(i + 1) = values[i];
+    insn->setbti(bti);
+    insn->extra.elem = ow_size; // number of OWord_size
+
+    // For A64 write, we did not add sends support yet.
+    if (hasSends() && bti != 255) {
+      insn->extra.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 1;
+      vector->reg = &insn->src(0);
+      vector->offsetID = 0;
+      vector->isSrc = 1;
+
+      vector = this->appendVector();
+      vector->regNum = vec_size;
+      vector->reg = &insn->src(1);
+      vector->offsetID = 1;
+      vector->isSrc = 1;
+    } else {
+      // tmp regs for OWORD write header and values
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = vec_size + 1;
+      vector->reg = &insn->src(0);
+      vector->offsetID = 0;
+      vector->isSrc = 1;
+    }
+
   }
 
   void Selection::Opaque::MBREAD(GenRegister* dsts,
-                                 GenRegister coordx,
-                                 GenRegister coordy,
+                                 uint32_t tmp_size,
                                  GenRegister header,
-                                 GenRegister* tmp,
                                  uint32_t bti,
-                                 uint32_t vec_size) {
+                                 uint32_t response_size) {
 
-    uint32_t simdWidth = curr.execWidth;
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBREAD, vec_size * simdWidth / 8 + 1, 2);
-
-    insn->dst(0) = header;
-    for (uint32_t i = 0; i < vec_size; ++i) {
-      insn->dst(i + 1) = dsts[i];
-      if(simdWidth == 16)
-        insn->dst(i + vec_size + 1) = tmp[i];
-    }
-    insn->src(0) = coordx;
-    insn->src(1) = coordy;
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBREAD, tmp_size, 1);
+    insn->src(0) = header;
     insn->setbti(bti);
-    insn->extra.elem = vec_size; // vector size
+    insn->extra.elem = response_size; // send response length
 
-    // Only in simd 8 the data is in vector form
-    if(simdWidth == 8) {
-      SelectionVector *vector = this->appendVector();
-      vector->regNum = vec_size;
-      vector->reg = &insn->dst(1);
-      vector->offsetID = 1;
-      vector->isSrc = 0;
+    for (uint32_t i = 0; i < tmp_size; ++i) {
+      insn->dst(i) = dsts[i];
     }
-    if(simdWidth == 16)
-    {
-      SelectionVector *vectortmp = this->appendVector();
-      vectortmp->regNum = vec_size;
-      vectortmp->reg = &insn->dst(vec_size + 1);
-      vectortmp->offsetID = vec_size + 1;
-      vectortmp->isSrc = 0;
-    }
-  }
-
-  void Selection::Opaque::MBWRITE(GenRegister coordx,
-                                  GenRegister coordy,
-                                  GenRegister* values,
-                                  GenRegister header,
-                                  GenRegister* tmp,
-                                  uint32_t bti,
-                                  uint32_t vec_size) {
-    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBWRITE, 1 + vec_size, 2 + vec_size);
     SelectionVector *vector = this->appendVector();
-    insn->src(0) = coordx;
-    insn->src(1) = coordy;
-    for (uint32_t i = 0; i < vec_size; ++i)
-      insn->src(2 + i) = values[i];
-    insn->dst(0) = header;
-    for (uint32_t i = 0; i < vec_size; ++i)
-      insn->dst(1 + i) = tmp[i];
-    insn->state = this->curr;
-    insn->setbti(bti);
-    insn->extra.elem = vec_size; // vector size
-
-    // We need to put the header and the data together
-    vector->regNum = 1 + vec_size;
+    vector->regNum = tmp_size;
     vector->reg = &insn->dst(0);
     vector->offsetID = 0;
     vector->isSrc = 0;
+  }
+
+  void Selection::Opaque::MBWRITE(GenRegister header,
+                                  GenRegister* values,
+                                  uint32_t tmp_size,
+                                  uint32_t bti,
+                                  uint32_t data_size) {
+    SelectionInstruction *insn = this->appendInsn(SEL_OP_MBWRITE, 0, 1 + tmp_size);
+    insn->src(0) = header;
+    for (uint32_t i = 0; i < tmp_size; ++i)
+      insn->src(1 + i) = values[i];
+    insn->setbti(bti);
+    insn->extra.elem = data_size; // msg data part size
+
+    if (hasSends()) {
+      insn->extra.splitSend = 1;
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 1;
+      vector->reg = &insn->src(0);
+      vector->offsetID = 0;
+      vector->isSrc = 1;
+
+      vector = this->appendVector();
+      vector->regNum = tmp_size;
+      vector->reg = &insn->src(1);
+      vector->offsetID = 1;
+      vector->isSrc = 1;
+    } else {
+      // We need to put the header and the data together
+      SelectionVector *vector = this->appendVector();
+      vector->regNum = 1 + tmp_size;
+      vector->reg = &insn->src(0);
+      vector->offsetID = 0;
+      vector->isSrc = 1;
+    }
   }
 
   // Boiler plate to initialize the selection library at c++ pre-main
@@ -2364,7 +2672,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           this->push();
             this->curr.predicate = GEN_PREDICATE_NORMAL;
             this->curr.flag = 0;
-            this->curr.subFlag = 0;
+            this->curr.subFlag = 1;
         }
         // If there is no branch at the end of this block.
 
@@ -2379,7 +2687,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         if(this->block->removeSimpleIfEndif){
             this->curr.predicate = GEN_PREDICATE_NONE;
             this->curr.flag = 0;
-            this->curr.subFlag = 0;
+            this->curr.subFlag = 1;
           this->pop();
         }
         // If we are in if/endif fix mode, and this block is
@@ -2389,13 +2697,14 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
             this->block->insnList.size() != 0 &&
             this->block->insnList.size() % 1000 == 0 &&
             this->block->endifLabel.value() != 0) {
+          this->curr.flag = 0;
+          this->curr.subFlag = 1;
           ir::LabelIndex jip = this->block->endifLabel;
           this->ENDIF(GenRegister::immd(0), jip);
           this->push();
             this->curr.predicate = GEN_PREDICATE_NORMAL;
             this->IF(GenRegister::immd(0), jip, jip);
           this->pop();
-          this->block->isLargeBlock = true;
         }
         // Output the code in the current basic block
         this->endBackwardGeneration();
@@ -2524,6 +2833,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
     this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    this->opaque->setHasSends(true);
     opt_features = SIOF_LOGICAL_SRCMOD;
   }
 
@@ -2545,6 +2855,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     this->opaque->setLdMsgOrder(LD_MSG_ORDER_SKL);
     this->opaque->setSlowByteGather(false);
     this->opaque->setHasHalfType(true);
+    this->opaque->setHasSends(true);
     opt_features = SIOF_LOGICAL_SRCMOD;
   }
 
@@ -2553,7 +2864,6 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     uint32_t elemID = 0;
     uint32_t i;
     SelectionInstruction *insn = this->appendInsn(SEL_OP_TYPED_WRITE, 0, msgNum);
-    SelectionVector *msgVector = this->appendVector();;
 
     for( i = 0; i < msgNum; ++i, ++elemID)
       insn->src(elemID) = msgs[i];
@@ -2561,11 +2871,31 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     insn->setbti(bti);
     insn->extra.msglen = msgNum;
     insn->extra.is3DWrite = is3D;
-    // Sends require contiguous allocation
-    msgVector->regNum = msgNum;
-    msgVector->isSrc = 1;
-    msgVector->offsetID = 0;
-    msgVector->reg = &insn->src(0);
+
+    if (hasSends()) {
+      assert(msgNum == 9);
+      insn->extra.typedWriteSplitSend = 1;
+      //header + coords
+      SelectionVector *msgVector = this->appendVector();
+      msgVector->regNum = 5;
+      msgVector->isSrc = 1;
+      msgVector->offsetID = 0;
+      msgVector->reg = &insn->src(0);
+
+      //data
+      msgVector = this->appendVector();
+      msgVector->regNum = 4;
+      msgVector->isSrc = 1;
+      msgVector->offsetID = 5;
+      msgVector->reg = &insn->src(5);
+    } else {
+      // Send require contiguous allocation
+      SelectionVector *msgVector = this->appendVector();
+      msgVector->regNum = msgNum;
+      msgVector->isSrc = 1;
+      msgVector->offsetID = 0;
+      msgVector->reg = &insn->src(0);
+    }
   }
 
   Selection::~Selection(void) { GBE_DELETE(this->opaque); }
@@ -2847,6 +3177,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           case ir::OP_FBL: sel.FBL(dst, src); break;
           case ir::OP_CBIT: sel.CBIT(dst, src); break;
           case ir::OP_LZD: sel.LZD(dst, src); break;
+          case ir::OP_BFREV: sel.BFREV(dst, src); break;
           case ir::OP_COS: sel.MATH(dst, GEN_MATH_FUNCTION_COS, src); break;
           case ir::OP_SIN: sel.MATH(dst, GEN_MATH_FUNCTION_SIN, src); break;
           case ir::OP_LOG: sel.MATH(dst, GEN_MATH_FUNCTION_LOG, src); break;
@@ -3573,8 +3904,11 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           reg == ir::ocl::lid1 ||
           reg == ir::ocl::lid2 ||
           reg == ir::ocl::lsize0 ||
-          reg == ir::ocl::lsize1||
-          reg == ir::ocl::lsize2)
+          reg == ir::ocl::lsize1 ||
+          reg == ir::ocl::lsize2 ||
+          reg == ir::ocl::enqlsize0 ||
+          reg == ir::ocl::enqlsize1 ||
+          reg == ir::ocl::enqlsize2)
         return true;
       else
         return false;
@@ -3799,6 +4133,17 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         return GEN_BYTE_SCATTER_BYTE;
     }
   }
+  ir::Register generateLocalMask(Selection::Opaque &sel, GenRegister addr) {
+    sel.push();
+      ir::Register localMask = sel.reg(ir::FAMILY_BOOL);
+      sel.curr.physicalFlag = 0;
+      sel.curr.modFlag = 1;
+      sel.curr.predicate = GEN_PREDICATE_NONE;
+      sel.curr.flagIndex = localMask;
+      sel.CMP(GEN_CONDITIONAL_L, addr, GenRegister::immud(64*1024));
+    sel.pop();
+    return localMask;
+  }
 
   class LoadInstructionPattern : public SelectionPattern
   {
@@ -3807,36 +4152,140 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     LoadInstructionPattern(void) : SelectionPattern(1, 1) {
        this->opcodes.push_back(ir::OP_LOAD);
     }
-    void readDWord(Selection::Opaque &sel,
+    bool isReadConstantLegacy(const ir::LoadInstruction &load) const {
+      ir::AddressMode AM = load.getAddressMode();
+      ir::AddressSpace AS = load.getAddressSpace();
+      if (AM != ir::AM_Stateless && AS == ir::MEM_CONSTANT)
+        return true;
+      return false;
+    }
+    void untypedReadStateless(Selection::Opaque &sel,
+                              GenRegister addr,
+                              vector<GenRegister> &dst
+                              ) const {
+      using namespace ir;
+      GenRegister addrQ;
+      unsigned simdWidth = sel.curr.execWidth;
+      unsigned addrBytes = typeSize(addr.type);
+      unsigned valueNum = dst.size();
+      bool isUniform = sel.isScalarReg(dst[0].reg());
+      if (addrBytes == 4) {
+        addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+        sel.MOV(addrQ, addr);
+      } else if (addrBytes == 8) {
+        addrQ = addr;
+      } else
+        NOT_IMPLEMENTED;
+
+      if (simdWidth == 8) {
+          sel.UNTYPED_READA64(addrQ, dst.data(), valueNum, valueNum);
+      } else if (simdWidth == 16) {
+        std::vector<GenRegister> tmpData;
+        for (unsigned i = 0; i < (valueNum+1)/2; i++) {
+          tmpData.push_back(sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32));
+        }
+        sel.push();
+          /* first quarter */
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+          sel.UNTYPED_READA64(GenRegister::Qn(addrQ, 0), tmpData.data(), (valueNum+1)/2, valueNum);
+
+          sel.push();
+            if (isUniform)
+              sel.curr.execWidth = 1;
+            for (unsigned k = 0; k < valueNum; k++) {
+              sel.MOV(GenRegister::Qn(dst[k], 0), GenRegister::Qn(tmpData[k/2], k%2));
+            }
+          sel.pop();
+
+          /* second quarter */
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+          sel.UNTYPED_READA64(GenRegister::Qn(addrQ, 1), tmpData.data(), (valueNum+1)/2, valueNum);
+          if (isUniform)
+            sel.curr.execWidth = 1;
+          for (unsigned k = 0; k < valueNum; k++) {
+            sel.MOV(GenRegister::Qn(dst[k], 1), GenRegister::Qn(tmpData[k/2], k%2));
+          }
+        sel.pop();
+      }
+    }
+
+    void shootUntypedReadMsg(Selection::Opaque &sel,
+                   const ir::LoadInstruction &insn,
                    vector<GenRegister> &dst,
                    GenRegister addr,
                    uint32_t valueNum,
-                   ir::BTI bti) const
+                   ir::AddressSpace addrSpace) const
     {
-        GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-        sel.UNTYPED_READ(addr, dst.data(), valueNum, b, sel.getBTITemps(bti));
+      using namespace ir;
+      unsigned addrBytes = typeSize(addr.type);
+      AddressMode AM = insn.getAddressMode();
+
+      /* Notes on uniform of LoadInstruction, all-lanes-active(noMask,noPredicate)
+       * property should only need be taken care when the value is UNIFORM, if the
+       * value is not uniform, just do things under predication or mask */
+      bool isUniform = sel.isScalarReg(dst[0].reg());
+      sel.push();
+        if (isUniform) {
+          sel.curr.noMask = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+        }
+        vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+
+        if (AM == AM_DynamicBti || AM == AM_StaticBti) {
+          if (AM == AM_DynamicBti) {
+            Register btiReg = insn.getBtiReg();
+            sel.UNTYPED_READ(addr, dst.data(), valueNum, sel.selReg(btiReg, TYPE_U32), btiTemp);
+          } else {
+            unsigned SI = insn.getSurfaceIndex();
+            sel.UNTYPED_READ(addr, dst.data(), valueNum, GenRegister::immud(SI), btiTemp);
+          }
+        } else if (addrSpace == ir::MEM_LOCAL || isReadConstantLegacy(insn) ) {
+          // stateless mode, local/constant still use bti access
+          unsigned bti = addrSpace == ir::MEM_CONSTANT ? BTI_CONSTANT : 0xfe;
+          GenRegister addrDW = addr;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, addr);
+          sel.UNTYPED_READ(addrDW, dst.data(), valueNum, GenRegister::immud(bti), btiTemp);
+        } else if (addrSpace == ir::MEM_GENERIC) {
+          Register localMask = generateLocalMask(sel, addr);
+          sel.push();
+            sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+            GenRegister addrDW = addr;
+            if (addrBytes == 8)
+              addrDW = convertU64ToU32(sel, addr);
+            sel.UNTYPED_READ(addrDW, dst.data(), valueNum, GenRegister::immud(0xfe), btiTemp);
+
+            sel.curr.inversePredicate = 1;
+            untypedReadStateless(sel, addr, dst);
+          sel.pop();
+
+        } else {
+          untypedReadStateless(sel, addr, dst);
+        }
+      sel.pop();
     }
 
     void emitUntypedRead(Selection::Opaque &sel,
                          const ir::LoadInstruction &insn,
                          GenRegister addr,
-                         ir::BTI bti) const
+                         ir::AddressSpace addrSpace) const
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
       vector<GenRegister> dst(valueNum);
       for (uint32_t dstID = 0; dstID < valueNum; ++dstID)
         dst[dstID] = sel.selReg(insn.getValue(dstID), TYPE_U32);
-      readDWord(sel, dst, addr, valueNum, bti);
+      shootUntypedReadMsg(sel, insn, dst, addr, valueNum, addrSpace);
     }
 
     void emitDWordGather(Selection::Opaque &sel,
                          const ir::LoadInstruction &insn,
                          GenRegister addr,
-                         ir::BTI bti) const
+                         ir::AddressSpace addrSpace) const
     {
       using namespace ir;
-      GBE_ASSERT(bti.isConst == 1);
       GBE_ASSERT(insn.getValueNum() == 1);
       const uint32_t isUniform = sel.isScalarReg(insn.getValue(0));
 
@@ -3844,7 +4293,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         GenRegister dst = sel.selReg(insn.getValue(0), ir::TYPE_U32);
         sel.push();
           sel.curr.noMask = 1;
-          sel.SAMPLE(&dst, 1, &addr, 1, bti.imm, 0, true, true);
+          sel.SAMPLE(&dst, 1, &addr, 1, BTI_CONSTANT, 0, true, true);
         sel.pop();
         return;
       }
@@ -3857,52 +4306,144 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         if (sel.isScalarReg(addr.reg())) {
           sel.curr.noMask = 1;
         }
-        sel.SHR(addrDW, GenRegister::retype(addr, GEN_TYPE_UD), GenRegister::immud(2));
+        if (sel.getRegisterFamily(addr.reg()) == FAMILY_QWORD) {
+          // as we still use offset instead of absolut graphics address,
+          // it is safe to convert from u64 to u32
+          GenRegister t = convertU64ToU32(sel, addr);
+          sel.SHR(addrDW, t, GenRegister::immud(2));
+        } else
+          sel.SHR(addrDW, GenRegister::retype(addr, GEN_TYPE_UD), GenRegister::immud(2));
       sel.pop();
 
-      sel.DWORD_GATHER(dst, addrDW, bti.imm);
+      sel.DWORD_GATHER(dst, addrDW, BTI_CONSTANT);
     }
 
-    void emitRead64(Selection::Opaque &sel,
-                         const ir::LoadInstruction &insn,
-                         GenRegister addr,
-                         ir::BTI bti) const
-    {
-      using namespace ir;
-      const uint32_t valueNum = insn.getValueNum();
-      /* XXX support scalar only right now. */
-      GBE_ASSERT(valueNum == 1);
-      GBE_ASSERT(bti.isConst == 1);
-      vector<GenRegister> dst(valueNum);
-      GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-      for ( uint32_t dstID = 0; dstID < valueNum; ++dstID)
-        dst[dstID] = sel.selReg(insn.getValue(dstID), ir::TYPE_U64);
-
+    void read64Legacy(Selection::Opaque &sel,
+                      GenRegister addr,
+                      vector<GenRegister> &dst,
+                      GenRegister bti,
+                      vector<GenRegister> &btiTemp) const {
+      const uint32_t valueNum = dst.size();
       if (sel.hasLongType()) {
         vector<GenRegister> tmp(valueNum);
         for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
           tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
         }
 
-        sel.READ64(addr, dst.data(), tmp.data(), valueNum, b, true, sel.getBTITemps(bti));
+        sel.READ64(addr, dst.data(), tmp.data(), valueNum, bti, true, btiTemp);
       } else {
-        sel.READ64(addr, dst.data(), NULL, valueNum, b, false, sel.getBTITemps(bti));
+        sel.READ64(addr, dst.data(), NULL, valueNum, bti, false, btiTemp);
       }
+    }
+    void read64Stateless(Selection::Opaque &sel,
+                         const GenRegister addr,
+                         vector<GenRegister> dst) const {
+      using namespace ir;
+      unsigned simdWidth = sel.ctx.getSimdWidth();
+      unsigned valueNum = dst.size();
+      vector<GenRegister> tmp(valueNum);
+      for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
+        tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
+      }
+      unsigned addrBytes = typeSize(addr.type);
+      GenRegister addrQ;
+
+      sel.push();
+        if (addrBytes == 4) {
+          addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+          sel.MOV(addrQ, addr);
+        } else {
+          addrQ = addr;
+        }
+
+        if (simdWidth == 8) {
+          sel.READ64A64(addrQ, dst.data(), tmp.data(), valueNum);
+        } else {
+          assert(valueNum == 1);
+          GenRegister tmpAddr, tmpDst;
+          tmpAddr = GenRegister::Qn(addrQ, 0);
+          tmpDst = GenRegister::Qn(dst[0], 0);
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+          sel.READ64A64(tmpAddr, &tmpDst, tmp.data(), valueNum);
+
+          tmpAddr = GenRegister::Qn(addrQ, 1);
+          tmpDst = GenRegister::Qn(dst[0], 1);
+          sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+          sel.READ64A64(tmpAddr, &tmpDst, tmp.data(), valueNum);
+        }
+      sel.pop();
+    }
+
+    void emitRead64(Selection::Opaque &sel,
+                         const ir::LoadInstruction &insn,
+                         GenRegister addr,
+                         ir::AddressSpace addrSpace) const
+    {
+      using namespace ir;
+      const uint32_t valueNum = insn.getValueNum();
+      /* XXX support scalar only right now. */
+      GBE_ASSERT(valueNum == 1);
+      vector<GenRegister> dst(valueNum);
+      for ( uint32_t dstID = 0; dstID < valueNum; ++dstID)
+        dst[dstID] = sel.selReg(insn.getValue(dstID), ir::TYPE_U64);
+
+      bool isUniform = sel.isScalarReg(insn.getValue(0));
+      unsigned addrBytes = typeSize(addr.type);
+      AddressMode AM = insn.getAddressMode();
+      vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+      sel.push();
+        if (isUniform) {
+          sel.curr.noMask = 1;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+        }
+        if (AM != AM_Stateless) {
+          GenRegister b;
+          if (AM == AM_DynamicBti) {
+            b = sel.selReg(insn.getBtiReg(), TYPE_U32);
+          } else {
+            b = GenRegister::immud(insn.getSurfaceIndex());
+          }
+          read64Legacy(sel, addr, dst, b, btiTemp);
+        } else if (addrSpace == MEM_LOCAL || isReadConstantLegacy(insn)) {
+          GenRegister b = GenRegister::immud(addrSpace == MEM_LOCAL? 0xfe : BTI_CONSTANT);
+          GenRegister addrDW = addr;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, addr);
+          read64Legacy(sel, addrDW, dst, b, btiTemp);
+        } else if (addrSpace == ir::MEM_GENERIC) {
+          Register localMask = generateLocalMask(sel, addr);
+          sel.push();
+            sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+            GenRegister addrDW = addr;
+            if (addrBytes == 8)
+              addrDW = convertU64ToU32(sel, addr);
+            read64Legacy(sel, addrDW, dst, GenRegister::immud(0xfe), btiTemp);
+
+            sel.curr.inversePredicate = 1;
+            read64Stateless(sel, addr, dst);
+          sel.pop();
+        } else {
+          read64Stateless(sel, addr, dst);
+        }
+      sel.pop();
     }
 
     void readByteAsDWord(Selection::Opaque &sel,
+                        const ir::LoadInstruction &insn,
                         const uint32_t elemSize,
                         GenRegister address,
                         GenRegister dst,
                         bool isUniform,
-                        ir::BTI bti) const
+                        ir::AddressSpace addrSpace) const
     {
       using namespace ir;
+        RegisterFamily addrFamily = sel.getRegisterFamily(address.reg());
+        Type addrType = getType(addrFamily);
         Register tmpReg = sel.reg(FAMILY_DWORD, isUniform);
-        GenRegister tmpAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+        GenRegister tmpAddr = sel.selReg(sel.reg(addrFamily, isUniform), addrType);
         GenRegister tmpData = sel.selReg(tmpReg, ir::TYPE_U32);
-
-        GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
+        GenRegister addrOffset = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
         // Get dword aligned addr
         sel.push();
@@ -3910,24 +4451,36 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
             sel.curr.noMask = 1;
             sel.curr.execWidth = 1;
           }
-          sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0xfffffffc));
+          if (addrFamily == FAMILY_DWORD)
+            sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0xfffffffc));
+          else {
+            sel.MOV(tmpAddr, GenRegister::immuint64(0xfffffffffffffffc));
+            sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UL), tmpAddr);
+          }
+
         sel.pop();
         sel.push();
+          vector<GenRegister> tmp;
+          tmp.push_back(tmpData);
+          shootUntypedReadMsg(sel, insn, tmp, tmpAddr, 1, addrSpace);
           if (isUniform)
             sel.curr.noMask = 1;
-          sel.UNTYPED_READ(tmpAddr, &tmpData, 1, b, sel.getBTITemps(bti));
 
           if (isUniform)
             sel.curr.execWidth = 1;
           // Get the remaining offset from aligned addr
-          sel.AND(tmpAddr, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0x3));
-          sel.SHL(tmpAddr, tmpAddr, GenRegister::immud(0x3));
-          sel.SHR(tmpData, tmpData, tmpAddr);
+          if (addrFamily == FAMILY_QWORD) {
+            sel.AND(addrOffset, sel.unpacked_ud(address.reg()), GenRegister::immud(0x3));
+          } else {
+            sel.AND(addrOffset, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0x3));
+          }
+          sel.SHL(addrOffset, addrOffset, GenRegister::immud(0x3));
+          sel.SHR(tmpData, tmpData, addrOffset);
 
           if (elemSize == GEN_BYTE_SCATTER_WORD)
-            sel.MOV(GenRegister::retype(dst, GEN_TYPE_UW), sel.unpacked_uw(tmpReg));
+            sel.MOV(GenRegister::retype(dst, GEN_TYPE_UW), GenRegister::unpacked_uw(tmpReg, isUniform, sel.isLongReg(tmpReg)));
           else if (elemSize == GEN_BYTE_SCATTER_BYTE)
-            sel.MOV(GenRegister::retype(dst, GEN_TYPE_UB), sel.unpacked_ub(tmpReg));
+            sel.MOV(GenRegister::retype(dst, GEN_TYPE_UB), GenRegister::unpacked_ub(tmpReg, isUniform));
         sel.pop();
     }
 
@@ -3936,7 +4489,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
                                const ir::LoadInstruction &insn,
                                const uint32_t elemSize,
                                GenRegister address,
-                               ir::BTI bti) const
+                               ir::AddressSpace addrSpace) const
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
@@ -3955,7 +4508,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
       }
 
-      readDWord(sel, tmp, address, tmpRegNum, bti);
+      shootUntypedReadMsg(sel, insn, tmp, address, tmpRegNum, addrSpace);
 
       for(uint32_t i = 0; i < tmpRegNum; i++) {
         unsigned int elemNum = (valueNum - i * (4 / typeSize)) > 4/typeSize ?
@@ -3976,6 +4529,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       using namespace ir;
       GBE_ASSERT(effectData.size() == effectDataNum);
       GBE_ASSERT(tmp.size() == effectDataNum + 1);
+      RegisterFamily addrFamily = sel.getRegisterFamily(address.reg());
       sel.push();
         Register alignedFlag = sel.reg(FAMILY_BOOL, isUniform);
         GenRegister shiftL = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
@@ -3984,7 +4538,12 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         sel.push();
           if (isUniform)
             sel.curr.noMask = 1;
-          sel.AND(shiftL, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(0x3));
+          if (addrFamily == FAMILY_QWORD) {
+            GenRegister t = convertU64ToU32(sel, address);
+            sel.AND(shiftL, t, GenRegister::immud(0x3));
+          } else {
+            sel.AND(shiftL, GenRegister::retype(address,GEN_TYPE_UD), GenRegister::immud(0x3));
+          }
           sel.SHL(shiftL, shiftL, GenRegister::immud(0x3));
           sel.ADD(shiftH, GenRegister::negate(shiftL), GenRegister::immud(32));
           sel.curr.physicalFlag = 0;
@@ -4012,11 +4571,93 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       sel.pop();
     }
 
+    /* Used to transform address from 64bit to 32bit, note as dataport messages
+     * cannot accept scalar register, so here to convert to non-uniform
+     * register here. */
+    GenRegister convertU64ToU32(Selection::Opaque &sel,
+                                GenRegister addr) const {
+      GenRegister unpacked = GenRegister::retype(sel.unpacked_ud(addr.reg()), GEN_TYPE_UD);
+      GenRegister dst = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+      sel.MOV(dst, unpacked);
+      return dst;
+    }
+
+    void byteGatherStateless(Selection::Opaque &sel,
+                             GenRegister addr,
+                             GenRegister dst,
+                             unsigned elemSize) const {
+      using namespace ir;
+      GenRegister addrQ;
+      unsigned simdWidth = sel.ctx.getSimdWidth();
+      unsigned addrBytes = typeSize(addr.type);
+      if (addrBytes == 4) {
+        addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+        sel.MOV(addrQ, addr);
+      } else {
+        addrQ = addr;
+      }
+
+      sel.push();
+        if (simdWidth == 8) {
+          sel.BYTE_GATHERA64(dst, addrQ, elemSize);
+        } else if (simdWidth == 16) {
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+          sel.BYTE_GATHERA64(GenRegister::Qn(dst, 0), GenRegister::Qn(addrQ, 0), elemSize);
+          sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+          sel.BYTE_GATHERA64(GenRegister::Qn(dst, 1), GenRegister::Qn(addrQ, 1), elemSize);
+        }
+      sel.pop();
+    }
+    void shootByteGatherMsg(Selection::Opaque &sel,
+                            const ir::LoadInstruction &insn,
+                            GenRegister dst,
+                            GenRegister addr,
+                            unsigned elemSize,
+                            bool isUniform,
+                            ir::AddressSpace addrSpace) const {
+      using namespace ir;
+      unsigned addrBytes = typeSize(addr.type);
+      AddressMode AM = insn.getAddressMode();
+      vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+      if (AM == AM_DynamicBti || AM == AM_StaticBti) {
+        if (AM == AM_DynamicBti) {
+          Register btiReg = insn.getBtiReg();
+          sel.BYTE_GATHER(dst, addr, elemSize, sel.selReg(btiReg, TYPE_U32), btiTemp);
+        } else {
+          unsigned SI = insn.getSurfaceIndex();
+          sel.BYTE_GATHER(dst, addr, elemSize, GenRegister::immud(SI), btiTemp);
+        }
+      } else if (addrSpace == ir::MEM_LOCAL || isReadConstantLegacy(insn)) {
+        unsigned bti = addrSpace == ir::MEM_CONSTANT ? BTI_CONSTANT : 0xfe;
+        GenRegister addrDW = addr;
+        if (addrBytes == 8) {
+          addrDW = convertU64ToU32(sel, addr);
+        }
+
+        sel.BYTE_GATHER(dst, addrDW, elemSize, GenRegister::immud(bti), btiTemp);
+      } else if (addrSpace == ir::MEM_GENERIC) {
+        Register localMask = generateLocalMask(sel, addr);
+        sel.push();
+          sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+          GenRegister addrDW = addr;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, addr);
+          sel.BYTE_GATHER(dst, addrDW, elemSize, GenRegister::immud(0xfe), btiTemp);
+
+          sel.curr.inversePredicate = 1;
+          byteGatherStateless(sel, addr, dst, elemSize);
+        sel.pop();
+      } else {
+        byteGatherStateless(sel, addr, dst, elemSize);
+      }
+    }
+
     void emitUnalignedByteGather(Selection::Opaque &sel,
                                  const ir::LoadInstruction &insn,
                                  const uint32_t elemSize,
                                  GenRegister address,
-                                 ir::BTI bti) const
+                                 ir::AddressSpace addrSpace) const
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
@@ -4024,6 +4665,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
                                  1 : sel.ctx.getSimdWidth();
       const bool isUniform = simdWidth == 1;
       RegisterFamily family = getFamily(insn.getValueType());
+      RegisterFamily addrFamily = sel.getRegisterFamily(address.reg());
+      Type addrType = getType(addrFamily);
 
       if(valueNum > 1) {
         GBE_ASSERT(!isUniform && "vector load should not be uniform. Something went wrong.");
@@ -4040,16 +4683,20 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
 
           uint32_t effectDataNum = (typeSize*valueNum + 3) / 4;
           vector<GenRegister> tmp(effectDataNum + 1);
-          vector<GenRegister> tmp2(effectDataNum + 1);
           vector<GenRegister> effectData(effectDataNum);
           for(uint32_t i = 0; i < effectDataNum + 1; i++)
-            tmp2[i] = tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+            tmp[i] = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
 
-          GenRegister alignedAddr = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+          GenRegister alignedAddr = sel.selReg(sel.reg(addrFamily, isUniform), addrType);
           sel.push();
             if (isUniform)
               sel.curr.noMask = 1;
-            sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(~0x3));
+            if (addrFamily == FAMILY_DWORD)
+              sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UD), GenRegister::immud(~0x3));
+            else {
+              sel.MOV(alignedAddr,  GenRegister::immuint64(~0x3ul));
+              sel.AND(alignedAddr, GenRegister::retype(address, GEN_TYPE_UL), alignedAddr);
+            }
           sel.pop();
 
           uint32_t remainedReg = effectDataNum + 1;
@@ -4057,15 +4704,17 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           do {
             uint32_t width = remainedReg > 4 ? 4 : remainedReg;
             vector<GenRegister> t1(tmp.begin() + pos, tmp.begin() + pos + width);
-            vector<GenRegister> t2(tmp2.begin() + pos, tmp2.begin() + pos + width);
             if (pos != 0) {
               sel.push();
-                if (isUniform)
-                  sel.curr.noMask = 1;
+              if (isUniform)
+                sel.curr.noMask = 1;
+              if (addrFamily == FAMILY_DWORD)
                 sel.ADD(alignedAddr, alignedAddr, GenRegister::immud(pos * 4));
+              else
+                sel.ADD(alignedAddr, alignedAddr, GenRegister::immuint64(pos * 4));
               sel.pop();
             }
-            readDWord(sel, t1, alignedAddr, width, bti);
+            shootUntypedReadMsg(sel, insn, t1, alignedAddr, width, addrSpace);
             remainedReg -= width;
             pos += width;
           } while(remainedReg);
@@ -4082,7 +4731,6 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           }
         } else {
           GBE_ASSERT(elemSize == GEN_BYTE_SCATTER_BYTE);
-          GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
           vector<GenRegister> dst(valueNum);
           for(uint32_t i = 0; i < valueNum; i++)
             dst[i] = sel.selReg(insn.getValue(i), getType(family));
@@ -4106,7 +4754,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
               dataSize = GEN_BYTE_SCATTER_WORD;
             else
               dataSize = GEN_BYTE_SCATTER_DWORD;
-            sel.BYTE_GATHER(readDst, addressForLoop, dataSize, b, sel.getBTITemps(bti));
+            shootByteGatherMsg(sel, insn, readDst, addressForLoop, dataSize, isUniform, addrSpace);
 
             // only 4 bytes is gathered even if valueLeft >= 4
             sel.UNPACK_BYTE(dst.data(), readDst, getFamilySize(FAMILY_BYTE), (valueLeft < 4 ? valueLeft : 4));
@@ -4122,23 +4770,22 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         GBE_ASSERT(insn.getValueNum() == 1);
         const GenRegister value = sel.selReg(insn.getValue(0), insn.getValueType());
         GBE_ASSERT(elemSize == GEN_BYTE_SCATTER_WORD || elemSize == GEN_BYTE_SCATTER_BYTE);
-        if(sel.getSlowByteGather())
-          readByteAsDWord(sel, elemSize, address, value, isUniform, bti);
+        if (sel.getSlowByteGather())
+          readByteAsDWord(sel, insn, elemSize, address, value, isUniform, addrSpace);
         else {
-          GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-
           // We need a temporary register if we read bytes or words
-          Register dst = sel.reg(FAMILY_DWORD, isUniform);
+          Register dst = sel.reg(FAMILY_DWORD);
           sel.push();
             if (isUniform)
               sel.curr.noMask = 1;
-            sel.BYTE_GATHER(sel.selReg(dst, ir::TYPE_U32), address, elemSize, b, sel.getBTITemps(bti));
+            shootByteGatherMsg(sel, insn, sel.selReg(dst, ir::TYPE_U32), address, elemSize, isUniform, addrSpace);
           sel.pop();
 
           sel.push();
             if (isUniform) {
               sel.curr.noMask = 1;
               sel.curr.execWidth = 1;
+              sel.curr.predicate = GEN_PREDICATE_NONE;
             }
             if (elemSize == GEN_BYTE_SCATTER_WORD)
               sel.MOV(GenRegister::retype(value, GEN_TYPE_UW), GenRegister::unpacked_uw(dst, isUniform));
@@ -4152,22 +4799,87 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     void emitOWordRead(Selection::Opaque &sel,
                        const ir::LoadInstruction &insn,
                        GenRegister address,
-                       ir::BTI bti) const
+                       ir::AddressSpace addrSpace) const
     {
       using namespace ir;
+      uint32_t SI = insn.getSurfaceIndex();
       const uint32_t vec_size = insn.getValueNum();
       const uint32_t simdWidth = sel.ctx.getSimdWidth();
-      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
+      const Type type = insn.getValueType();
+      const uint32_t typeSize = type == TYPE_U32 ? 4 : 2;
+      const uint32_t genType = type == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_UW;
+      const RegisterFamily family = getFamily(type);
+      bool isA64 = SI == 255;
+
+      const GenRegister header = GenRegister::ud8grf(sel.reg(FAMILY_REG));
       vector<GenRegister> valuesVec;
-      for(uint32_t i = 0; i < vec_size; i++)
-        valuesVec.push_back(sel.selReg(insn.getValue(i), TYPE_U32));
-      // check tmp_size for OWORD read need, max 8 OWROD thus 4 regs
-      uint32_t tmp_size = simdWidth * vec_size / 8;
-      tmp_size = tmp_size > 4 ? 4 : tmp_size;
       vector<GenRegister> tmpVec;
+      for(uint32_t i = 0; i < vec_size; i++)
+        valuesVec.push_back(sel.selReg(insn.getValue(i), type));
+
+      GenRegister headeraddr;
+      if (isA64)
+        headeraddr = GenRegister::toUniform(sel.getOffsetReg(header, 0, 0), GEN_TYPE_UL);
+      else
+        headeraddr = GenRegister::toUniform(sel.getOffsetReg(header, 0, 2 * 4), GEN_TYPE_UD);
+      // Make header
+      sel.push();
+      {
+        // Copy r0 into the header first
+        sel.curr.execWidth = 8;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        sel.MOV(header, GenRegister::ud8grf(0, 0));
+
+        // Update the header with the current address
+        sel.curr.execWidth = 1;
+
+        // Put zero in the general state base address
+        if (isA64)
+          sel.MOV(headeraddr, GenRegister::toUniform(address, GEN_TYPE_UL));
+        else {
+          sel.MOV(headeraddr, GenRegister::toUniform(address, GEN_TYPE_UD));
+          sel.MOV(sel.getOffsetReg(header, 0, 5 * 4), GenRegister::immud(0));
+        }
+      }
+      sel.pop();
+
+      /* For block read we need to unpack the block date into values, and for different
+       * simdwidth and vector size with different type size, we may need to spilt the
+       * block read send message.
+       * We can only get a send message with 5 reg length
+       * so for different combination we have different message length and tmp vector size
+       *              |  simd8  | simd16 |  simd8 | simd16
+       *  r0  |header |         |        |        |
+       *  r1  |date   |  w0,w1  |   w0   |   dw0  |  dw0
+       *  r2  |date   |  w2,w3  |   w1   |   dw1  |  dw0
+       *  r3  |date   | ......  | ...... | ...... |  dw1
+       *  r4  |date   | ....... | ...... | ...... |  dw1
+       */
+
+      uint32_t totalSize = simdWidth * typeSize * vec_size;
+      uint32_t valueSize = simdWidth * typeSize;
+      uint32_t tmp_size = totalSize > 128 ? (128 / valueSize) : vec_size;
+      uint32_t msg_num = vec_size / tmp_size;
+      uint32_t ow_size = msg_num > 1 ? 8 : (totalSize / 16);
+
       for(uint32_t i = 0; i < tmp_size; i++)
-        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
-      sel.OBREAD(&valuesVec[0], vec_size, address, header, bti.imm, &tmpVec[0], tmp_size);
+        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(family)), genType));
+      for (uint32_t i = 0; i < msg_num; i++) {
+          if (i > 0) {
+            sel.push();
+            {
+              // Update the address in header
+              sel.curr.execWidth = 1;
+              sel.ADD(headeraddr, headeraddr, GenRegister::immud(128));
+            }
+            sel.pop();
+          }
+          sel.OBREAD(&tmpVec[0], tmp_size, header, SI, ow_size);
+          for (uint32_t j = 0; j < tmp_size; j++)
+            sel.MOV(valuesVec[j + i * tmp_size], tmpVec[j]);
+      }
+
     }
 
     // check whether all binded table index point to constant memory
@@ -4182,59 +4894,51 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     {
       using namespace ir;
       const ir::LoadInstruction &insn = cast<ir::LoadInstruction>(dag.insn);
-      GenRegister address = sel.selReg(insn.getAddressRegister(), ir::TYPE_U32);
+      Register reg = insn.getAddressRegister();
+      GenRegister address = sel.selReg(reg, getType(sel.getRegisterFamily(reg)));
       GBE_ASSERT(insn.getAddressSpace() == MEM_GLOBAL ||
                  insn.getAddressSpace() == MEM_CONSTANT ||
                  insn.getAddressSpace() == MEM_PRIVATE ||
                  insn.getAddressSpace() == MEM_LOCAL ||
+                 insn.getAddressSpace() == MEM_GENERIC ||
                  insn.getAddressSpace() == MEM_MIXED);
       //GBE_ASSERT(sel.isScalarReg(insn.getValue(0)) == false);
 
-      BTI bti;
-      AddressMode am = insn.getAddressMode();
-      if (am == AM_StaticBti) {
-        bti.isConst = 1;
-        bti.imm = insn.getSurfaceIndex();
-      } else if (am == AM_DynamicBti) {
-        bti.isConst = 0;
-        bti.reg = insn.getBtiReg();
-      } else {
-        assert(0 && "stateless not supported yet");
-      }
+      AddressSpace addrSpace = insn.getAddressSpace();
+
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(sel, type);
-      bool allConstant = isAllConstant(bti);
 
       if (insn.isBlock())
-        this->emitOWordRead(sel, insn, address, bti);
-      else if (allConstant) {
+        this->emitOWordRead(sel, insn, address, addrSpace);
+      else if (isReadConstantLegacy(insn)) {
         // XXX TODO read 64bit constant through constant cache
         // Per HW Spec, constant cache messages can read at least DWORD data.
         // So, byte/short data type, we have to read through data cache.
         if(insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
-          this->emitRead64(sel, insn, address, bti);
+          this->emitRead64(sel, insn, address, addrSpace);
         else if(insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
-          this->emitDWordGather(sel, insn, address, bti);
+          this->emitDWordGather(sel, insn, address, addrSpace);
         else if (insn.isAligned() == true)
-          this->emitAlignedByteGather(sel, insn, elemSize, address, bti);
+          this->emitAlignedByteGather(sel, insn, elemSize, address, addrSpace);
         else
-          this->emitUnalignedByteGather(sel, insn, elemSize, address, bti);
+          this->emitUnalignedByteGather(sel, insn, elemSize, address, addrSpace);
       } else {
         if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
-          this->emitRead64(sel, insn, address, bti);
+          this->emitRead64(sel, insn, address, addrSpace);
         else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
-          this->emitUntypedRead(sel, insn, address, bti);
+          this->emitUntypedRead(sel, insn, address, addrSpace);
         else if (insn.isAligned())
-          this->emitAlignedByteGather(sel, insn, elemSize, address, bti);
+          this->emitAlignedByteGather(sel, insn, elemSize, address, addrSpace);
         else
-          this->emitUnalignedByteGather(sel, insn, elemSize, address, bti);
+          this->emitUnalignedByteGather(sel, insn, elemSize, address, addrSpace);
       }
 
       markAllChildren(dag);
+
       return true;
     }
   };
-
   class StoreInstructionPattern : public SelectionPattern
   {
   public:
@@ -4242,44 +4946,316 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     StoreInstructionPattern(void) : SelectionPattern(1, 1) {
        this->opcodes.push_back(ir::OP_STORE);
     }
+    GenRegister convertU64ToU32(Selection::Opaque &sel,
+                                GenRegister addr) const {
+      GenRegister unpacked = GenRegister::retype(sel.unpacked_ud(addr.reg()), GEN_TYPE_UD);
+      GenRegister dst = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+      sel.MOV(dst, unpacked);
+      return dst;
+    }
+
+    void untypedWriteStateless(Selection::Opaque &sel,
+                               GenRegister address,
+                               vector<GenRegister> &value) const
+    {
+      using namespace ir;
+      unsigned simdWidth = sel.ctx.getSimdWidth();
+      unsigned int addrBytes = typeSize(address.type);
+      unsigned valueNum = value.size();
+      GenRegister addrQ;
+      if (addrBytes == 4) {
+        if (simdWidth == 8) {
+          addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+          sel.MOV(addrQ, address);
+        } else if (simdWidth == 16) {
+          addrQ = address;
+        }
+      } else if (addrBytes == 8) {
+        addrQ = address;
+      }
+
+      if (simdWidth == 8) {
+        vector<GenRegister> msg;
+        msg.push_back(addrQ);
+        for (unsigned k = 0; k < valueNum; k++)
+          msg.push_back(value[k]);
+
+        sel.UNTYPED_WRITEA64(msg.data(), valueNum+1, valueNum);
+      } else if (simdWidth == 16) {
+        vector<GenRegister> msgs;
+        for (unsigned k = 0; k < (valueNum+1)/2+1; k++) {
+          msgs.push_back(sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32));
+        }
+        sel.push();
+          /* do first quarter */
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+          sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 0));
+          for (unsigned k = 0; k < valueNum; k++) {
+            sel.MOV(GenRegister::Qn(msgs[k/2+1], k%2), GenRegister::Qn(value[k], 0));
+          }
+          sel.UNTYPED_WRITEA64(msgs.data(), (valueNum+1)/2+1, valueNum);
+
+          /* do second quarter */
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+          sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 1));
+          for (unsigned k = 0; k < valueNum; k++)
+            sel.MOV(GenRegister::Qn(msgs[k/2+1], k%2), GenRegister::Qn(value[k], 1));
+          sel.UNTYPED_WRITEA64(msgs.data(), (valueNum+1)/2+1, valueNum);
+        sel.pop();
+      }
+    }
+
+    void shootUntypedWriteMsg(Selection::Opaque &sel,
+                              const ir::StoreInstruction &insn,
+                              GenRegister &address,
+                              vector<GenRegister> &value,
+                              ir::AddressSpace addrSpace) const
+    {
+      using namespace ir;
+      unsigned int addrBytes = typeSize(address.type);
+      unsigned valueNum = value.size();
+      AddressMode AM = insn.getAddressMode();
+      vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+
+      if (AM == AM_DynamicBti || AM == AM_StaticBti) {
+        if (AM == AM_DynamicBti) {
+          Register btiReg = insn.getBtiReg();
+          sel.UNTYPED_WRITE(address, value.data(), valueNum, sel.selReg(btiReg, TYPE_U32), btiTemp);
+        } else {
+          unsigned SI = insn.getSurfaceIndex();
+          sel.UNTYPED_WRITE(address, value.data(), valueNum, GenRegister::immud(SI), btiTemp);
+        }
+      } else if (addrSpace == ir::MEM_LOCAL) {
+        GenRegister addr = address;
+        if (addrBytes == 8) {
+          addr = convertU64ToU32(sel, address);
+        }
+        sel.UNTYPED_WRITE(addr, value.data(), valueNum, GenRegister::immud(0xfe), btiTemp);
+      } else if (addrSpace == ir::MEM_GENERIC) {
+        Register localMask = generateLocalMask(sel, address);
+        sel.push();
+          sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+          GenRegister addrDW = address;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, address);
+          sel.UNTYPED_WRITE(addrDW, value.data(), valueNum, GenRegister::immud(0xfe), btiTemp);
+
+          sel.curr.inversePredicate = 1;
+          untypedWriteStateless(sel, address, value);
+        sel.pop();
+      } else {
+        untypedWriteStateless(sel, address, value);
+      }
+    }
+
     void emitUntypedWrite(Selection::Opaque &sel,
                           const ir::StoreInstruction &insn,
                           GenRegister address,
-                          ir::BTI &bti) const
+                          ir::AddressSpace addrSpace) const
     {
       using namespace ir;
       const uint32_t valueNum = insn.getValueNum();
-      vector<GenRegister> value(valueNum), tmps;
-      GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
+      vector<GenRegister> value(valueNum);
 
       for (uint32_t valueID = 0; valueID < valueNum; ++valueID)
         value[valueID] = GenRegister::retype(sel.selReg(insn.getValue(valueID)), GEN_TYPE_UD);
-      sel.UNTYPED_WRITE(address, value.data(), valueNum, b, sel.getBTITemps(bti));
+
+      shootUntypedWriteMsg(sel, insn, address, value, addrSpace);
     }
 
-    void emitWrite64(Selection::Opaque &sel,
-                     const ir::StoreInstruction &insn,
-                     GenRegister address,
-                     ir::BTI &bti) const
+    void write64Legacy(Selection::Opaque &sel,
+                       GenRegister address,
+                       vector<GenRegister> &value,
+                       GenRegister bti,
+                       vector<GenRegister> &btiTemp) const
     {
       using namespace ir;
-      const uint32_t valueNum = insn.getValueNum();
-      /* XXX support scalar only right now. */
-      GBE_ASSERT(valueNum == 1);
-      GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
-      vector<GenRegister> src(valueNum);
-
-      for (uint32_t valueID = 0; valueID < valueNum; ++valueID)
-        src[valueID] = sel.selReg(insn.getValue(valueID), ir::TYPE_U64);
-
+      const uint32_t valueNum = value.size();
       if (sel.hasLongType()) {
         vector<GenRegister> tmp(valueNum);
         for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
           tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
         }
-        sel.WRITE64(address, src.data(), tmp.data(), valueNum, b, true, sel.getBTITemps(bti));
+        sel.WRITE64(address, value.data(), tmp.data(), valueNum, bti, true, btiTemp);
       } else {
-        sel.WRITE64(address, src.data(), NULL, valueNum, b, false, sel.getBTITemps(bti));
+        sel.WRITE64(address, value.data(), NULL, valueNum, bti, false, btiTemp);
+      }
+    }
+
+    void write64Stateless(Selection::Opaque &sel,
+                          GenRegister address,
+                          vector<GenRegister> &value) const
+    {
+      using namespace ir;
+      unsigned simdWidth = sel.ctx.getSimdWidth();
+      unsigned int addrBytes = typeSize(address.type);
+      unsigned valueNum = value.size();
+      vector<GenRegister> tmp(valueNum);
+      for (uint32_t valueID = 0; valueID < valueNum; ++valueID) {
+        tmp[valueID] = GenRegister::retype(sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64), GEN_TYPE_UL);
+      }
+      GenRegister addrQ;
+      if (addrBytes == 4) {
+        addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+        sel.MOV(addrQ, address);
+      } else {
+        addrQ = address;
+      }
+
+      sel.push();
+        if (simdWidth == 8) {
+          sel.WRITE64A64(addrQ, value.data(), tmp.data(), valueNum);
+        } else {
+          GenRegister tmpAddr, tmpSrc;
+          tmpAddr = GenRegister::Qn(addrQ, 0);
+          tmpSrc = GenRegister::Qn(value[0], 0);
+          GenRegister tmp = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+
+          /* SIMD16 long register is just enough for (SIMD8 A64 addr + SIMD8 long) */
+          sel.curr.execWidth = 8;
+          sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+          sel.MOV(GenRegister::Qn(tmp, 0), tmpAddr);
+          sel.UNPACK_LONG(GenRegister::Qn(tmp, 1), tmpSrc);
+          sel.UNTYPED_WRITEA64(&tmp, 1, 2);
+
+          tmpAddr = GenRegister::Qn(addrQ, 1);
+          tmpSrc = GenRegister::Qn(value[0], 1);
+          sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+          sel.MOV(GenRegister::Qn(tmp, 0), tmpAddr);
+          sel.UNPACK_LONG(GenRegister::Qn(tmp, 1), tmpSrc);
+          sel.UNTYPED_WRITEA64(&tmp, 1, 2);
+        }
+      sel.pop();
+    }
+    void emitWrite64(Selection::Opaque &sel,
+                     const ir::StoreInstruction &insn,
+                     GenRegister address,
+                     ir::AddressSpace addrSpace) const
+    {
+      using namespace ir;
+      const uint32_t valueNum = insn.getValueNum();
+      /* XXX support scalar only right now. */
+      GBE_ASSERT(valueNum == 1);
+      vector<GenRegister> src(valueNum);
+
+      for (uint32_t valueID = 0; valueID < valueNum; ++valueID)
+        src[valueID] = sel.selReg(insn.getValue(valueID), ir::TYPE_U64);
+
+      AddressMode AM = insn.getAddressMode();
+      unsigned int addrBytes = typeSize(address.type);
+      vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+      if (AM != AM_Stateless) {
+        GenRegister b;
+        if (AM == AM_DynamicBti) {
+          b = sel.selReg(insn.getBtiReg(), TYPE_U32);
+        } else {
+          b = GenRegister::immud(insn.getSurfaceIndex());
+        }
+        write64Legacy(sel, address, src, b, btiTemp);
+      } else if (addrSpace == MEM_LOCAL) {
+        GenRegister b = GenRegister::immud(0xfe);
+        GenRegister addr = address;
+        if (addrBytes == 8) {
+          addr = convertU64ToU32(sel, address);
+        }
+        write64Legacy(sel, addr, src, b, btiTemp);
+      } else if (addrSpace == ir::MEM_GENERIC) {
+        Register localMask = generateLocalMask(sel, address);
+        sel.push();
+          sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+          GenRegister addrDW = address;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, address);
+          write64Legacy(sel, addrDW, src, GenRegister::immud(0xfe), btiTemp);
+
+          sel.curr.inversePredicate = 1;
+          write64Stateless(sel, address, src);
+        sel.pop();
+      } else {
+        GBE_ASSERT(sel.hasLongType());
+        write64Stateless(sel, address, src);
+      }
+    }
+
+    void byteScatterStateless(Selection::Opaque &sel,
+                              GenRegister address,
+                              GenRegister data,
+                              unsigned elemSize) const {
+      using namespace ir;
+      unsigned addrBytes = typeSize(address.type);
+      unsigned simdWidth = sel.ctx.getSimdWidth();
+      GenRegister addrQ;
+        if (addrBytes == 4) {
+          addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+          sel.MOV(addrQ, address);
+        } else {
+          addrQ = address;
+        }
+        if (simdWidth == 8) {
+          GenRegister msg[2];
+          msg[0] = addrQ;
+          msg[1] = data;
+          sel.BYTE_SCATTERA64(msg, 2, elemSize);
+        } else if (simdWidth == 16) {
+          GenRegister msgs[2];
+          msgs[0] = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+          msgs[1] = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+          sel.push();
+            sel.curr.execWidth = 8;
+            /* do first quarter */
+            sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+            sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 0));
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(data, 0));
+            sel.BYTE_SCATTERA64(msgs, 2, elemSize);
+            /* do second quarter */
+            sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+            sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 1));
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(data, 1));
+            sel.BYTE_SCATTERA64(msgs, 2, elemSize);
+          sel.pop();
+        }
+    }
+    void shootByteScatterMsg(Selection::Opaque &sel,
+                             const ir::StoreInstruction &insn,
+                             GenRegister address,
+                             GenRegister data,
+                             unsigned elemSize,
+                             ir::AddressSpace addrSpace) const
+    {
+      using namespace ir;
+      unsigned addrBytes = typeSize(address.type);
+      AddressMode AM = insn.getAddressMode();
+      vector<GenRegister> btiTemp = sel.getBTITemps(AM);
+      if (AM != AM_Stateless) {
+        if (AM == AM_DynamicBti) {
+          Register btiReg = insn.getBtiReg();
+          sel.BYTE_SCATTER(address, data, elemSize, sel.selReg(btiReg, TYPE_U32), btiTemp);
+        } else {
+          unsigned SI = insn.getSurfaceIndex();
+          sel.BYTE_SCATTER(address, data, elemSize, GenRegister::immud(SI), btiTemp);
+        }
+      } else if (addrSpace == ir::MEM_LOCAL) {
+        GenRegister addr = address;
+        if (addrBytes == 8) {
+          addr = convertU64ToU32(sel, address);
+        }
+        sel.BYTE_SCATTER(addr, data, elemSize, GenRegister::immud(0xfe), btiTemp);
+      } else if (addrSpace == ir::MEM_GENERIC) {
+        Register localMask = generateLocalMask(sel, address);
+        sel.push();
+          sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+          GenRegister addrDW = address;
+          if (addrBytes == 8)
+            addrDW = convertU64ToU32(sel, address);
+          sel.BYTE_SCATTER(addrDW, data, elemSize, GenRegister::immud(0xfe), btiTemp);
+
+          sel.curr.inversePredicate = 1;
+          byteScatterStateless(sel, address, data, elemSize);
+        sel.pop();
+      } else {
+        byteScatterStateless(sel, address, data, elemSize);
       }
     }
 
@@ -4287,13 +5263,12 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
                          const ir::StoreInstruction &insn,
                          const uint32_t elemSize,
                          GenRegister address,
-                         ir::BTI &bti,
+                         ir::AddressSpace addrSpace,
                          bool isUniform) const
     {
       using namespace ir;
       uint32_t valueNum = insn.getValueNum();
 
-      GenRegister b = bti.isConst ? GenRegister::immud(bti.imm) : sel.selReg(bti.reg, ir::TYPE_U32);
       if(valueNum > 1) {
         const uint32_t typeSize = getFamilySize(getFamily(insn.getValueType()));
         vector<GenRegister> value(valueNum);
@@ -4313,77 +5288,136 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           sel.PACK_BYTE(tmp[i], value.data() + i * 4/typeSize, typeSize, 4/typeSize);
         }
 
-        sel.UNTYPED_WRITE(address, tmp.data(), tmpRegNum, b, sel.getBTITemps(bti));
+        shootUntypedWriteMsg(sel, insn, address, tmp, addrSpace);
       } else {
         const GenRegister value = sel.selReg(insn.getValue(0));
         GBE_ASSERT(insn.getValueNum() == 1);
-        const GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD, isUniform), ir::TYPE_U32);
+        const GenRegister tmp = sel.selReg(sel.reg(FAMILY_DWORD), ir::TYPE_U32);
 
-        sel.push();
-          if (isUniform) {
-            sel.curr.noMask = 1;
-            sel.curr.execWidth = 1;
-          }
+        if (elemSize == GEN_BYTE_SCATTER_WORD)
+          sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UW));
+        else if (elemSize == GEN_BYTE_SCATTER_BYTE)
+          sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UB));
 
-          if (elemSize == GEN_BYTE_SCATTER_WORD)
-            sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UW));
-          else if (elemSize == GEN_BYTE_SCATTER_BYTE)
-            sel.MOV(tmp, GenRegister::retype(value, GEN_TYPE_UB));
-        sel.pop();
-        sel.BYTE_SCATTER(address, tmp, elemSize, b, sel.getBTITemps(bti));
+        shootByteScatterMsg(sel, insn, address, tmp, elemSize, addrSpace);
       }
     }
 
     void emitOWordWrite(Selection::Opaque &sel,
                         const ir::StoreInstruction &insn,
                         GenRegister address,
-                        ir::BTI bti) const
+                        ir::AddressSpace addrSpace) const
     {
       using namespace ir;
+      uint32_t SI = insn.getSurfaceIndex();
       const uint32_t vec_size = insn.getValueNum();
       const uint32_t simdWidth = sel.ctx.getSimdWidth();
-      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
+      const Type type = insn.getValueType();
+      const uint32_t typeSize = type == TYPE_U32 ? 4 : 2;
+      const uint32_t genType = type == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_UW;
+      const RegisterFamily family = getFamily(type);
+      bool isA64 = SI == 255;
+      uint32_t offset_size = isA64 ? 128 : 8;
+
+      const GenRegister header = GenRegister::ud8grf(sel.reg(FAMILY_REG));
       vector<GenRegister> valuesVec;
-      for(uint32_t i = 0; i < vec_size; i++)
-        valuesVec.push_back(sel.selReg(insn.getValue(i), TYPE_U32));
-      // check tmp_size for OWORD write need, max 8 OWROD thus 4 regs
-      uint32_t tmp_size = simdWidth * vec_size / 8;
-      tmp_size = tmp_size > 4 ? 4 : tmp_size;
       vector<GenRegister> tmpVec;
+      for(uint32_t i = 0; i < vec_size; i++)
+        valuesVec.push_back(sel.selReg(insn.getValue(i), type));
+
+      GenRegister headeraddr;
+      if (isA64)
+        headeraddr = GenRegister::toUniform(sel.getOffsetReg(header, 0, 0), GEN_TYPE_UL);
+      else
+        headeraddr = GenRegister::toUniform(sel.getOffsetReg(header, 0, 2 * 4), GEN_TYPE_UD);
+      // Make header
+      sel.push();
+      {
+        // Copy r0 into the header first
+        sel.curr.execWidth = 8;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        sel.MOV(header, GenRegister::ud8grf(0, 0));
+
+        // Update the header with the current address
+        sel.curr.execWidth = 1;
+
+        // Put zero in the general state base address
+        if (isA64)
+          sel.MOV(headeraddr, GenRegister::toUniform(address, GEN_TYPE_UL));
+        else {
+          sel.SHR(headeraddr, GenRegister::toUniform(address, GEN_TYPE_UD), GenRegister::immud(4));
+          sel.MOV(sel.getOffsetReg(header, 0, 5 * 4), GenRegister::immud(0));
+        }
+      }
+      sel.pop();
+
+      /* For block write we need to pack the block date into the tmp, and for different
+       * simdwidth and vector size with different type size, we may need to spilt the
+       * block write send message.
+       * We can only get a send message with 5 reg length
+       * so for different combination we have different message length and tmp vector size
+       *              |  simd8  | simd16 |  simd8 | simd16
+       *  r0  |header |         |        |        |
+       *  r1  |date   |  w0,w1  |   w0   |   dw0  |  dw0
+       *  r2  |date   |  w2,w3  |   w1   |   dw1  |  dw0
+       *  r3  |date   | ......  | ...... | ...... |  dw1
+       *  r4  |date   | ....... | ...... | ...... |  dw1
+       */
+
+      uint32_t totalSize = simdWidth * typeSize * vec_size;
+      uint32_t valueSize = simdWidth * typeSize;
+      uint32_t tmp_size = totalSize > 128 ? (128 / valueSize) : vec_size;
+      uint32_t msg_num = vec_size / tmp_size;
+      uint32_t ow_size = msg_num > 1 ? 8 : (totalSize / 16);
+
       for(uint32_t i = 0; i < tmp_size; i++)
-        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
-      sel.OBWRITE(address, &valuesVec[0], vec_size, header, bti.imm, &tmpVec[0], tmp_size);
+        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(family)), genType));
+      for (uint32_t i = 0; i < msg_num; i++) {
+          for (uint32_t j = 0; j < tmp_size; j++)
+            sel.MOV(tmpVec[j], valuesVec[j + i * tmp_size]);
+          if (i > 0) {
+            sel.push();
+            {
+              // Update the address in header
+              sel.curr.execWidth = 1;
+              sel.ADD(headeraddr, headeraddr, GenRegister::immud(offset_size));
+            }
+            sel.pop();
+          }
+          sel.push();
+            // In simd8 mode, when data reg has more than 1 reg, execWidth 8 will get wrong
+            // result, so set the execWidth to 16.
+            sel.curr.execWidth = 16;
+            sel.curr.predicate = GEN_PREDICATE_NONE;
+            sel.curr.noMask = 1;
+            sel.OBWRITE(header, &tmpVec[0], tmp_size, SI, ow_size);
+          sel.pop();
+      }
+
+
     }
 
     virtual bool emit(Selection::Opaque  &sel, SelectionDAG &dag) const
     {
       using namespace ir;
       const ir::StoreInstruction &insn = cast<ir::StoreInstruction>(dag.insn);
-      GenRegister address = sel.selReg(insn.getAddressRegister(), ir::TYPE_U32);
+      Register reg = insn.getAddressRegister();
+      GenRegister address = sel.selReg(reg, getType(sel.getRegisterFamily(reg)));
+      AddressSpace addrSpace = insn.getAddressSpace();
       const Type type = insn.getValueType();
       const uint32_t elemSize = getByteScatterGatherSize(sel, type);
 
       const bool isUniform = sel.isScalarReg(insn.getAddressRegister()) && sel.isScalarReg(insn.getValue(0));
-      BTI bti;
-      AddressMode am = insn.getAddressMode();
-      if (am == AM_StaticBti) {
-        bti.isConst = 1;
-        bti.imm = insn.getSurfaceIndex();
-      } else if (am == AM_DynamicBti) {
-        bti.isConst = 0;
-        bti.reg = insn.getBtiReg();
-      } else {
-        assert(0 && "stateless not supported yet");
-      }
 
       if (insn.isBlock())
-        this->emitOWordWrite(sel, insn, address, bti);
+        this->emitOWordWrite(sel, insn, address, addrSpace);
       else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_QWORD)
-        this->emitWrite64(sel, insn, address, bti);
+        this->emitWrite64(sel, insn, address, addrSpace);
       else if (insn.isAligned() == true && elemSize == GEN_BYTE_SCATTER_DWORD)
-        this->emitUntypedWrite(sel, insn, address,  bti);
+        this->emitUntypedWrite(sel, insn, address, addrSpace);
       else {
-        this->emitByteScatter(sel, insn, elemSize, address, bti, isUniform);
+        this->emitByteScatter(sel, insn, elemSize, address, addrSpace, isUniform);
       }
 
       markAllChildren(dag);
@@ -4416,9 +5450,13 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       if (liveOut.contains(dst) || dag.computeBool)
         needStoreBool = true;
 
+      // why we set the tmpDst to null?
+      // because for the listed type compare instruction could not
+      // generate bool(uw) result to grf directly, we need an extra
+      // select to generate the bool value to grf
       if(type == TYPE_S64 || type == TYPE_U64 ||
          type == TYPE_DOUBLE || type == TYPE_FLOAT ||
-         type == TYPE_U32 ||  type == TYPE_S32 /*||
+         type == TYPE_U32 ||  type == TYPE_S32 || type == TYPE_HALF /*||
          (!needStoreBool)*/)
         tmpDst = GenRegister::retype(GenRegister::null(), GEN_TYPE_F);
       else
@@ -4451,7 +5489,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         } else {
           if((type == TYPE_S64 || type == TYPE_U64 ||
               type == TYPE_DOUBLE || type == TYPE_FLOAT ||
-              type == TYPE_U32 ||  type == TYPE_S32))
+              type == TYPE_U32 ||  type == TYPE_S32 || type == TYPE_HALF))
             sel.curr.flagGen = 1;
           else if (sel.isScalarReg(dst)) {
             // If the dest reg is a scalar bool, we can't set it as
@@ -5456,34 +6494,154 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
           this->opcodes.push_back(ir::Opcode(op));
     }
 
+    /* Used to transform address from 64bit to 32bit, note as dataport messages
+     * cannot accept scalar register, so here to convert to non-uniform
+     * register here. */
+    GenRegister convertU64ToU32(Selection::Opaque &sel,
+                                GenRegister addr) const {
+      GenRegister unpacked = GenRegister::retype(sel.unpacked_ud(addr.reg()), GEN_TYPE_UD);
+      GenRegister dst = sel.selReg(sel.reg(ir::FAMILY_DWORD), ir::TYPE_U32);
+      sel.MOV(dst, unpacked);
+      return dst;
+    }
+
+    void untypedAtomicA64Stateless(Selection::Opaque &sel,
+                              const ir::AtomicInstruction &insn,
+                              unsigned msgPayload,
+                              GenRegister dst,
+                              GenRegister addr,
+                              GenRegister src1,
+                              GenRegister src2,
+                              GenRegister bti) const {
+      using namespace ir;
+      GenRegister addrQ;
+      const AtomicOps atomicOp = insn.getAtomicOpcode();
+      GenAtomicOpCode genAtomicOp = (GenAtomicOpCode)atomicOp;
+      unsigned addrBytes = typeSize(addr.type);
+      GBE_ASSERT(msgPayload <= 3);
+
+      unsigned simdWidth = sel.curr.execWidth;
+      AddressMode AM = insn.getAddressMode();
+      if (addrBytes == 4) {
+        addrQ = sel.selReg(sel.reg(ir::FAMILY_QWORD), ir::TYPE_U64);
+        sel.MOV(addrQ, addr);
+      } else {
+        addrQ = addr;
+      }
+
+      if (simdWidth == 8) {
+        vector<GenRegister> msgs;
+        msgs.push_back(addr);
+        msgs.push_back(src1);
+        msgs.push_back(src2);
+        sel.ATOMICA64(dst, genAtomicOp, msgPayload, msgs, bti, sel.getBTITemps(AM));
+      } else if (simdWidth == 16) {
+        vector<GenRegister> msgs;
+        RegisterFamily family = sel.getRegisterFamily(insn.getDst(0));
+        Type type = getType(family);
+        for (unsigned k = 0; k < msgPayload; k++) {
+          msgs.push_back(sel.selReg(sel.reg(family), type));
+        }
+        sel.push();
+        /* first quarter */
+        sel.curr.execWidth = 8;
+        sel.curr.quarterControl = GEN_COMPRESSION_Q1;
+        sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 0));
+        if(msgPayload > 1) {
+          if(family == ir::FAMILY_QWORD)
+            sel.MOV(GenRegister::Qn(msgs[0], 1), GenRegister::Qn(src1, 0));
+          else
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(src1, 0));
+        }
+        if(msgPayload > 2) {
+          if(family == ir::FAMILY_QWORD)
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(src2, 0));
+          else
+            sel.MOV(GenRegister::Qn(msgs[1], 1), GenRegister::Qn(src2, 0));
+        }
+        sel.ATOMICA64(GenRegister::Qn(dst, 0), genAtomicOp, msgPayload, msgs, bti, sel.getBTITemps(AM));
+
+        /* second quarter */
+        sel.curr.execWidth = 8;
+        sel.curr.quarterControl = GEN_COMPRESSION_Q2;
+        sel.MOV(GenRegister::retype(msgs[0], GEN_TYPE_UL), GenRegister::Qn(addrQ, 1));
+        if(msgPayload > 1) {
+          if(family == ir::FAMILY_QWORD)
+            sel.MOV(GenRegister::Qn(msgs[0], 1), GenRegister::Qn(src1, 1));
+          else
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(src1, 1));
+        }
+        if(msgPayload > 2) {
+          if(family == ir::FAMILY_QWORD)
+            sel.MOV(GenRegister::Qn(msgs[1], 0), GenRegister::Qn(src2, 1));
+          else
+            sel.MOV(GenRegister::Qn(msgs[1], 1), GenRegister::Qn(src2, 1));
+        }
+        sel.ATOMICA64(GenRegister::Qn(dst, 1), genAtomicOp, msgPayload, msgs, bti, sel.getBTITemps(AM));
+        sel.pop();
+      }
+    }
+
     INLINE bool emit(Selection::Opaque &sel, SelectionDAG &dag) const {
       using namespace ir;
       const ir::AtomicInstruction &insn = cast<ir::AtomicInstruction>(dag.insn);
 
-      ir::BTI b;
       const AtomicOps atomicOp = insn.getAtomicOpcode();
       unsigned srcNum = insn.getSrcNum();
       unsigned msgPayload;
+      Register reg = insn.getAddressRegister();
+      GenRegister address = sel.selReg(reg, getType(sel.getRegisterFamily(reg)));
+      AddressSpace addrSpace = insn.getAddressSpace();
+      GBE_ASSERT(insn.getAddressSpace() == MEM_GLOBAL ||
+                 insn.getAddressSpace() == MEM_PRIVATE ||
+                 insn.getAddressSpace() == MEM_LOCAL ||
+                 insn.getAddressSpace() == MEM_GENERIC ||
+                 insn.getAddressSpace() == MEM_MIXED);
+      unsigned addrBytes = typeSize(address.type);
 
       AddressMode AM = insn.getAddressMode();
       if (AM == AM_DynamicBti) {
-        b.reg = insn.getBtiReg();
         msgPayload = srcNum - 1;
       } else {
-        b.imm = insn.getSurfaceIndex();
-        b.isConst = 1;
         msgPayload = srcNum;
       }
 
-      GenRegister dst  = sel.selReg(insn.getDst(0), TYPE_U32);
-      GenRegister bti =  b.isConst ? GenRegister::immud(b.imm) : sel.selReg(b.reg, ir::TYPE_U32);
-      GenRegister src0 = sel.selReg(insn.getAddressRegister(), TYPE_U32);
+      Type type = getType(sel.getRegisterFamily(insn.getDst(0)));
+      GenRegister dst  = sel.selReg(insn.getDst(0), type);
+      GenRegister src0 = sel.selReg(insn.getAddressRegister(), type);
       GenRegister src1 = src0, src2 = src0;
-      if(msgPayload > 1) src1 = sel.selReg(insn.getSrc(1), TYPE_U32);
-      if(msgPayload > 2) src2 = sel.selReg(insn.getSrc(2), TYPE_U32);
+      if(msgPayload > 1) src1 = sel.selReg(insn.getSrc(1), type);
+      if(msgPayload > 2) src2 = sel.selReg(insn.getSrc(2), type);
 
       GenAtomicOpCode genAtomicOp = (GenAtomicOpCode)atomicOp;
-      sel.ATOMIC(dst, genAtomicOp, msgPayload, src0, src1, src2, bti, sel.getBTITemps(b));
+      if (AM == AM_DynamicBti || AM == AM_StaticBti) {
+        if (AM == AM_DynamicBti) {
+          Register btiReg = insn.getBtiReg();
+          sel.ATOMIC(dst, genAtomicOp, msgPayload, address, src1, src2, sel.selReg(btiReg, type), sel.getBTITemps(AM));
+        } else {
+          unsigned SI = insn.getSurfaceIndex();
+          sel.ATOMIC(dst, genAtomicOp, msgPayload, address, src1, src2, GenRegister::immud(SI), sel.getBTITemps(AM));
+        }
+      } else if (addrSpace == ir::MEM_LOCAL) {
+        // stateless mode, local still use bti access
+        GenRegister addrDW = address;
+        if (addrBytes == 8)
+          addrDW = convertU64ToU32(sel, address);
+        sel.ATOMIC(dst, genAtomicOp, msgPayload, addrDW, src1, src2, GenRegister::immud(0xfe), sel.getBTITemps(AM));
+      } else if (addrSpace == ir::MEM_GENERIC) {
+          Register localMask = generateLocalMask(sel, address);
+          sel.push();
+            sel.curr.useVirtualFlag(localMask, GEN_PREDICATE_NORMAL);
+            GenRegister addrDW = address;
+            if (addrBytes == 8)
+              addrDW = convertU64ToU32(sel, address);
+            sel.ATOMIC(dst, genAtomicOp, msgPayload, addrDW, src1, src2, GenRegister::immud(0xfe), sel.getBTITemps(AM));
+
+            sel.curr.inversePredicate = 1;
+            untypedAtomicA64Stateless(sel, insn, msgPayload, dst, address, src1, src2, GenRegister::immud(0xff));
+          sel.pop();
+      } else
+        untypedAtomicA64Stateless(sel, insn, msgPayload, dst, address, src1, src2, GenRegister::immud(0xff));
 
       markAllChildren(dag);
       return true;
@@ -5639,6 +6797,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       sel.push();
         sel.curr.noMask = 1;
         sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
         sel.cmpBlockIP(GEN_CONDITIONAL_LE, src0, src1);
       sel.pop();
 
@@ -5649,6 +6809,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         // this block, as it will always excute with all lanes activated.
         sel.push();
           sel.curr.predicate = GEN_PREDICATE_NORMAL;
+          sel.curr.flag = 0;
+          sel.curr.subFlag = 1;
           sel.setBlockIP(src0, sel.ctx.getMaxLabel());
           sel.curr.predicate = GEN_PREDICATE_NONE;
           sel.curr.noMask = 1;
@@ -5667,6 +6829,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         // FIXME, if the last BRA is unconditional jump, we don't need to update the label here.
         sel.push();
          sel.curr.predicate = GEN_PREDICATE_NORMAL;
+         sel.curr.flag = 0;
+         sel.curr.subFlag = 1;
          sel.setBlockIP(src0, label.value());
         sel.pop();
       }
@@ -5678,6 +6842,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
             (jip != nextLabel || sel.block->endifOffset != -1)) {
           // If it is required, insert a JUMP to bypass the block
           sel.push();
+            sel.curr.flag = 0;
+            sel.curr.subFlag = 1;
             if (simdWidth == 8)
               sel.curr.predicate = GEN_PREDICATE_ALIGN1_ANY8H;
             else if (simdWidth == 16)
@@ -5692,6 +6858,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
         }
         if(!sel.block->removeSimpleIfEndif){
           sel.push();
+            sel.curr.flag = 0;
+            sel.curr.subFlag = 1;
             sel.curr.predicate = GEN_PREDICATE_NORMAL;
             if(!insn.getParent()->needEndif && insn.getParent()->needIf) {
               ir::LabelIndex label = insn.getParent()->endifLabel;
@@ -5831,86 +6999,97 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
   {
     INLINE bool emitOne(Selection::Opaque &sel, const ir::TypedWriteInstruction &insn, bool &markChildren) const
     {
-      using namespace ir;
-      const uint32_t simdWidth = sel.ctx.getSimdWidth();
-      GenRegister msgs[9]; // (header + U + V + R + LOD + 4)
-      const uint32_t msgNum = (8 / (simdWidth / 8)) + 1;
-      const uint32_t dim = insn.getSrcNum() - 4;
-
-      if (simdWidth == 16) {
-        for(uint32_t i = 0; i < msgNum; i++)
-          msgs[i] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-      } else {
-        uint32_t valueID = 0;
-        uint32_t msgID = 0;
-        msgs[msgID++] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-        for(; msgID < 1 + dim; msgID++, valueID++)
-          msgs[msgID] = sel.selReg(insn.getSrc(msgID - 1), insn.getCoordType());
-
-        // fake v.
-        if (dim < 2)
-          msgs[msgID++] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-        // fake w.
-        if (dim < 3)
-          msgs[msgID++] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-        // LOD.
-        msgs[msgID++] = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
-        for(; valueID < insn.getSrcNum(); msgID++, valueID++)
-          msgs[msgID] = sel.selReg(insn.getSrc(valueID), insn.getSrcType());
-      }
-
+      const GenRegister header = GenRegister::ud8grf(sel.reg(ir::FAMILY_REG));
       sel.push();
       sel.curr.predicate = GEN_PREDICATE_NONE;
       sel.curr.noMask = 1;
-      sel.MOV(msgs[0], GenRegister::immud(0));
+      sel.MOV(header, GenRegister::immud(0));
       sel.curr.execWidth = 1;
-
-      GenRegister channelEn = sel.getOffsetReg(msgs[0], 0, 7*4);
+      GenRegister channelEn = sel.getOffsetReg(header, 0, 7*4);
       // Enable all channels.
       sel.MOV(channelEn, GenRegister::immud(0xffff));
-      sel.curr.execWidth = 8;
-      // Set zero LOD.
-      if (simdWidth == 8)
-        sel.MOV(msgs[4], GenRegister::immud(0));
-      else
-        sel.MOV(GenRegister::Qn(msgs[2], 0), GenRegister::immud(0));
       sel.pop();
 
-      uint32_t bti = insn.getImageIndex();
-      if (simdWidth == 8)
-        sel.TYPED_WRITE(msgs, msgNum, bti, dim == 3);
-      else {
-        sel.push();
-        sel.curr.execWidth = 8;
-        for( uint32_t quarter = 0; quarter < 2; quarter++)
-        {
-          #define QUARTER_MOV0(msgs, msgid, src) \
-                    sel.MOV(GenRegister::Qn(GenRegister::retype(msgs[msgid/2], GEN_TYPE_UD), msgid % 2), \
-                            GenRegister::Qn(src, quarter))
-
-          #define QUARTER_MOV1(msgs, msgid, src) \
-                  sel.MOV(GenRegister::Qn(GenRegister::retype(msgs[msgid/2], src.type), msgid % 2), \
-                          GenRegister::Qn(src, quarter))
-          sel.curr.quarterControl = (quarter == 0) ? GEN_COMPRESSION_Q1 : GEN_COMPRESSION_Q2;
-          // Set U,V,W
-          QUARTER_MOV0(msgs, 1, sel.selReg(insn.getSrc(0), insn.getCoordType()));
-          if (dim > 1)
-            QUARTER_MOV0(msgs, 2, sel.selReg(insn.getSrc(1), insn.getCoordType()));
-          if (dim > 2)
-            QUARTER_MOV0(msgs, 3, sel.selReg(insn.getSrc(2), insn.getCoordType()));
-          // Set R, G, B, A
-          QUARTER_MOV1(msgs, 5, sel.selReg(insn.getSrc(dim), insn.getSrcType()));
-          QUARTER_MOV1(msgs, 6, sel.selReg(insn.getSrc(dim + 1), insn.getSrcType()));
-          QUARTER_MOV1(msgs, 7, sel.selReg(insn.getSrc(dim + 2), insn.getSrcType()));
-          QUARTER_MOV1(msgs, 8, sel.selReg(insn.getSrc(dim + 3), insn.getSrcType()));
-          sel.TYPED_WRITE(msgs, msgNum, bti, dim == 3);
-          #undef QUARTER_MOV0
-          #undef QUARTER_MOV1
-        }
-        sel.pop();
-      }
+      const uint32_t simdWidth = sel.ctx.getSimdWidth();
+      if (simdWidth == 16)
+        emitWithSimd16(sel, insn, markChildren, header);
+      else if (simdWidth == 8)
+        emitWithSimd8(sel, insn, markChildren, header);
+      else
+        NOT_SUPPORTED;
       return true;
     }
+
+    INLINE bool emitWithSimd16(Selection::Opaque &sel, const ir::TypedWriteInstruction &insn, bool &markChildren, const GenRegister& header) const
+    {
+      using namespace ir;
+
+      GenRegister msgs[9]; // (header + U + V + W + LOD + 4)
+      msgs[0] = header;
+      for (uint32_t i = 1; i < 9; ++i) {
+        //SIMD16 will be split into two SIMD8,
+        //each virtual reg in msgs requires one physical reg with 8 DWORDs (32 bytes),
+        //so, declare with FAMILY_WORD, and the allocated size will be sizeof(WORD)*SIMD16 = 32 bytes
+        msgs[i] = sel.selReg(sel.reg(FAMILY_WORD), TYPE_U32);
+      }
+
+      const uint32_t dims = insn.getSrcNum() - 4;
+      uint32_t bti = insn.getImageIndex();
+
+      sel.push();
+      sel.curr.execWidth = 8;
+      for (uint32_t i = 0; i < 2; ++i) { //SIMD16 split to two SIMD8
+        sel.curr.quarterControl = (i == 0) ? GEN_COMPRESSION_Q1 : GEN_COMPRESSION_Q2;
+        uint32_t msgid = 1;
+        for (uint32_t dim = 0; dim < dims; ++dim) {  //the coords
+          GenRegister coord = sel.selReg(insn.getSrc(dim), insn.getCoordType());
+          sel.MOV(GenRegister::retype(msgs[msgid++], coord.type), GenRegister::Qn(coord, i));
+        }
+
+        while (msgid < 5)  //fill fake coords
+          sel.MOV(msgs[msgid++], GenRegister::immud(0));
+
+        for (uint32_t j = 0; j < 4; ++j) {  //the data
+          GenRegister data = sel.selReg(insn.getSrc(j + dims), insn.getSrcType());
+          sel.MOV(GenRegister::retype(msgs[msgid++], data.type), GenRegister::Qn(data, i));
+        }
+
+        sel.TYPED_WRITE(msgs, 9, bti, dims == 3);
+      }
+      sel.pop();
+      return true;
+    }
+
+    INLINE bool emitWithSimd8(Selection::Opaque &sel, const ir::TypedWriteInstruction &insn, bool &markChildren, const GenRegister& header) const
+    {
+      using namespace ir;
+      GenRegister msgs[9]; // (header + U + V + W + LOD + 4)
+      msgs[0] = header;
+
+      const uint32_t dims = insn.getSrcNum() - 4;
+      uint32_t bti = insn.getImageIndex();
+      uint32_t msgid = 1;
+
+      for (uint32_t dim = 0; dim < dims; ++dim) {  //the coords
+        GenRegister coord = sel.selReg(insn.getSrc(dim), insn.getCoordType());
+        msgs[msgid++] = coord;
+      }
+
+      while (msgid < 5) {  //fill fake coords
+        GenRegister fake = sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32);
+        sel.MOV(fake, GenRegister::immud(0));
+        msgs[msgid++] = fake;
+      }
+
+      for (uint32_t j = 0; j < 4; ++j) {  //the data
+        GenRegister data = sel.selReg(insn.getSrc(j + dims), insn.getSrcType());
+        msgs[msgid++] = data;
+      }
+
+      sel.TYPED_WRITE(msgs, 9, bti, dims == 3);
+      return true;
+    }
+
     DECL_CTOR(TypedWriteInstruction, 1, 1);
   };
 
@@ -6170,8 +7349,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       uint8_t BTI = insn.getBti();
       GenRegister tmp0, tmp1;
       uint32_t srcNum = insn.getSrcNum();
-      GenRegister dst = sel.selReg(insn.getDst(0), TYPE_S32);
-      //GBE_ASSERT(srcNum);
+
       uint32_t i = 0;
       uint32_t totalSize = 0;
       bool isContinue = false;
@@ -6192,14 +7370,14 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       i = 0;
       GenRegister regs[8];
       if (srcNum == 0) {
-          sel.PRINTF(dst, BTI, tmp0, tmp1, regs, srcNum, num, isContinue, totalSize);
+          sel.PRINTF(BTI, tmp0, tmp1, regs, srcNum, num, isContinue, totalSize);
       } else {
         do {
           uint32_t s = srcNum < 8 ? srcNum : 8;
           for (uint32_t j = 0; j < s; j++) {
             regs[j] = sel.selReg(insn.getSrc(i + j), insn.getType(i + j));
           }
-          sel.PRINTF(dst, BTI, tmp0, tmp1, regs, s, num, isContinue, totalSize);
+          sel.PRINTF(BTI, tmp0, tmp1, regs, s, num, isContinue, totalSize);
 
           if (srcNum > 8) {
             srcNum -= 8;
@@ -6257,6 +7435,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       } else {
         // Update the PcIPs
         const LabelIndex jip = sel.ctx.getLabelIndex(&insn);
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
         if(insn.getParent()->needEndif)
           sel.setBlockIP(ip, dst.value());
 
@@ -6323,6 +7503,8 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       } else {
         const LabelIndex next = bb.getNextBlock()->getLabelIndex();
         // Update the PcIPs
+        sel.curr.flag = 0;
+        sel.curr.subFlag = 1;
         if(insn.getParent()->needEndif)
         sel.setBlockIP(ip, dst.value());
         sel.block->endifOffset = -1;
@@ -6440,10 +7622,15 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       GenRegister localBarrier = GenRegister::ud8grf(sel.reg(FAMILY_DWORD));
 
       /* Allocate registers for message sending
-       * (read/write to shared local memory) */
+       * (read/write to shared local memory),
+       * only one data (ud/ul) is needed for thread communication,
+       * we will always use SIMD8 to do the read/write
+       */
       vector<GenRegister> msg;
-      for(uint32_t i = 0; i < 6; i++)
-        msg.push_back(sel.selReg(sel.reg(FAMILY_DWORD), TYPE_U32));
+      msg.push_back(GenRegister::ud8grf(sel.reg(ir::FAMILY_REG)));  //address
+      msg.push_back(GenRegister::ud8grf(sel.reg(ir::FAMILY_REG)));  //data
+      if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L)
+        msg.push_back(GenRegister::ud8grf(sel.reg(ir::FAMILY_REG)));  //data
 
       /* Insert a barrier to make sure all the var we are interested in
          have been assigned the final value. */
@@ -6455,7 +7642,7 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
 
       /* Perform workgroup op */
       sel.WORKGROUP_OP(workGroupOp, dst, src, tmpData1,
-                       localThreadID, localThreadNUM, tmpData2, slmOff, msg, 6,
+                       localThreadID, localThreadNUM, tmpData2, slmOff, msg,
                        localBarrier);
 
       return true;
@@ -6713,20 +7900,78 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
       using namespace ir;
       uint32_t vec_size = insn.getVectorSize();
       uint32_t simdWidth = sel.curr.execWidth;
+      const Type type = insn.getType();
+      const uint32_t typeSize = type == TYPE_U32 ? 4 : 2;
+      uint32_t response_size = simdWidth * vec_size * typeSize / 32;
+      // ushort in simd8 will have half reg thus 0.5 reg size, but response lenght is still 1
+      response_size = response_size ? response_size : 1;
+      uint32_t block_width = typeSize * simdWidth;
+      uint32_t blocksize = (block_width - 1) % 32 | (vec_size - 1) << 16;
+
+
       vector<GenRegister> valuesVec;
       vector<GenRegister> tmpVec;
       for (uint32_t i = 0; i < vec_size; ++i) {
-        valuesVec.push_back(sel.selReg(insn.getDst(i), TYPE_U32));
-        if(simdWidth == 16)
-          tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
+        valuesVec.push_back(sel.selReg(insn.getDst(i), type));
+        if(simdWidth == 16 && typeSize == 4)
+          tmpVec.push_back(GenRegister::ud8grf(sel.reg(FAMILY_REG)));
       }
-      const GenRegister coordx = sel.selReg(insn.getSrc(0), TYPE_U32);
-      const GenRegister coordy = sel.selReg(insn.getSrc(1), TYPE_U32);
-      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
-      GenRegister *tmp = NULL;
-      if(simdWidth == 16)
-        tmp = &tmpVec[0];
-      sel.MBREAD(&valuesVec[0], coordx, coordy, header, tmp, insn.getImageIndex(), insn.getVectorSize());
+      const GenRegister coordx = GenRegister::toUniform(sel.selReg(insn.getSrc(0), TYPE_U32), GEN_TYPE_UD);
+      const GenRegister coordy = GenRegister::toUniform(sel.selReg(insn.getSrc(1), TYPE_U32), GEN_TYPE_UD);
+      const GenRegister header = GenRegister::ud8grf(sel.reg(FAMILY_REG));
+      const GenRegister offsetx = GenRegister::toUniform(sel.getOffsetReg(header, 0, 0 * 4), GEN_TYPE_UD);
+      const GenRegister offsety = GenRegister::toUniform(sel.getOffsetReg(header, 0, 1 * 4), GEN_TYPE_UD);
+      const GenRegister blocksizereg = sel.getOffsetReg(header, 0, 2 * 4);
+
+      // Make header
+      sel.push();
+        // Copy r0 into the header first
+        sel.curr.execWidth = 8;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        sel.MOV(header, GenRegister::ud8grf(0, 0));
+
+        // Update the header with the coord
+        sel.curr.execWidth = 1;
+        sel.MOV(offsetx, coordx);
+        sel.MOV(offsety, coordy);
+        // Update block width and height
+        sel.MOV(blocksizereg, GenRegister::immud(blocksize));
+      sel.pop();
+
+      if (simdWidth * typeSize < 64) {
+        sel.push();
+          sel.curr.execWidth = 8;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+          // Now read the data
+          sel.MBREAD(&valuesVec[0], vec_size, header, insn.getImageIndex(), response_size);
+        sel.pop();
+      } else if (simdWidth * typeSize == 64) {
+        sel.push();
+          sel.curr.execWidth = 8;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+          sel.MBREAD(&tmpVec[0], vec_size ,header, insn.getImageIndex(), vec_size);
+          for (uint32_t i = 0; i < vec_size; i++)
+            sel.MOV(valuesVec[i], tmpVec[i]);
+
+          // Second half
+          // Update the header with the coord
+          sel.curr.execWidth = 1;
+          sel.ADD(offsetx, offsetx, GenRegister::immud(32));
+
+          // Now read the data
+          sel.curr.execWidth = 8;
+          sel.MBREAD(&tmpVec[0], vec_size, header, insn.getImageIndex(), vec_size);
+
+          // Move the reg to fit vector rule.
+          for (uint32_t i = 0; i < vec_size; i++)
+            sel.MOV(sel.getOffsetReg(valuesVec[i], 0, 32) , tmpVec[i]);
+        sel.pop();
+      } else NOT_IMPLEMENTED;
+
+
       return true;
     }
     DECL_CTOR(MediaBlockReadInstruction, 1, 1);
@@ -6739,17 +7984,85 @@ extern bool OCL_DEBUGINFO; // first defined by calling BVAR in program.cpp
     {
       using namespace ir;
       uint32_t vec_size = insn.getVectorSize();
-      const GenRegister coordx = sel.selReg(insn.getSrc(0), TYPE_U32);
-      const GenRegister coordy = sel.selReg(insn.getSrc(1), TYPE_U32);
+      const Type type = insn.getType();
+      uint32_t simdWidth = sel.curr.execWidth;
+      const uint32_t genType = type == TYPE_U32 ? GEN_TYPE_UD : GEN_TYPE_UW;
+      const RegisterFamily family = getFamily(type);
+      const uint32_t typeSize = type == TYPE_U32 ? 4 : 2;
+      // ushort in simd8 will have half reg, but data lenght is still 1
+      uint32_t data_size = simdWidth * vec_size * typeSize / 32;
+      data_size = data_size? data_size : 1;
+      uint32_t block_width = typeSize * simdWidth;
+      uint32_t blocksize = (block_width - 1) % 32 | (vec_size - 1) << 16;
+
+
       vector<GenRegister> valuesVec;
       vector<GenRegister> tmpVec;
-      for(uint32_t i = 0; i < vec_size; i++)
-      {
-        valuesVec.push_back(sel.selReg(insn.getSrc(2 + i), TYPE_U32));
-        tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32));
-      }
-      const GenRegister header = GenRegister::retype(GenRegister::f8grf(sel.reg(FAMILY_DWORD)), TYPE_U32);
-      sel.MBWRITE(coordx, coordy, &valuesVec[0], header, &tmpVec[0], insn.getImageIndex(), vec_size);
+      for (uint32_t i = 0; i < vec_size; ++i) {
+         valuesVec.push_back(sel.selReg(insn.getSrc(2 + i), type));
+        if(simdWidth == 16 && typeSize == 4)
+          tmpVec.push_back(GenRegister::ud8grf(sel.reg(FAMILY_REG)));
+        else
+          tmpVec.push_back(GenRegister::retype(GenRegister::f8grf(sel.reg(family)), genType));
+       }
+      const GenRegister coordx = GenRegister::toUniform(sel.selReg(insn.getSrc(0), TYPE_U32), GEN_TYPE_UD);
+      const GenRegister coordy = GenRegister::toUniform(sel.selReg(insn.getSrc(1), TYPE_U32), GEN_TYPE_UD);
+      const GenRegister header = GenRegister::ud8grf(sel.reg(FAMILY_REG));
+      const GenRegister offsetx = GenRegister::toUniform(sel.getOffsetReg(header, 0, 0*4), GEN_TYPE_UD);
+      const GenRegister offsety = GenRegister::toUniform(sel.getOffsetReg(header, 0, 1*4), GEN_TYPE_UD);
+      const GenRegister blocksizereg = sel.getOffsetReg(header, 0, 2*4);
+
+      // Make header
+      sel.push();
+        // Copy r0 into the header first
+        sel.curr.execWidth = 8;
+        sel.curr.predicate = GEN_PREDICATE_NONE;
+        sel.curr.noMask = 1;
+        sel.MOV(header, GenRegister::ud8grf(0, 0));
+
+        // Update the header with the coord
+        sel.curr.execWidth = 1;
+        sel.MOV(offsetx, coordx);
+        sel.MOV(offsety, coordy);
+        // Update block width and height
+        sel.MOV(blocksizereg, GenRegister::immud(blocksize));
+      sel.pop();
+
+      if (simdWidth * typeSize < 64) {
+        for (uint32_t i = 0; i < vec_size; ++i) {
+            sel.MOV(tmpVec[i], valuesVec[i]);
+        }
+        sel.push();
+          sel.curr.execWidth = 8;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+          // Now write the data
+          sel.MBWRITE(header, &tmpVec[0], vec_size, insn.getImageIndex(), data_size);
+        sel.pop();
+      } else if (simdWidth * typeSize == 64) {
+        sel.push();
+          sel.curr.execWidth = 8;
+          sel.curr.predicate = GEN_PREDICATE_NONE;
+          sel.curr.noMask = 1;
+          for (uint32_t i = 0; i < vec_size; i++)
+            sel.MOV(tmpVec[i], valuesVec[i]);
+          sel.MBWRITE(header, &tmpVec[0], vec_size, insn.getImageIndex(), vec_size);
+
+          // Second half
+          // Update the header with the coord
+          sel.curr.execWidth = 1;
+          sel.ADD(offsetx, offsetx, GenRegister::immud(32));
+
+          sel.curr.execWidth = 8;
+          for (uint32_t i = 0; i < vec_size; i++)
+            sel.MOV(tmpVec[i], sel.getOffsetReg(valuesVec[i], 0, 32));
+          // Now write the data
+          sel.MBWRITE(header, &tmpVec[0], vec_size, insn.getImageIndex(), vec_size);
+
+          // Move the reg to fit vector rule.
+        sel.pop();
+      } else NOT_IMPLEMENTED;
+
       return true;
     }
     DECL_CTOR(MediaBlockWriteInstruction, 1, 1);

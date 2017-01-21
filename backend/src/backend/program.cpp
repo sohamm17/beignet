@@ -89,7 +89,8 @@ namespace gbe {
   Kernel::Kernel(const std::string &name) :
     name(name), args(NULL), argNum(0), curbeSize(0), stackSize(0), useSLM(false),
         slmSize(0), ctx(NULL), samplerSet(NULL), imageSet(NULL), printfSet(NULL),
-        profilingInfo(NULL) {}
+        profilingInfo(NULL), useDeviceEnqueue(false) {}
+
   Kernel::~Kernel(void) {
     if(ctx) GBE_DELETE(ctx);
     if(samplerSet) GBE_DELETE(samplerSet);
@@ -106,11 +107,14 @@ namespace gbe {
     return it->offset; // we found it!
   }
 
-  Program::Program(uint32_t fast_relaxed_math) : fast_relaxed_math(fast_relaxed_math), constantSet(NULL) {}
+  Program::Program(uint32_t fast_relaxed_math) : fast_relaxed_math(fast_relaxed_math), 
+                               constantSet(NULL),
+                               relocTable(NULL) {}
   Program::~Program(void) {
     for (map<std::string, Kernel*>::iterator it = kernels.begin(); it != kernels.end(); ++it)
       GBE_DELETE(it->second);
     if (constantSet) delete constantSet;
+    if (relocTable) delete relocTable;
   }
 
 #ifdef GBE_COMPILER_AVAILABLE
@@ -119,7 +123,10 @@ namespace gbe {
   IVAR(OCL_PROFILING_LOG, 0, 0, 1); // Int for different profiling types.
   BVAR(OCL_OUTPUT_BUILD_LOG, false);
 
-  bool Program::buildFromLLVMFile(const char *fileName, const void* module, std::string &error, int optLevel) {
+  bool Program::buildFromLLVMFile(const char *fileName,
+                                         const void* module,
+                                         std::string &error,
+                                         int optLevel) {
     ir::Unit *unit = new ir::Unit();
     llvm::Module * cloned_module = NULL;
     bool ret = false;
@@ -174,6 +181,8 @@ namespace gbe {
 
   bool Program::buildFromUnit(const ir::Unit &unit, std::string &error) {
     constantSet = new ir::ConstantSet(unit.getConstantSet());
+    relocTable = new ir::RelocTable(unit.getRelocTable());
+    blockFuncs = unit.blockFuncs;
     const auto &set = unit.getFunctionSet();
     const uint32_t kernelNum = set.size();
     if (OCL_OUTPUT_GEN_IR) std::cout << unit;
@@ -212,6 +221,7 @@ namespace gbe {
     uint32_t ret_size = 0;
     uint32_t ker_num = kernels.size();
     uint32_t has_constset = 0;
+    uint32_t has_relocTable = 0;
 
     OUT_UPDATE_SZ(magic_begin);
 
@@ -225,6 +235,18 @@ namespace gbe {
       ret_size += sz;
     } else {
       OUT_UPDATE_SZ(has_constset);
+    }
+
+    if(relocTable) {
+      has_relocTable = 1;
+      OUT_UPDATE_SZ(has_relocTable);
+      uint32_t sz = relocTable->serializeToBin(outs);
+      if (!sz)
+        return 0;
+
+      ret_size += sz;
+    } else {
+      OUT_UPDATE_SZ(has_relocTable);
     }
 
     OUT_UPDATE_SZ(ker_num);
@@ -247,6 +269,7 @@ namespace gbe {
     int has_constset = 0;
     uint32_t ker_num;
     uint32_t magic;
+    uint32_t has_relocTable = 0;
 
     IN_UPDATE_SZ(magic);
     if (magic != magic_begin)
@@ -256,6 +279,17 @@ namespace gbe {
     if(has_constset) {
       constantSet = new ir::ConstantSet;
       uint32_t sz = constantSet->deserializeFromBin(ins);
+
+      if (sz == 0)
+        return 0;
+
+      total_size += sz;
+    }
+
+    IN_UPDATE_SZ(has_relocTable);
+    if(has_relocTable) {
+      relocTable = new ir::RelocTable;
+      uint32_t sz = relocTable->deserializeFromBin(ins);
 
       if (sz == 0)
         return 0;
@@ -302,6 +336,8 @@ namespace gbe {
     OUT_UPDATE_SZ(sz);
     outs.write(name.c_str(), name.size());
     ret_size += sizeof(char)*name.size();
+
+    OUT_UPDATE_SZ(oclVersion);
 
     OUT_UPDATE_SZ(argNum);
     for (i = 0; i < argNum; i++) {
@@ -414,6 +450,8 @@ namespace gbe {
     c_name[name_len] = 0;
     name = c_name;
     delete[] c_name;
+
+    IN_UPDATE_SZ(oclVersion);
 
     IN_UPDATE_SZ(argNum);
     args = GBE_NEW_ARRAY_NO_ARG(KernelArgument, argNum);
@@ -616,7 +654,7 @@ namespace gbe {
 #ifdef GBE_COMPILER_AVAILABLE
   static bool buildModuleFromSource(const char *source, llvm::Module** out_module, llvm::LLVMContext* llvm_ctx,
                                     std::string dumpLLVMFileName, std::string dumpSPIRBinaryName, std::vector<std::string>& options, size_t stringSize, char *err,
-                                    size_t *errSize) {
+                                    size_t *errSize, uint32_t oclVersion) {
     // Arguments to pass to the clang frontend
     vector<const char *> args;
     bool bFastMath = false;
@@ -626,6 +664,17 @@ namespace gbe {
     }
 
     args.push_back("-cl-kernel-arg-info");
+    // The ParseCommandLineOptions used for mllvm args can not be used with multithread
+    // and GVN now have a 100 inst limit on block scan. Now only pass a bigger limit
+    // for each context only once, this can also fix multithread bug.
+#if LLVM_VERSION_MINOR >= 8
+    static bool ifsetllvm = false;
+    if(!ifsetllvm) {
+      args.push_back("-mllvm");
+      args.push_back("-memdep-block-scan-limit=200");
+      ifsetllvm = true;
+    }
+#endif
 #ifdef GEN7_SAMPLER_CLAMP_BORDER_WORKAROUND
     args.push_back("-DGEN7_SAMPLER_CLAMP_BORDER_WORKAROUND");
 #endif
@@ -643,7 +692,11 @@ namespace gbe {
     args.push_back("-x");
     args.push_back("cl");
     args.push_back("-triple");
-    args.push_back("spir");
+    if (oclVersion >= 200) {
+      args.push_back("spir64");
+      args.push_back("-fblocks");
+    } else
+      args.push_back("spir");
 #endif /* LLVM_VERSION_MINOR <= 2 */
     args.push_back("stringInput.cl");
     args.push_back("-ffp-contract=on");
@@ -691,7 +744,18 @@ namespace gbe {
     clang::LangOptions & lang_opts = Clang.getLangOpts();
     lang_opts.OpenCL = 1;
     
-    GBE_ASSERT(Clang.getFrontendOpts().LLVMArgs.empty() && "We do not have llvm args now");
+    //llvm flags need command line parsing to take effect
+    if (!Clang.getFrontendOpts().LLVMArgs.empty()) {
+      unsigned NumArgs = Clang.getFrontendOpts().LLVMArgs.size();
+      const char **Args = new const char*[NumArgs + 2];
+      Args[0] = "clang (LLVM option parsing)";
+      for (unsigned i = 0; i != NumArgs; ++i){
+        Args[i + 1] = Clang.getFrontendOpts().LLVMArgs[i].c_str();
+      }
+      Args[NumArgs + 1] = 0;
+      llvm::cl::ParseCommandLineOptions(NumArgs + 1, Args);
+      delete [] Args;
+    }
   
     // Create an action and make the compiler instance carry it out
     std::unique_ptr<clang::CodeGenAction> Act(new clang::EmitLLVMOnlyAction(llvm_ctx));
@@ -774,6 +838,7 @@ namespace gbe {
 
 
   SVAR(OCL_PCH_PATH, OCL_PCH_OBJECT);
+  SVAR(OCL_PCH_20_PATH, OCL_PCH_OBJECT_20);
   SVAR(OCL_HEADER_FILE_DIR, OCL_HEADER_DIR);
   BVAR(OCL_OUTPUT_KERNEL_SOURCE, false);
 
@@ -787,10 +852,9 @@ namespace gbe {
                                      int& optLevel,
                                      size_t stringSize,
                                      char *err,
-                                     size_t *errSize)
+                                     size_t *errSize,
+                                     uint32_t &oclVersion)
   {
-    std::string dirs = OCL_PCH_PATH;
-    std::istringstream idirs(dirs);
     std::string pchFileName;
     bool findPCH = false;
 #if defined(__ANDROID__)
@@ -803,8 +867,6 @@ namespace gbe {
     std::string hdirs = OCL_HEADER_FILE_DIR;
     if(hdirs == "")
       hdirs = OCL_HEADER_DIR;
-    if(dirs == "")
-      dirs = OCL_PCH_OBJECT;
     std::istringstream hidirs(hdirs);
     std::string headerFilePath;
     bool findOcl = false;
@@ -816,6 +878,7 @@ namespace gbe {
         break;
       }
     }
+    (void) findOcl;
     assert(findOcl);
     if (OCL_OUTPUT_KERNEL_SOURCE) {
       if(options) {
@@ -831,6 +894,8 @@ namespace gbe {
 
     if (options) {
       char *c_str = (char *)malloc(sizeof(char) * (strlen(options) + 1));
+      if (c_str == NULL)
+        return false;
       memcpy(c_str, options, strlen(options) + 1);
       std::string optionStr(c_str);
       const std::string unsupportedOptions("-cl-denorms-are-zero, -cl-strict-aliasing, -cl-opt-disable,"
@@ -912,11 +977,16 @@ EXTEND_QUOTE:
 
         if(str.find("-cl-std=") != std::string::npos) {
           useDefaultCLCVersion = false;
-          if (str == "-cl-std=CL1.1")
+          if (str == "-cl-std=CL1.1") {
             clOpt.push_back("-D__OPENCL_C_VERSION__=110");
-          else if (str == "-cl-std=CL1.2")
+            oclVersion = 110;
+          } else if (str == "-cl-std=CL1.2") {
             clOpt.push_back("-D__OPENCL_C_VERSION__=120");
-          else {
+            oclVersion = 120;
+          } else if (str == "-cl-std=CL2.0") {
+            clOpt.push_back("-D__OPENCL_C_VERSION__=200");
+            oclVersion = 200;
+          } else {
             if (err && stringSize > 0 && errSize)
               *errSize = snprintf(err, stringSize, "Invalid build option: %s\n", str.c_str());
             return false;
@@ -952,14 +1022,29 @@ EXTEND_QUOTE:
     }
 
     if (useDefaultCLCVersion) {
+#ifdef ENABLE_OPENCL_20
+      clOpt.push_back("-D__OPENCL_C_VERSION__=200");
+      clOpt.push_back("-cl-std=CL2.0");
+      oclVersion = 200;
+#else
       clOpt.push_back("-D__OPENCL_C_VERSION__=120");
       clOpt.push_back("-cl-std=CL1.2");
+      oclVersion = 120;
+#endif
     }
     //for clCompilerProgram usage.
     if(temp_header_path){
       clOpt.push_back("-I");
       clOpt.push_back(temp_header_path);
     }
+
+    std::string dirs = OCL_PCH_PATH;
+    if(oclVersion >= 200)
+      dirs = OCL_PCH_20_PATH;
+    if(dirs == "") {
+      dirs = oclVersion >= 200 ? OCL_PCH_OBJECT_20 : OCL_PCH_OBJECT;
+    }
+    std::istringstream idirs(dirs);
 
     while (getline(idirs, pchFileName, ':')) {
       if(access(pchFileName.c_str(), R_OK) == 0) {
@@ -991,10 +1076,11 @@ EXTEND_QUOTE:
     std::vector<std::string> clOpt;
     std::string dumpLLVMFileName, dumpASMFileName;
     std::string dumpSPIRBinaryName;
+    uint32_t oclVersion = 0;
     if (!processSourceAndOption(source, options, NULL, clOpt,
                                 dumpLLVMFileName, dumpASMFileName, dumpSPIRBinaryName,
                                 optLevel,
-                                stringSize, err, errSize))
+                                stringSize, err, errSize, oclVersion))
       return NULL;
 
     gbe_program p;
@@ -1006,7 +1092,7 @@ EXTEND_QUOTE:
       llvm_mutex.lock();
 
     if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, dumpSPIRBinaryName, clOpt,
-                              stringSize, err, errSize)) {
+                              stringSize, err, errSize, oclVersion)) {
     // Now build the program from llvm
       size_t clangErrSize = 0;
       if (err != NULL && *errSize != 0) {
@@ -1053,9 +1139,10 @@ EXTEND_QUOTE:
     std::vector<std::string> clOpt;
     std::string dumpLLVMFileName, dumpASMFileName;
     std::string dumpSPIRBinaryName;
+    uint32_t oclVersion = 0;
     if (!processSourceAndOption(source, options, temp_header_path, clOpt,
                                 dumpLLVMFileName, dumpASMFileName, dumpSPIRBinaryName,
-                                optLevel, stringSize, err, errSize))
+                                optLevel, stringSize, err, errSize, oclVersion))
       return NULL;
 
     gbe_program p;
@@ -1070,7 +1157,7 @@ EXTEND_QUOTE:
 #endif
 
     if (buildModuleFromSource(source, &out_module, llvm_ctx, dumpLLVMFileName, dumpSPIRBinaryName, clOpt,
-                              stringSize, err, errSize)) {
+                              stringSize, err, errSize, oclVersion)) {
     // Now build the program from llvm
       if (err != NULL) {
         GBE_ASSERT(errSize != NULL);
@@ -1164,10 +1251,28 @@ EXTEND_QUOTE:
     program->getGlobalConstantData(mem);
   }
 
+  static size_t programGetGlobalRelocCount(gbe_program gbeProgram) {
+    if (gbeProgram == NULL) return 0;
+    const gbe::Program *program = (const gbe::Program*) gbeProgram;
+    return program->getGlobalRelocCount();
+  }
+
+  static void programGetGlobalRelocTable(gbe_program gbeProgram, char *mem) {
+    if (gbeProgram == NULL) return;
+    const gbe::Program *program = (const gbe::Program*) gbeProgram;
+    program->getGlobalRelocTable(mem);
+  }
+
   static uint32_t programGetKernelNum(gbe_program gbeProgram) {
     if (gbeProgram == NULL) return 0;
     const gbe::Program *program = (const gbe::Program*) gbeProgram;
     return program->getKernelNum();
+  }
+
+  const static char* programGetDeviceEnqueueKernelName(gbe_program gbeProgram, uint32_t index) {
+    if (gbeProgram == NULL) return 0;
+    const gbe::Program *program = (const gbe::Program*) gbeProgram;
+    return program->getDeviceEnqueueKernelName(index);
   }
 
   static gbe_kernel programGetKernelByName(gbe_program gbeProgram, const char *name) {
@@ -1228,6 +1333,8 @@ EXTEND_QUOTE:
         return (void *)(info->typeQual.c_str());
       case GBE_GET_ARG_INFO_NAME:
         return (void *)(info->argName.c_str());
+      case GBE_GET_ARG_INFO_TYPESIZE:
+        return (void *)((size_t)info->typeSize);
       default:
         assert(0);
     }
@@ -1333,6 +1440,12 @@ EXTEND_QUOTE:
     return ps->getPrintfNum();
   }
 
+  static uint32_t kernelUseDeviceEnqueue(gbe_kernel gbeKernel) {
+    if (gbeKernel == NULL) return 0;
+    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
+    return kernel->getUseDeviceEnqueue();
+  }
+
   static void* kernelDupPrintfSet(gbe_kernel gbeKernel) {
     if (gbeKernel == NULL) return NULL;
     const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
@@ -1376,6 +1489,12 @@ EXTEND_QUOTE:
     kernel->getImageData(images);
   }
 
+  static uint32_t kernelGetOclVersion(gbe_kernel gbeKernel) {
+    if (gbeKernel == NULL) return 0;
+    const gbe::Kernel *kernel = (const gbe::Kernel*) gbeKernel;
+    return kernel->getOclVersion();
+  }
+
   static uint32_t kernelGetRequiredWorkGroupSize(gbe_kernel kernel, uint32_t dim) {
     return 0u;
   }
@@ -1405,11 +1524,14 @@ GBE_EXPORT_SYMBOL gbe_program_link_from_llvm_cb *gbe_program_link_from_llvm = NU
 GBE_EXPORT_SYMBOL gbe_program_build_from_llvm_cb *gbe_program_build_from_llvm = NULL;
 GBE_EXPORT_SYMBOL gbe_program_get_global_constant_size_cb *gbe_program_get_global_constant_size = NULL;
 GBE_EXPORT_SYMBOL gbe_program_get_global_constant_data_cb *gbe_program_get_global_constant_data = NULL;
+GBE_EXPORT_SYMBOL gbe_program_get_global_reloc_count_cb *gbe_program_get_global_reloc_count = NULL;
+GBE_EXPORT_SYMBOL gbe_program_get_global_reloc_table_cb *gbe_program_get_global_reloc_table = NULL;
 GBE_EXPORT_SYMBOL gbe_program_clean_llvm_resource_cb *gbe_program_clean_llvm_resource = NULL;
 GBE_EXPORT_SYMBOL gbe_program_delete_cb *gbe_program_delete = NULL;
 GBE_EXPORT_SYMBOL gbe_program_get_kernel_num_cb *gbe_program_get_kernel_num = NULL;
 GBE_EXPORT_SYMBOL gbe_program_get_kernel_by_name_cb *gbe_program_get_kernel_by_name = NULL;
 GBE_EXPORT_SYMBOL gbe_program_get_kernel_cb *gbe_program_get_kernel = NULL;
+GBE_EXPORT_SYMBOL gbe_program_get_device_enqueue_kernel_name_cb *gbe_program_get_device_enqueue_kernel_name = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_name_cb *gbe_kernel_get_name = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_attributes_cb *gbe_kernel_get_attributes = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_code_cb *gbe_kernel_get_code = NULL;
@@ -1433,6 +1555,7 @@ GBE_EXPORT_SYMBOL gbe_kernel_get_sampler_data_cb *gbe_kernel_get_sampler_data = 
 GBE_EXPORT_SYMBOL gbe_kernel_get_compile_wg_size_cb *gbe_kernel_get_compile_wg_size = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_image_size_cb *gbe_kernel_get_image_size = NULL;
 GBE_EXPORT_SYMBOL gbe_kernel_get_image_data_cb *gbe_kernel_get_image_data = NULL;
+GBE_EXPORT_SYMBOL gbe_kernel_get_ocl_version_cb *gbe_kernel_get_ocl_version = NULL;
 GBE_EXPORT_SYMBOL gbe_output_profiling_cb *gbe_output_profiling = NULL;
 GBE_EXPORT_SYMBOL gbe_dup_profiling_cb *gbe_dup_profiling = NULL;
 GBE_EXPORT_SYMBOL gbe_get_profiling_bti_cb *gbe_get_profiling_bti = NULL;
@@ -1441,6 +1564,7 @@ GBE_EXPORT_SYMBOL gbe_dup_printfset_cb *gbe_dup_printfset = NULL;
 GBE_EXPORT_SYMBOL gbe_get_printf_buf_bti_cb *gbe_get_printf_buf_bti = NULL;
 GBE_EXPORT_SYMBOL gbe_release_printf_info_cb *gbe_release_printf_info = NULL;
 GBE_EXPORT_SYMBOL gbe_output_printf_cb *gbe_output_printf = NULL;
+GBE_EXPORT_SYMBOL gbe_kernel_use_device_enqueue_cb *gbe_kernel_use_device_enqueue = NULL;
 
 #ifdef GBE_COMPILER_AVAILABLE
 namespace gbe
@@ -1455,9 +1579,12 @@ namespace gbe
       gbe_program_check_opt = gbe::programCheckOption;
       gbe_program_get_global_constant_size = gbe::programGetGlobalConstantSize;
       gbe_program_get_global_constant_data = gbe::programGetGlobalConstantData;
+      gbe_program_get_global_reloc_count = gbe::programGetGlobalRelocCount;
+      gbe_program_get_global_reloc_table = gbe::programGetGlobalRelocTable;
       gbe_program_clean_llvm_resource = gbe::programCleanLlvmResource;
       gbe_program_delete = gbe::programDelete;
       gbe_program_get_kernel_num = gbe::programGetKernelNum;
+      gbe_program_get_device_enqueue_kernel_name = gbe::programGetDeviceEnqueueKernelName;
       gbe_program_get_kernel_by_name = gbe::programGetKernelByName;
       gbe_program_get_kernel = gbe::programGetKernel;
       gbe_kernel_get_name = gbe::kernelGetName;
@@ -1483,6 +1610,7 @@ namespace gbe
       gbe_kernel_get_compile_wg_size = gbe::kernelGetCompileWorkGroupSize;
       gbe_kernel_get_image_size = gbe::kernelGetImageSize;
       gbe_kernel_get_image_data = gbe::kernelGetImageData;
+      gbe_kernel_get_ocl_version = gbe::kernelGetOclVersion;
       gbe_get_profiling_bti = gbe::kernelGetProfilingBTI;
       gbe_get_printf_num = gbe::kernelGetPrintfNum;
       gbe_dup_profiling = gbe::kernelDupProfiling;
@@ -1491,6 +1619,7 @@ namespace gbe
       gbe_dup_printfset = gbe::kernelDupPrintfSet;
       gbe_release_printf_info = gbe::kernelReleasePrintfSet;
       gbe_output_printf = gbe::kernelOutputPrintf;
+      gbe_kernel_use_device_enqueue = gbe::kernelUseDeviceEnqueue;
       genSetupCallBacks();
     }
 

@@ -86,14 +86,18 @@ namespace gbe
     INLINE void getRegAttrib(ir::Register reg, uint32_t &regSize, ir::RegisterFamily *regFamily = NULL) const {
       // Note that byte vector registers use two bytes per byte (and can be
       // interleaved)
-      static const size_t familyVectorSize[] = {2,2,2,4,8};
-      static const size_t familyScalarSize[] = {2,2,2,4,8};
+      static const size_t familyVectorSize[] = {2,2,2,4,8,16,32};
+      static const size_t familyScalarSize[] = {2,2,2,4,8,16,32};
       using namespace ir;
       const bool isScalar = ctx.sel->isScalarReg(reg);
       const RegisterData regData = ctx.sel->getRegisterData(reg);
       const RegisterFamily family = regData.family;
-      const uint32_t typeSize = isScalar ? familyScalarSize[family] : familyVectorSize[family];
-      regSize = isScalar ? typeSize : ctx.getSimdWidth() * typeSize;
+      if (family == ir::FAMILY_REG)
+        regSize = 32;
+      else {
+        const uint32_t typeSize = isScalar ? familyScalarSize[family] : familyVectorSize[family];
+        regSize = isScalar ? typeSize : ctx.getSimdWidth() * typeSize;
+      }
       if (regFamily != NULL)
         *regFamily = family;
     }
@@ -148,7 +152,6 @@ namespace gbe
     vector<GenRegInterval> intervals;
     /*! All the boolean register intervals on the corresponding BB*/
     typedef map<ir::Register, GenRegInterval> RegIntervalMap;
-    set<SelectionBlock *> flag0ReservedBlocks;
     map<SelectionBlock *, RegIntervalMap *> boolIntervalsMap;
     /*! Intervals sorting based on starting point positions */
     vector<GenRegInterval*> starting;
@@ -425,6 +428,12 @@ namespace gbe
   #define GET_FLAG_REG(insn) GenRegister::uwxgrf(IS_SCALAR_FLAG(insn) ? 1 : 8,\
                                                  ir::Register(insn.state.flagIndex));
   #define IS_TEMP_FLAG(insn) (insn.state.flag == 0 && insn.state.subFlag == 1)
+  #define NEED_DST_GRF_TYPE_FIX(ty) \
+          (ty == GEN_TYPE_F ||      \
+           ty == GEN_TYPE_HF ||     \
+           ty == GEN_TYPE_DF ||     \
+           ty == GEN_TYPE_UL ||     \
+           ty == GEN_TYPE_L)
   // Flag is a virtual flag, this function is to validate the virtual flag
   // to a physical flag. It is used to validate both temporary flag and the
   // non-temporary flag registers.
@@ -497,7 +506,7 @@ namespace gbe
       map<ir::Register, uint32_t> allocatedFlags;
       map<const GenRegInterval*, uint32_t> allocatedFlagIntervals;
 
-      const uint32_t flagNum = flag0ReservedBlocks.contains(&block) ?  2 : 3;
+      const uint32_t flagNum = 3;
       uint32_t freeFlags[] = {2, 3, 0};
       uint32_t freeNum = flagNum;
       if (boolIntervalsMap.find(&block) == boolIntervalsMap.end())
@@ -590,6 +599,14 @@ namespace gbe
         // is called a "conditional modifier"). The other instructions just read
         // it
         if (insn.state.physicalFlag == 0) {
+          // SEL.bool instruction, the dst register should be stored in GRF
+          // the pred flag is used by flag register
+          if (insn.opcode == SEL_OP_SEL) {
+            ir::Register dst = insn.dst(0).reg();
+            if (ctx.sel->getRegisterFamily(dst) == ir::FAMILY_BOOL &&
+                allocatedFlags.find(dst) != allocatedFlags.end())
+              allocatedFlags.erase(dst);
+          }
           auto it = allocatedFlags.find(ir::Register(insn.state.flagIndex));
           if (it != allocatedFlags.end()) {
             insn.state.physicalFlag = 1;
@@ -629,19 +646,28 @@ namespace gbe
             if (insn.state.predicate != GEN_PREDICATE_NONE)
               validateFlag(selection, insn);
           }
-          // This is a CMP for a pure flag booleans, we don't need to write result to
-          // the grf. And latter, we will not allocate grf for it.
           if (insn.opcode == SEL_OP_CMP &&
               (flagBooleans.contains(insn.dst(0).reg()) ||
                GenRegister::isNull(insn.dst(0)))) {
+            // This is a CMP for a pure flag booleans, we don't need to write result to
+            // the grf. And latter, we will not allocate grf for it.
             // set a temporary register to avoid switch in this block.
             bool isSrc = false;
             bool needMov = false;
             ir::Type ir_type = ir::TYPE_FLOAT;
-            if (insn.src(0).isint64())
-              ir_type = ir::TYPE_U64;
+
+            // below (src : dst) type mapping for 'cmp'
+            // is allowed by hardware
+            // B,W,D,F : F
+            // HF      : HF
+            // DF      : DF
+            // Q       : Q
+            if (NEED_DST_GRF_TYPE_FIX(insn.src(0).type))
+              ir_type = getIRType(insn.src(0).type);
+
             this->replaceReg(selection, &insn, 0, isSrc, ir_type, needMov);
           }
+
           // If the instruction requires to generate (CMP for long/int/float..)
           // the flag value to the register, and it's not a pure flag boolean,
           // we need to use SEL instruction to generate the flag value to the UW8
@@ -1215,11 +1241,9 @@ namespace gbe
       // Update the intervals of each used register. Note that we do not
       // register allocate R0, so we skip all sub-registers in r0
       RegIntervalMap *boolsMap = new RegIntervalMap;
-      if (block.isLargeBlock)
-        flag0ReservedBlocks.insert(&block);
       for (auto &insn : block.insnList) {
         const uint32_t srcNum = insn.srcNum, dstNum = insn.dstNum;
-        insn.ID  = insnID;
+        assert(insnID == (int32_t)insn.ID);
         bool is3SrcOp = insn.opcode == SEL_OP_MAD;
         for (uint32_t srcID = 0; srcID < srcNum; ++srcID) {
           const GenRegister &selReg = insn.src(srcID);
@@ -1244,8 +1268,14 @@ namespace gbe
           if (this->intervals[reg].conflictReg == 0 ||
               this->intervals[reg].conflictReg > conflictReg)
           this->intervals[reg].conflictReg = conflictReg;
-          this->intervals[reg].minID = std::min(this->intervals[reg].minID, insnID);
-          this->intervals[reg].maxID = std::max(this->intervals[reg].maxID, insnID);
+          int insnsrcID = insnID;
+          // If instruction is simple, src and dst can be reused and they will have different IDs
+          // insn may be split in the encoder, if register region are not same, can't be reused.
+          // Because hard to check split or not here, so only check register regio.
+          if (insn.isNative() && insn.sameAsDstRegion(srcID))
+            insnsrcID -= 1;
+          this->intervals[reg].minID = std::min(this->intervals[reg].minID, insnsrcID);
+          this->intervals[reg].maxID = std::max(this->intervals[reg].maxID, insnsrcID);
         }
         for (uint32_t dstID = 0; dstID < dstNum; ++dstID) {
           const GenRegister &selReg = insn.dst(dstID);
@@ -1289,8 +1319,6 @@ namespace gbe
             // is out-of the if/endif region, so we have to borrow the f0
             // to get correct bits for all channels.
             boolsMap->find(reg)->second.minID = 0;
-            if (flag0ReservedBlocks.contains(&block))
-              flag0ReservedBlocks.erase(&block);
           }
         } else {
           // Make sure that instruction selection stage didn't use physiacl flags incorrectly.
@@ -1299,11 +1327,10 @@ namespace gbe
                        insn.opcode == SEL_OP_JMPI ||
                        insn.state.predicate == GEN_PREDICATE_NONE ||
                        (block.hasBarrier && insn.opcode == SEL_OP_MOV) ||
-                       (insn.state.flag == 0 && insn.state.subFlag == 1) ||
-                       (block.removeSimpleIfEndif && insn.state.flag == 0 && insn.state.subFlag == 0) ));
+                       (insn.state.flag == 0 && insn.state.subFlag == 1) ));
         }
         lastID = insnID;
-        insnID++;
+        insnID += 2;
       }
 
       // All registers alive at the begining of the block must update their intervals.
@@ -1472,7 +1499,7 @@ do { \
       }
       GBE_ASSERT(RA.contains(reg.reg()) != false);
       const uint32_t grfOffset = RA.find(reg.reg())->second;
-      const uint32_t suboffset = reg.subphysical ? reg.subnr : 0;
+      const uint32_t suboffset = reg.subphysical ? reg.nr * GEN_REG_SIZE + reg.subnr : 0;
       const GenRegister dst = setGenReg(reg, grfOffset + suboffset);
       if (reg.quarter != 0)
         return GenRegister::Qn(dst, reg.quarter);
@@ -1522,7 +1549,8 @@ do { \
       const ir::FunctionArgument &arg = this->opaque->ctx.getFunction().getArg(subType);
       if (arg.type == ir::FunctionArgument::GLOBAL_POINTER ||
           arg.type == ir::FunctionArgument::LOCAL_POINTER  ||
-          arg.type == ir::FunctionArgument::CONSTANT_POINTER)
+          arg.type == ir::FunctionArgument::CONSTANT_POINTER||
+          arg.type == ir::FunctionArgument::PIPE)
         regSize = this->opaque->ctx.getPointerSize();
       else
         regSize = arg.size;

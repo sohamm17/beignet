@@ -159,8 +159,15 @@ namespace gbe
     void emitMathInstruction(const SelectionInstruction &insn);
     virtual void emitRead64Instruction(const SelectionInstruction &insn);
     virtual void emitWrite64Instruction(const SelectionInstruction &insn);
+    virtual void emitRead64A64Instruction(const SelectionInstruction &insn);
+    virtual void emitWrite64A64Instruction(const SelectionInstruction &insn);
+    virtual void emitAtomicA64Instruction(const SelectionInstruction &insn);
     void emitUntypedReadInstruction(const SelectionInstruction &insn);
     void emitUntypedWriteInstruction(const SelectionInstruction &insn);
+    virtual void emitUntypedReadA64Instruction(const SelectionInstruction &insn);
+    virtual void emitUntypedWriteA64Instruction(const SelectionInstruction &insn);
+    virtual void emitByteGatherA64Instruction(const SelectionInstruction &insn);
+    virtual void emitByteScatterA64Instruction(const SelectionInstruction &insn);
     void emitAtomicInstruction(const SelectionInstruction &insn);
     void emitByteGatherInstruction(const SelectionInstruction &insn);
     void emitByteScatterInstruction(const SelectionInstruction &insn);
@@ -236,7 +243,7 @@ namespace gbe
     void calcGlobalXYZRange(GenRegister& reg, GenRegister& tmp, int flag, int subFlag);
     virtual void subTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp);
     virtual void addTimestamps(GenRegister& t0, GenRegister& t1, GenRegister& tmp);
-    virtual void emitPrintfLongInstruction(GenRegister& addr, GenRegister& data, GenRegister& src, uint32_t bti);
+    virtual void emitPrintfLongInstruction(GenRegister& addr, GenRegister& data, GenRegister& src, uint32_t bti, bool useSends);
 
   private:
     CompileErrorCode errCode;

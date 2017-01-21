@@ -23,14 +23,11 @@
 /////////////////////////////////////////////////////////////////////////////
 // Synchronization functions
 /////////////////////////////////////////////////////////////////////////////
-#define CLK_LOCAL_MEM_FENCE  (1 << 0)
-#define CLK_GLOBAL_MEM_FENCE (1 << 1)
-
-typedef uint cl_mem_fence_flags;
 OVERLOADABLE void barrier(cl_mem_fence_flags flags);
 OVERLOADABLE void debugwait(void);
 OVERLOADABLE void mem_fence(cl_mem_fence_flags flags);
 OVERLOADABLE void read_mem_fence(cl_mem_fence_flags flags);
 OVERLOADABLE void write_mem_fence(cl_mem_fence_flags flags);
-
+#define work_group_barrier barrier
+cl_mem_fence_flags get_fence(void *ptr);
 #endif  /* __OCL_SYNC_H__ */

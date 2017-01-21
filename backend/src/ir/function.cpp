@@ -44,7 +44,7 @@ namespace ir {
 
   Function::Function(const std::string &name, const Unit &unit, Profile profile) :
     name(name), unit(unit), profile(profile), simdWidth(0), useSLM(false), slmSize(0), stackSize(0),
-    wgBroadcastSLM(-1), tidMapSLM(-1)
+    wgBroadcastSLM(-1), tidMapSLM(-1), useDeviceEnqueue(false)
   {
     initProfile(*this);
     samplerSet = GBE_NEW(SamplerSet);
@@ -60,6 +60,10 @@ namespace ir {
 
   RegisterFamily Function::getPointerFamily(void) const {
     return unit.getPointerFamily();
+  }
+
+  uint32_t Function::getOclVersion(void) const {
+    return unit.getOclVersion();
   }
 
   void Function::addLoop(LabelIndex preheader,
@@ -353,6 +357,7 @@ namespace ir {
           out << "structure." << input.size;
         break;
         case FunctionArgument::IMAGE: out << "image"; break;
+        case FunctionArgument::PIPE: out << "pipe"; break;
         default: break;
       }
       out << " %" << input.reg << " " << input.name << std::endl;

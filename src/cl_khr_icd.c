@@ -169,23 +169,23 @@ struct _cl_icd_dispatch const cl_khr_icd_dispatch = {
   (void *) NULL,
   (void *) NULL,
   (void *) NULL,
-#if (OCL_ICD_IDENTIFIED_FUNCTIONS > 110)
   (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) NULL,
-  (void *) clGetKernelSubGroupInfoKHR,
 #endif
+#ifdef CL_VERSION_2_0
+  clCreateCommandQueueWithProperties,
+  clCreatePipe,
+  clGetPipeInfo,
+  clSVMAlloc,
+  clSVMFree,
+  clEnqueueSVMFree,
+  clEnqueueSVMMemcpy,
+  clEnqueueSVMMemFill,
+  clEnqueueSVMMap,
+  clEnqueueSVMUnmap,
+  clCreateSamplerWithProperties,
+  clSetKernelArgSVMPointer,
+  clSetKernelExecInfo,
+  clGetKernelSubGroupInfoKHR,
 #endif
 };
 

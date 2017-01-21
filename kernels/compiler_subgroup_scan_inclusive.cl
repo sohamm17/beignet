@@ -1,6 +1,19 @@
 /*
  * Subgroup scan inclusive add functions
  */
+#ifndef HALF
+kernel void compiler_subgroup_scan_inclusive_add_short(global short *src, global short *dst) {
+  short val = src[get_global_id(0)];
+  short sum = sub_group_scan_inclusive_add(val);
+  dst[get_global_id(0)] = sum;
+}
+
+kernel void compiler_subgroup_scan_inclusive_add_ushort(global ushort *src, global ushort *dst) {
+  ushort val = src[get_global_id(0)];
+  ushort sum = sub_group_scan_inclusive_add(val);
+  dst[get_global_id(0)] = sum;
+}
+
 kernel void compiler_subgroup_scan_inclusive_add_int(global int *src, global int *dst) {
   int val = src[get_global_id(0)];
   int sum = sub_group_scan_inclusive_add(val);
@@ -34,6 +47,18 @@ kernel void compiler_subgroup_scan_inclusive_add_float(global float *src, global
 /*
  * Subgroup scan inclusive max functions
  */
+kernel void compiler_subgroup_scan_inclusive_max_short(global short *src, global short *dst) {
+  short val = src[get_global_id(0)];
+  short sum = sub_group_scan_inclusive_max(val);
+  dst[get_global_id(0)] = sum;
+}
+
+kernel void compiler_subgroup_scan_inclusive_max_ushort(global ushort *src, global ushort *dst) {
+  ushort val = src[get_global_id(0)];
+  ushort sum = sub_group_scan_inclusive_max(val);
+  dst[get_global_id(0)] = sum;
+}
+
 kernel void compiler_subgroup_scan_inclusive_max_int(global int *src, global int *dst) {
   int val = src[get_global_id(0)];
   int sum = sub_group_scan_inclusive_max(val);
@@ -67,6 +92,18 @@ kernel void compiler_subgroup_scan_inclusive_max_float(global float *src, global
 /*
  * Subgroup scan inclusive min functions
  */
+kernel void compiler_subgroup_scan_inclusive_min_short(global short *src, global short *dst) {
+  short val = src[get_global_id(0)];
+  short sum = sub_group_scan_inclusive_min(val);
+  dst[get_global_id(0)] = sum;
+}
+
+kernel void compiler_subgroup_scan_inclusive_min_ushort(global ushort *src, global ushort *dst) {
+  ushort val = src[get_global_id(0)];
+  ushort sum = sub_group_scan_inclusive_min(val);
+  dst[get_global_id(0)] = sum;
+}
+
 kernel void compiler_subgroup_scan_inclusive_min_int(global int *src, global int *dst) {
   int val = src[get_global_id(0)];
   int sum = sub_group_scan_inclusive_min(val);
@@ -96,3 +133,21 @@ kernel void compiler_subgroup_scan_inclusive_min_float(global float *src, global
   float sum = sub_group_scan_inclusive_min(val);
   dst[get_global_id(0)] = sum;
 }
+#else
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+kernel void compiler_subgroup_scan_inclusive_add_half(global half *src, global half *dst) {
+  half val = src[get_global_id(0)];
+  half sum = sub_group_scan_inclusive_add(val);
+  dst[get_global_id(0)] = sum;
+}
+kernel void compiler_subgroup_scan_inclusive_max_half(global half *src, global half *dst) {
+  half val = src[get_global_id(0)];
+  half sum = sub_group_scan_inclusive_max(val);
+  dst[get_global_id(0)] = sum;
+}
+kernel void compiler_subgroup_scan_inclusive_min_half(global half *src, global half *dst) {
+  half val = src[get_global_id(0)];
+  half sum = sub_group_scan_inclusive_min(val);
+  dst[get_global_id(0)] = sum;
+}
+#endif

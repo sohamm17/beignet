@@ -26,18 +26,23 @@
 #include "src/GBEConfig.h"
 #include "llvm_includes.hpp"
 #include "llvm/llvm_gen_backend.hpp"
+#include "ir/unit.hpp"
 
 using namespace llvm;
 
 SVAR(OCL_BITCODE_LIB_PATH, OCL_BITCODE_BIN);
+SVAR(OCL_BITCODE_LIB_20_PATH, OCL_BITCODE_BIN_20);
 
 namespace gbe
 {
-  static Module* createOclBitCodeModule(LLVMContext& ctx, bool strictMath)
+  static Module* createOclBitCodeModule(LLVMContext& ctx,
+                                                 bool strictMath,
+                                                 uint32_t oclVersion)
   {
-    std::string bitCodeFiles = OCL_BITCODE_LIB_PATH;
+    std::string bitCodeFiles = oclVersion >= 200 ?
+                               OCL_BITCODE_LIB_20_PATH : OCL_BITCODE_LIB_PATH;
     if(bitCodeFiles == "")
-      bitCodeFiles = OCL_BITCODE_BIN;
+      bitCodeFiles = oclVersion >= 200 ? OCL_BITCODE_BIN_20 : OCL_BITCODE_BIN;
     std::istringstream bitCodeFilePath(bitCodeFiles);
     std::string FilePath;
     bool findBC = false;
@@ -86,11 +91,11 @@ namespace gbe
         }
 
         llvm::Function * callFunc = call->getCalledFunction();
-        if(!callFunc) {
-          continue;
-        }
+        //if(!callFunc) {
+        //  continue;
+        //}
 
-        if (callFunc->getIntrinsicID() != 0)
+        if (callFunc && callFunc->getIntrinsicID() != 0)
           continue;
 
         std::string fnName = call->getCalledValue()->stripPointerCasts()->getName();
@@ -135,12 +140,16 @@ namespace gbe
   }
 
 
-  Module* runBitCodeLinker(Module *mod, bool strictMath)
+  Module* runBitCodeLinker(Module *mod, bool strictMath, ir::Unit &unit)
   {
     LLVMContext& ctx = mod->getContext();
     std::set<std::string> materializedFuncs;
     std::vector<GlobalValue *> Gvs;
-    Module* clonedLib = createOclBitCodeModule(ctx, strictMath);
+
+    uint32_t oclVersion = getModuleOclVersion(mod);
+    ir::PointerSize size = oclVersion >= 200 ? ir::POINTER_64_BITS : ir::POINTER_32_BITS;
+    unit.setPointerSize(size);
+    Module* clonedLib = createOclBitCodeModule(ctx, strictMath, oclVersion);
     if (clonedLib == NULL)
       return NULL;
 
@@ -181,6 +190,28 @@ namespace gbe
     builtinFuncs.push_back("__gen_memcpy_pc_align");
     builtinFuncs.push_back("__gen_memcpy_gc_align");
     builtinFuncs.push_back("__gen_memcpy_lc_align");
+
+    if (oclVersion >= 200) {
+      builtinFuncs.push_back("__gen_memcpy_gn");
+      builtinFuncs.push_back("__gen_memcpy_pn");
+      builtinFuncs.push_back("__gen_memcpy_ln");
+      builtinFuncs.push_back("__gen_memcpy_ng");
+      builtinFuncs.push_back("__gen_memcpy_np");
+      builtinFuncs.push_back("__gen_memcpy_nl");
+      builtinFuncs.push_back("__gen_memcpy_nc");
+      builtinFuncs.push_back("__gen_memcpy_nn");
+      builtinFuncs.push_back("__gen_memset_n");
+
+      builtinFuncs.push_back("__gen_memcpy_gn_align");
+      builtinFuncs.push_back("__gen_memcpy_pn_align");
+      builtinFuncs.push_back("__gen_memcpy_ln_align");
+      builtinFuncs.push_back("__gen_memcpy_ng_align");
+      builtinFuncs.push_back("__gen_memcpy_np_align");
+      builtinFuncs.push_back("__gen_memcpy_nl_align");
+      builtinFuncs.push_back("__gen_memcpy_nc_align");
+      builtinFuncs.push_back("__gen_memcpy_nn_align");
+      builtinFuncs.push_back("__gen_memset_n_align");
+    }
 
     for (Module::iterator SF = mod->begin(), E = mod->end(); SF != E; ++SF) {
       if (SF->isDeclaration()) continue;

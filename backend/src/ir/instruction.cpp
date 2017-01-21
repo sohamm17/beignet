@@ -1070,18 +1070,20 @@ namespace ir {
       public TupleDstPolicy<MediaBlockReadInstruction>
     {
     public:
-      INLINE MediaBlockReadInstruction(uint8_t imageIdx, Tuple dst, uint8_t vec_size, Tuple srcTuple, uint8_t srcNum) {
+      INLINE MediaBlockReadInstruction(uint8_t imageIdx, Tuple dst, uint8_t vec_size, Tuple srcTuple, uint8_t srcNum, Type type) {
         this->opcode = OP_MBREAD;
         this->dst = dst;
         this->dstNum = vec_size;
         this->src = srcTuple;
         this->srcNum = srcNum;
         this->imageIdx = imageIdx;
+        this->type = type;
       }
       INLINE bool wellFormed(const Function &fn, std::string &why) const;
       INLINE void out(std::ostream &out, const Function &fn) const {
         this->outOpcode(out);
-        out << (int)this->getVectorSize();
+        out << "." << type << "."
+            << (int)this->getVectorSize();
         out << " {";
         for (uint32_t i = 0; i < dstNum; ++i)
           out << "%" << this->getDst(fn, i) << (i != (dstNum-1u) ? " " : "");
@@ -1092,12 +1094,14 @@ namespace ir {
       }
       INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
       INLINE uint8_t getVectorSize(void) const { return this->dstNum; }
+      INLINE Type getType(void) const { return this->type; }
 
       Tuple src;
       Tuple dst;
       uint8_t imageIdx;
       uint8_t srcNum;
       uint8_t dstNum;
+      Type type;
     };
 
     class ALIGNED_INSTRUCTION MediaBlockWriteInstruction :
@@ -1107,17 +1111,19 @@ namespace ir {
     {
     public:
 
-      INLINE MediaBlockWriteInstruction(uint8_t imageIdx, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size) {
+      INLINE MediaBlockWriteInstruction(uint8_t imageIdx, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size, Type type) {
         this->opcode = OP_MBWRITE;
         this->src = srcTuple;
         this->srcNum = srcNum;
         this->imageIdx = imageIdx;
         this->vec_size = vec_size;
+        this->type = type;
       }
       INLINE bool wellFormed(const Function &fn, std::string &why) const;
       INLINE void out(std::ostream &out, const Function &fn) const {
         this->outOpcode(out);
-        out << (int)this->getVectorSize()
+        out << "." << type << "."
+            << (int)this->getVectorSize()
             << " 2D surface id " << (int)this->getImageIndex()
             << " byte coord x %" << this->getSrc(fn, 0)
             << " row coord y %" << this->getSrc(fn, 1);
@@ -1128,12 +1134,14 @@ namespace ir {
       }
       INLINE uint8_t getImageIndex(void) const { return this->imageIdx; }
       INLINE uint8_t getVectorSize(void) const { return this->vec_size; }
+      INLINE Type getType(void) const { return this->type; }
 
       Tuple src;
       Register dst[0];
       uint8_t imageIdx;
       uint8_t srcNum;
       uint8_t vec_size;
+      Type type;
     };
 
 #undef ALIGNED_INSTRUCTION
@@ -1349,10 +1357,11 @@ namespace ir {
     {
       if (UNLIKELY(checkSpecialRegForWrite(dst[0], fn, whyNot) == false))
         return false;
-      if (UNLIKELY(checkRegisterData(FAMILY_DWORD, dst[0], fn, whyNot) == false))
+      const RegisterFamily family = getFamily(this->type);
+      if (UNLIKELY(checkRegisterData(family, dst[0], fn, whyNot) == false))
         return false;
       for (uint32_t srcID = 0; srcID < srcNum-1u; ++srcID)
-        if (UNLIKELY(checkRegisterData(FAMILY_DWORD, getSrc(fn, srcID+1u), fn, whyNot) == false))
+        if (UNLIKELY(checkRegisterData(family, getSrc(fn, srcID+1u), fn, whyNot) == false))
           return false;
 
       return true;
@@ -1466,7 +1475,8 @@ namespace ir {
                                  SYNC_LOCAL_READ_FENCE |
                                  SYNC_LOCAL_WRITE_FENCE |
                                  SYNC_GLOBAL_READ_FENCE |
-                                 SYNC_GLOBAL_WRITE_FENCE;
+                                 SYNC_GLOBAL_WRITE_FENCE |
+                                 SYNC_IMAGE_FENCE;
       if (UNLIKELY(this->parameters > maxParams)) {
         whyNot = "Invalid parameters for sync instruction";
         return false;
@@ -1493,8 +1503,9 @@ namespace ir {
 
     INLINE bool SimdShuffleInstruction::wellFormed(const Function &fn, std::string &whyNot) const
     {
-      if (UNLIKELY( this->type != TYPE_U32 && this->type != TYPE_S32 && this->type != TYPE_FLOAT)) {
-        whyNot = "Only support S32/U32/FLOAT type";
+      if (UNLIKELY( this->type != TYPE_U32 && this->type != TYPE_S32 && this->type != TYPE_FLOAT &&
+                    this->type != TYPE_U16 && this->type != TYPE_S16)) {
+        whyNot = "Only support S16/U16/S32/U32/FLOAT type";
         return false;
       }
 
@@ -1643,12 +1654,8 @@ namespace ir {
             whyNot = "Wrong number of source.";
             return false;
           } else {
-            const RegisterFamily fam = fn.getPointerFamily();
-            for (uint32_t srcID = 1; srcID < this->srcNum; ++srcID) {
-              const Register regID = fn.getRegister(src, srcID);
-              if (UNLIKELY(checkRegisterData(fam, regID, fn, whyNot) == false))
-                return false;
-            }
+            if (UNLIKELY(checkRegisterData(FAMILY_DWORD, fn.getRegister(src, 1), fn, whyNot) == false))
+              return false;
           }
           break;
         default:
@@ -1714,6 +1721,31 @@ namespace ir {
     INLINE void AtomicInstruction::out(std::ostream &out, const Function &fn) const {
       this->outOpcode(out);
       out << "." << AS;
+
+#define OUT_ATOMIC_OP(TYPE)     \
+      case ATOMIC_OP_##TYPE:    \
+      {    out << "." << #TYPE; \
+          break; \
+      }
+      switch(atomicOp)
+      {
+        OUT_ATOMIC_OP(AND)
+        OUT_ATOMIC_OP(OR)
+        OUT_ATOMIC_OP(XOR)
+        OUT_ATOMIC_OP(XCHG)
+        OUT_ATOMIC_OP(INC)
+        OUT_ATOMIC_OP(DEC)
+        OUT_ATOMIC_OP(ADD)
+        OUT_ATOMIC_OP(SUB)
+        OUT_ATOMIC_OP(IMAX)
+        OUT_ATOMIC_OP(IMIN)
+        OUT_ATOMIC_OP(UMAX)
+        OUT_ATOMIC_OP(UMIN)
+        OUT_ATOMIC_OP(CMPXCHG)
+        default:
+          out << "." << "INVALID";
+          assert(0);
+      };
       out << " %" << this->getDst(fn, 0);
       out << " {" << "%" << this->getSrc(fn, 0) << "}";
       for (uint32_t i = 1; i < srcNum; ++i)
@@ -1826,7 +1858,7 @@ namespace ir {
     }
 
     static const char *syncStr[syncFieldNum] = {
-      "workgroup", "local_read", "local_write", "global_read", "global_write"
+      "workgroup", "local_read", "local_write", "global_read", "global_write", "image"
     };
 
     INLINE void SyncInstruction::out(std::ostream &out, const Function &fn) const {
@@ -1885,7 +1917,8 @@ namespace ir {
       }
 
       out << " %" << this->getDst(fn, 0);
-      out << " %" << this->getSrc(fn, 0);
+      for (uint32_t i = 0; i < this->getSrcNum(); ++i)
+        out << " %" << this->getSrc(fn, i);
 
       if (this->workGroupOp == WORKGROUP_OP_BROADCAST) {
         do {
@@ -1910,7 +1943,7 @@ namespace ir {
         } while(0);
       }
 
-      out << "TheadID Map at SLM: " << this->slmAddr;
+      out << " (TheadID Map at SLM: " << this->slmAddr << ")";
     }
 
     INLINE void SubGroupInstruction::out(std::ostream &out, const Function &fn) const {
@@ -1987,6 +2020,7 @@ namespace ir {
       case MEM_CONSTANT: return out << "constant";
       case MEM_PRIVATE: return out << "private";
       case MEM_MIXED: return out << "mixed";
+      case MEM_GENERIC: return out << "generic";
       case MEM_INVALID: return out << "invalid";
     };
     return out;
@@ -2374,8 +2408,10 @@ DECL_MEM_FN(PrintfInstruction, uint32_t, getBti(void), getBti())
 DECL_MEM_FN(PrintfInstruction, Type, getType(const Function& fn, uint32_t ID), getType(fn, ID))
 DECL_MEM_FN(MediaBlockReadInstruction, uint8_t, getImageIndex(void), getImageIndex())
 DECL_MEM_FN(MediaBlockReadInstruction, uint8_t, getVectorSize(void), getVectorSize())
+DECL_MEM_FN(MediaBlockReadInstruction, Type, getType(void), getType())
 DECL_MEM_FN(MediaBlockWriteInstruction, uint8_t, getImageIndex(void), getImageIndex())
 DECL_MEM_FN(MediaBlockWriteInstruction, uint8_t, getVectorSize(void), getVectorSize())
+DECL_MEM_FN(MediaBlockWriteInstruction, Type, getType(void), getType())
 
 #undef DECL_MEM_FN
 
@@ -2437,6 +2473,7 @@ DECL_MEM_FN(MemInstruction, void,     setBtiReg(Register reg), setBtiReg(reg))
   DECL_EMIT_FUNCTION(RNDE)
   DECL_EMIT_FUNCTION(RNDU)
   DECL_EMIT_FUNCTION(RNDZ)
+  DECL_EMIT_FUNCTION(BFREV)
 
 #undef DECL_EMIT_FUNCTION
 
@@ -2683,12 +2720,12 @@ DECL_MEM_FN(MemInstruction, void,     setBtiReg(Register reg), setBtiReg(reg))
     return internal::PrintfInstruction(dst, srcTuple, typeTuple, srcNum, bti, num).convert();
   }
 
-  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum) {
-    return internal::MediaBlockReadInstruction(imageIndex, dst, vec_size, coord, srcNum).convert();
+  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum, Type type) {
+    return internal::MediaBlockReadInstruction(imageIndex, dst, vec_size, coord, srcNum, type).convert();
   }
 
-  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size) {
-    return internal::MediaBlockWriteInstruction(imageIndex, srcTuple, srcNum, vec_size).convert();
+  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size, Type type) {
+    return internal::MediaBlockWriteInstruction(imageIndex, srcTuple, srcNum, vec_size, type).convert();
   }
 
 

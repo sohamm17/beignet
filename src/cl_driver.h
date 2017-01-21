@@ -123,7 +123,7 @@ typedef enum gpu_command_status {
 typedef struct cl_gpgpu_kernel {
   const char *name;        /* kernel name and bo name */
   uint32_t grf_blocks;     /* register blocks kernel wants (in 8 reg blocks) */
-  uint32_t curbe_sz;         /* total size of all curbes */
+  uint32_t curbe_sz;       /* total size of all curbes */
   cl_buffer bo;            /* kernel code in the proper addr space */
   int32_t barrierID;       /* barrierID for _this_ kernel */
   uint32_t use_slm:1;      /* For gen7 (automatic barrier management) */
@@ -146,6 +146,12 @@ extern cl_gpgpu_sync_cb *cl_gpgpu_sync;
 /* Bind a regular unformatted buffer */
 typedef void (cl_gpgpu_bind_buf_cb)(cl_gpgpu, cl_buffer, uint32_t offset, uint32_t internal_offset, size_t size, uint8_t bti);
 extern cl_gpgpu_bind_buf_cb *cl_gpgpu_bind_buf;
+
+typedef void (cl_gpgpu_set_kernel_cb)(cl_gpgpu, void *);
+extern cl_gpgpu_set_kernel_cb *cl_gpgpu_set_kernel;
+
+typedef void* (cl_gpgpu_get_kernel_cb)(cl_gpgpu);
+extern cl_gpgpu_get_kernel_cb *cl_gpgpu_get_kernel;
 
 /* bind samplers defined in both kernel and kernel args. */
 typedef void (cl_gpgpu_bind_sampler_cb)(cl_gpgpu, uint32_t *samplers, size_t sampler_sz);
@@ -262,11 +268,11 @@ typedef void (cl_gpgpu_event_delete_cb)(cl_gpgpu_event);
 extern cl_gpgpu_event_delete_cb *cl_gpgpu_event_delete;
 
 /* Get a event time stamp */
-typedef void (cl_gpgpu_event_get_exec_timestamp_cb)(cl_gpgpu, cl_gpgpu_event, int, uint64_t*);
+typedef void (cl_gpgpu_event_get_exec_timestamp_cb)(cl_gpgpu, int, uint64_t*);
 extern cl_gpgpu_event_get_exec_timestamp_cb *cl_gpgpu_event_get_exec_timestamp;
 
 /* Get current GPU time stamp */
-typedef void (cl_gpgpu_event_get_gpu_cur_timestamp_cb)(cl_gpgpu, uint64_t*);
+typedef void (cl_gpgpu_event_get_gpu_cur_timestamp_cb)(cl_driver, uint64_t*);
 extern cl_gpgpu_event_get_gpu_cur_timestamp_cb *cl_gpgpu_event_get_gpu_cur_timestamp;
 
 /* Get current batch buffer handle */
@@ -326,10 +332,10 @@ typedef void (cl_gpgpu_walker_cb)(cl_gpgpu,
                                   uint32_t simd_sz,
                                   uint32_t thread_n,
                                   const size_t global_wk_off[3],
+                                  const size_t global_dim_off[3],
                                   const size_t global_wk_sz[3],
                                   const size_t local_wk_sz[3]);
 extern cl_gpgpu_walker_cb *cl_gpgpu_walker;
-
 /**************************************************************************
  * Buffer
  **************************************************************************/
@@ -340,8 +346,17 @@ extern cl_buffer_alloc_cb *cl_buffer_alloc;
 typedef cl_buffer (cl_buffer_alloc_userptr_cb)(cl_buffer_mgr, const char*, void *, size_t, unsigned long);
 extern cl_buffer_alloc_userptr_cb *cl_buffer_alloc_userptr;
 
+typedef int (cl_buffer_set_softpin_offset_cb)(cl_buffer, uint64_t);
+extern cl_buffer_set_softpin_offset_cb *cl_buffer_set_softpin_offset;
+
+typedef int (cl_buffer_set_bo_use_full_range_cb)(cl_buffer, uint32_t);
+extern cl_buffer_set_bo_use_full_range_cb *cl_buffer_set_bo_use_full_range;
+
+typedef int (cl_buffer_disable_reuse_cb)(cl_buffer);
+extern cl_buffer_disable_reuse_cb *cl_buffer_disable_reuse;
+
 /* Set a buffer's tiling mode */
-typedef cl_buffer (cl_buffer_set_tiling_cb)(cl_buffer, int tiling, size_t stride);
+typedef int (cl_buffer_set_tiling_cb)(cl_buffer, int tiling, size_t stride);
 extern cl_buffer_set_tiling_cb *cl_buffer_set_tiling;
 
 #include "cl_context.h"
@@ -351,7 +366,7 @@ typedef cl_buffer (cl_buffer_alloc_from_texture_cb)(cl_context, unsigned int, in
                                                     struct _cl_mem_image *gl_image);
 extern cl_buffer_alloc_from_texture_cb *cl_buffer_alloc_from_texture;
 
-typedef void (cl_buffer_release_from_texture_cb)(cl_context, unsigned int, int, unsigned int);
+typedef void (cl_buffer_release_from_texture_cb)(cl_context, struct _cl_mem_gl_image *);
 extern cl_buffer_release_from_texture_cb *cl_buffer_release_from_texture;
 
 typedef cl_buffer (cl_buffer_get_buffer_from_libva_cb)(cl_context ctx, unsigned int bo_name, size_t *sz);
@@ -435,36 +450,6 @@ extern cl_driver_get_device_id_cb *cl_driver_get_device_id;
 /* Update the device info */
 typedef void (cl_driver_update_device_info_cb)(cl_device_id device);
 extern cl_driver_update_device_info_cb *cl_driver_update_device_info;
-
-/**************************************************************************
- * cl_khr_gl_sharing.
- **************************************************************************/
-typedef int (cl_gl_acquire_texture_cb)(void *driver, void *ctx, int target,
-                                       int level, int texture, void*user_data);
-extern cl_gl_acquire_texture_cb *cl_gl_acquire_texture;
-
-typedef int (cl_gl_release_texture_cb)(void *driver, void *ctx, int target,
-                                       int level, int texture);
-extern cl_gl_release_texture_cb *cl_gl_release_texture;
-
-typedef int (cl_gl_acquire_buffer_object_cb)(void *driver, void *ctx,
-                                             int bufobj, void* user_data);
-extern cl_gl_acquire_buffer_object_cb *cl_gl_acquire_buffer_object;
-
-typedef int (cl_gl_release_buffer_object_cb)(void *driver, void *ctx, int bufobj);
-extern cl_gl_release_buffer_object_cb *cl_gl_release_buffer_object;
-
-typedef int (cl_gl_acquire_render_buffer_cb)(void *driver, void *ctx,
-                                             int rb, void* user_data);
-extern cl_gl_acquire_render_buffer_cb *cl_gl_acquire_render_buffer;
-
-typedef int (cl_gl_release_render_buffer_cb)(void *driver, void *ctx, int rb);
-extern cl_gl_release_render_buffer_cb *cl_gl_release_render_buffer;
-
-#ifndef DEFAULT_DRIVER_DIR
-/* this is normally defined in Mesa/configs/default with DRI_DRIVER_SEARCH_PATH */
-#define DEFAULT_DRIVER_DIR "/usr/local/lib/dri"
-#endif
 
 #endif /* __CL_DRIVER_H__ */
 

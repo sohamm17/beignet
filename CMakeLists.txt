@@ -16,11 +16,6 @@ endif ()
 
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6.0)
 PROJECT(OCL)
-set (LIBCL_DRIVER_VERSION_MAJOR 1)
-set (LIBCL_DRIVER_VERSION_MINOR 2)
-set (LIBCL_DRIVER_VERSION_PATCH 1)
-set (LIBCL_C_VERSION_MAJOR 1)
-set (LIBCL_C_VERSION_MINOR 2)
 if( ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
   set(COMPILER "CLANG")
 elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
@@ -28,11 +23,6 @@ elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
   set(COMPILER "ICC")
 endif()
-configure_file (
-  "src/OCLConfig.h.in"
-  "src/OCLConfig.h"
-)
-
 set (NOT_BUILD_STAND_ALONE_UTEST 1)
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
@@ -154,41 +144,38 @@ IF(DRM_INTEL_FOUND)
   ELSE(HAVE_DRM_INTEL_SUBSLICE_TOTAL)
     MESSAGE(STATUS "Disable subslice total query support")
   ENDIF(HAVE_DRM_INTEL_SUBSLICE_TOTAL)
-  CHECK_LIBRARY_EXISTS(drm_intel "drm_intel_get_pooled_eu" "" HAVE_DRM_INTEL_POOLED_EU)
+  CHECK_LIBRARY_EXISTS(drm_intel "drm_intel_get_pooled_eu" ${DRM_INTEL_LIBDIR} HAVE_DRM_INTEL_POOLED_EU)
   IF(HAVE_DRM_INTEL_POOLED_EU)
     MESSAGE(STATUS "Enable pooled eu query support")
   ELSE(HAVE_DRM_INTEL_POOLED_EU)
     MESSAGE(STATUS "Disable pooled eu query support")
   ENDIF(HAVE_DRM_INTEL_POOLED_EU)
-  CHECK_LIBRARY_EXISTS(drm_intel "drm_intel_get_min_eu_in_pool" "" HAVE_DRM_INTEL_MIN_EU_IN_POOL)
+  CHECK_LIBRARY_EXISTS(drm_intel "drm_intel_get_min_eu_in_pool" ${DRM_INTEL_LIBDIR} HAVE_DRM_INTEL_MIN_EU_IN_POOL)
   IF(HAVE_DRM_INTEL_MIN_EU_IN_POOL)
     MESSAGE(STATUS "Enable min eu in pool query support")
   ELSE(HAVE_DRM_INTEL_MIN_EU_IN_POOL)
     MESSAGE(STATUS "Disable min eu in pool query support")
   ENDIF(HAVE_DRM_INTEL_MIN_EU_IN_POOL)
+  CHECK_LIBRARY_EXISTS(drm_intel "drm_intel_bo_set_softpin_offset" ${DRM_INTEL_LIBDIR} HAVE_DRM_INTEL_BO_SET_SOFTPIN)
 ELSE(DRM_INTEL_FOUND)
   MESSAGE(FATAL_ERROR "Looking for DRM Intel (>= 2.4.52) - not found")
 ENDIF(DRM_INTEL_FOUND)
 
 # CMRT
+#disable CMRT as default, since we do not see real case,
+#but see build issue of this feature
+OPTION(INVOKE_CMRT "Enable CMRT" OFF)
+IF(INVOKE_CMRT)
 pkg_check_modules(CMRT libcmrt)
 IF(CMRT_FOUND)
 INCLUDE_DIRECTORIES(${CMRT_INCLUDE_DIRS})
 ENDIF(CMRT_FOUND)
+ENDIF(INVOKE_CMRT)
 
 # Threads
 Find_Package(Threads)
 
 IF(X11_FOUND)
-# OpenGL (not use cmake helper)
-pkg_check_modules(OPENGL gl)
-IF(OPENGL_FOUND)
-  INCLUDE_DIRECTORIES(${OPENGL_INCLUDE_DIRS})
-  MESSAGE(STATUS "Looking for OpenGL - found at ${OPENGL_PREFIX}")
-ELSE(OPENGL_FOUND)
-  MESSAGE(STATUS "Looking for OpenGL - not found")
-ENDIF(OPENGL_FOUND)
-
 # Xext
 pkg_check_modules(XEXT REQUIRED xext)
 IF(XEXT_FOUND)
@@ -208,20 +195,22 @@ ELSE(XFIXES_FOUND)
 ENDIF(XFIXES_FOUND)
 ENDIF(X11_FOUND)
 
-pkg_check_modules(EGL egl)
-IF(EGL_FOUND)
-  MESSAGE(STATUS "Looking for EGL - found at ${EGL_PREFIX}")
-ELSE(EGL_FOUND)
-  MESSAGE(STATUS "Looking for EGL - not found")
-ENDIF(EGL_FOUND)
+OPTION(ENABLE_GL_SHARING "cl_khr_gl_sharing" OFF)
 
-# cl_khr_gl_sharing requires to build with mesa source
-#Find_Package(MesaSrc)
-#IF(MESA_SOURCE_FOUND)
-#  MESSAGE(STATUS "Looking for mesa source code - found at ${MESA_SOURCE_PREFIX}")
-#ELSE(MESA_SOURCE_FOUND)
-#  MESSAGE(STATUS "Looking for mesa source code - not found, cl_khr_gl_sharing will be disabled.")
-#ENDIF(MESA_SOURCE_FOUND)
+IF(ENABLE_GL_SHARING)
+  pkg_check_modules(OPENGL REQUIRED gl)
+  IF(OPENGL_FOUND)
+    MESSAGE(STATUS "Looking for OpenGL - found at ${OPENGL_PREFIX}")
+  ELSE(OPENGL_FOUND)
+    MESSAGE(STATUS "Looking for OpenGL - not found")
+  ENDIF(OPENGL_FOUND)
+  pkg_check_modules(EGL REQUIRED egl>=11.0.0)
+  IF(EGL_FOUND)
+    MESSAGE(STATUS "Looking for EGL - found at ${EGL_PREFIX}")
+  ELSE(EGL_FOUND)
+    MESSAGE(STATUS "Looking for EGL - not found")
+  ENDIF(EGL_FOUND)
+ENDIF(ENABLE_GL_SHARING)
 
 Find_Package(OCLIcd)
 IF(OCLIcd_FOUND)
@@ -238,9 +227,50 @@ ENDIF(OCLIcd_FOUND)
 Find_Package(PythonInterp)
 
 OPTION(EXPERIMENTAL_DOUBLE "Enable experimental double support" OFF)
-IF(EXPERIMENTAL_DOUBLE)
+IF (EXPERIMENTAL_DOUBLE)
   ADD_DEFINITIONS(-DENABLE_FP64)
 ENDIF(EXPERIMENTAL_DOUBLE)
+
+OPTION(ENABLE_OPENCL_20 "Enable opencl 2.0 support" OFF)
+IF (ENABLE_OPENCL_20)
+  Find_Program(LSPCI lspci)
+  IF (NOT LSPCI)
+    MESSAGE(FATAL_ERROR "Looking for lspci - not found")
+  ENDIF (NOT LSPCI)
+  EXECUTE_PROCESS(COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/GetGenID.sh"
+                          RESULT_VARIABLE SUPPORT_OCL20_DEVICE
+                          OUTPUT_VARIABLE PCI_ID_NOT_USED)
+
+  IF (NOT SUPPORT_OCL20_DEVICE EQUAL 1)
+    MESSAGE(FATAL_ERROR "Only SKL and newer devices support OpenCL 2.0 now, your device don't support.")
+  ENDIF (NOT SUPPORT_OCL20_DEVICE EQUAL 1)
+
+  IF (NOT HAVE_DRM_INTEL_BO_SET_SOFTPIN)
+    MESSAGE(FATAL_ERROR "Please update libdrm to version 2.4.66 or later to enable OpenCL 2.0.")
+  ENDIF (NOT HAVE_DRM_INTEL_BO_SET_SOFTPIN)
+
+  IF (LLVM_VERSION_NODOT VERSION_LESS 39)
+    MESSAGE(FATAL_ERROR "Please update LLVM to version 3.9 or later to enable OpenCL 2.0.")
+  ENDIF (LLVM_VERSION_NODOT VERSION_LESS 39)
+
+  ADD_DEFINITIONS(-DENABLE_OPENCL_20)
+ENDIF(ENABLE_OPENCL_20)
+
+set (LIBCL_DRIVER_VERSION_MAJOR 1)
+set (LIBCL_DRIVER_VERSION_MINOR 3)
+set (LIBCL_DRIVER_VERSION_PATCH 0)
+if (ENABLE_OPENCL_20)
+  set (LIBCL_C_VERSION_MAJOR 2)
+  set (LIBCL_C_VERSION_MINOR 0)
+else (ENABLE_OPENCL_20)
+  set (LIBCL_C_VERSION_MAJOR 1)
+  set (LIBCL_C_VERSION_MINOR 2)
+endif (ENABLE_OPENCL_20)
+configure_file (
+  "src/OCLConfig.h.in"
+  "src/OCLConfig.h"
+)
+
 
 OPTION(BUILD_EXAMPLES "Build examples" OFF)
 IF(BUILD_EXAMPLES)

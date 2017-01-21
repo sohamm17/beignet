@@ -55,6 +55,7 @@ enum gbe_arg_type {
   GBE_ARG_LOCAL_PTR = 3,        // __local
   GBE_ARG_IMAGE = 4,            // image2d_t, image3d_t
   GBE_ARG_SAMPLER = 5,          // sampler_t
+  GBE_ARG_PIPE = 6,             // pipe
   GBE_ARG_INVALID = 0xffffffff
 };
 
@@ -65,6 +66,7 @@ enum gbe_get_arg_info_value {
   GBE_GET_ARG_INFO_TYPE = 2,
   GBE_GET_ARG_INFO_TYPEQUAL = 3,
   GBE_GET_ARG_INFO_NAME = 4,
+  GBE_GET_ARG_INFO_TYPESIZE = 5,
   GBE_GET_ARG_INFO_INVALID = 0xffffffff
 };
 
@@ -86,6 +88,9 @@ enum gbe_curbe_type {
   GBE_CURBE_LOCAL_SIZE_X,
   GBE_CURBE_LOCAL_SIZE_Y,
   GBE_CURBE_LOCAL_SIZE_Z,
+  GBE_CURBE_ENQUEUED_LOCAL_SIZE_X,
+  GBE_CURBE_ENQUEUED_LOCAL_SIZE_Y,
+  GBE_CURBE_ENQUEUED_LOCAL_SIZE_Z,
   GBE_CURBE_GLOBAL_SIZE_X,
   GBE_CURBE_GLOBAL_SIZE_Y,
   GBE_CURBE_GLOBAL_SIZE_Z,
@@ -109,6 +114,9 @@ enum gbe_curbe_type {
   GBE_CURBE_PROFILING_TIMESTAMP3,
   GBE_CURBE_PROFILING_TIMESTAMP4,
   GBE_CURBE_THREAD_ID,
+  GBE_CURBE_CONSTANT_ADDRSPACE,
+  GBE_CURBE_STACK_SIZE,
+  GBE_CURBE_ENQUEUE_BUF_POINTER,
   GBE_GEN_REG,
 };
 
@@ -257,6 +265,11 @@ extern gbe_program_get_global_constant_size_cb *gbe_program_get_global_constant_
 typedef void (gbe_program_get_global_constant_data_cb)(gbe_program gbeProgram, char *mem);
 extern gbe_program_get_global_constant_data_cb *gbe_program_get_global_constant_data;
 
+typedef size_t (gbe_program_get_global_reloc_count_cb)(gbe_program gbeProgram);
+extern gbe_program_get_global_reloc_count_cb *gbe_program_get_global_reloc_count;
+
+typedef void (gbe_program_get_global_reloc_table_cb)(gbe_program gbeProgram, char *mem);
+extern gbe_program_get_global_reloc_table_cb *gbe_program_get_global_reloc_table;
 /*! Get the size of defined samplers */
 typedef size_t (gbe_kernel_get_sampler_size_cb)(gbe_kernel gbeKernel);
 extern gbe_kernel_get_sampler_size_cb *gbe_kernel_get_sampler_size;
@@ -288,6 +301,9 @@ extern gbe_program_get_kernel_by_name_cb *gbe_program_get_kernel_by_name;
 /*! Get the kernel from its ID */
 typedef gbe_kernel (gbe_program_get_kernel_cb)(gbe_program, uint32_t ID);
 extern gbe_program_get_kernel_cb *gbe_program_get_kernel;
+
+typedef const char* (gbe_program_get_device_enqueue_kernel_name_cb)(gbe_program, uint32_t ID);
+extern gbe_program_get_device_enqueue_kernel_name_cb *gbe_program_get_device_enqueue_kernel_name;
 
 /*! Get the kernel name */
 typedef const char *(gbe_kernel_get_name_cb)(gbe_kernel);
@@ -361,6 +377,12 @@ extern gbe_kernel_use_slm_cb *gbe_kernel_use_slm;
 /*! Get slm size needed for kernel local variables */
 typedef int32_t (gbe_kernel_get_slm_size_cb)(gbe_kernel);
 extern gbe_kernel_get_slm_size_cb *gbe_kernel_get_slm_size;
+/*! Get the kernel's opencl version. */
+typedef uint32_t (gbe_kernel_get_ocl_version_cb)(gbe_kernel);
+extern gbe_kernel_get_ocl_version_cb *gbe_kernel_get_ocl_version;
+/* Kernel use device enqueue or not.  */
+typedef uint32_t (gbe_kernel_use_device_enqueue_cb)(gbe_kernel);
+extern gbe_kernel_use_device_enqueue_cb *gbe_kernel_use_device_enqueue;
 
 /*mutex to lock global llvmcontext access.*/
 extern void acquireLLVMContextLock();

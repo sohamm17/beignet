@@ -131,6 +131,7 @@ namespace gbe
     ALU3(LRP)
     ALU2(BRC)
     ALU1(BRD)
+    ALU1(BFREV)
 #undef ALU1
 #undef ALU2
 #undef ALU2_MOD
@@ -144,7 +145,7 @@ namespace gbe
     /*! Forward the gateway message. */
     void FWD_GATEWAY_MSG(GenRegister src, uint32_t notifyN = 0);
     /*! Memory fence message (to order loads and stores between threads) */
-    void FENCE(GenRegister dst);
+    virtual void FENCE(GenRegister dst, bool flushRWCache);
     /*! Jump indexed instruction */
     virtual void JMPI(GenRegister src, bool longjmp = false);
     /*! IF indexed instruction */
@@ -170,15 +171,25 @@ namespace gbe
     /*! Wait instruction (used for the barrier) */
     void WAIT(uint32_t n = 0);
     /*! Atomic instructions */
-    virtual void ATOMIC(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum);
+    virtual void ATOMIC(GenRegister dst, uint32_t function, GenRegister addr, GenRegister data, GenRegister bti, uint32_t srcNum, bool useSends);
+    /*! AtomicA64 instructions */
+    virtual void ATOMICA64(GenRegister dst, uint32_t function, GenRegister src, GenRegister bti, uint32_t srcNum);
     /*! Untyped read (upto 4 channels) */
     virtual void UNTYPED_READ(GenRegister dst, GenRegister src, GenRegister bti, uint32_t elemNum);
     /*! Untyped write (upto 4 channels) */
-    virtual void UNTYPED_WRITE(GenRegister src, GenRegister bti, uint32_t elemNum);
+    virtual void UNTYPED_WRITE(GenRegister addr, GenRegister data, GenRegister bti, uint32_t elemNum, bool useSends);
+    /*! Untyped read A64(upto 4 channels) */
+    virtual void UNTYPED_READA64(GenRegister dst, GenRegister src, uint32_t elemNum);
+    /*! Untyped write (upto 4 channels) */
+    virtual void UNTYPED_WRITEA64(GenRegister src, uint32_t elemNum);
     /*! Byte gather (for unaligned bytes, shorts and ints) */
     void BYTE_GATHER(GenRegister dst, GenRegister src, GenRegister bti, uint32_t elemSize);
     /*! Byte scatter (for unaligned bytes, shorts and ints) */
-    void BYTE_SCATTER(GenRegister src, GenRegister bti, uint32_t elemSize);
+    virtual void BYTE_SCATTER(GenRegister addr, GenRegister data, GenRegister bti, uint32_t elemSize, bool useSends);
+    /*! Byte gather a64 (for unaligned bytes, shorts and ints) */
+    virtual void BYTE_GATHERA64(GenRegister dst, GenRegister src, uint32_t elemSize);
+    /*! Byte scatter a64 (for unaligned bytes, shorts and ints) */
+    virtual void BYTE_SCATTERA64(GenRegister src, uint32_t elemSize);
     /*! DWord gather (for constant cache read) */
     void DWORD_GATHER(GenRegister dst, GenRegister src, uint32_t bti);
     /*! for scratch memory read */
@@ -219,11 +230,14 @@ namespace gbe
                           uint32_t msg_type,
                           unsigned char vme_search_path_lut,
                           unsigned char lut_sub);
+    virtual void FLUSH_SAMPLERCACHE(GenRegister dst);
 
     /*! TypedWrite instruction for texture */
     virtual void TYPED_WRITE(GenRegister header,
+                             GenRegister data,
                              bool header_present,
-                             unsigned char bti);
+                             unsigned char bti,
+                             bool useSends);
     /*! Extended math function (2 sources) */
     void MATH(GenRegister dst, uint32_t function, GenRegister src0, GenRegister src1);
     /*! Extended math function (1 source) */
@@ -235,6 +249,8 @@ namespace gbe
     ////////////////////////////////////////////////////////////////////////
     // Helper functions to encode
     ////////////////////////////////////////////////////////////////////////
+    void setDPByteScatterGather(GenNativeInstruction *insn, uint32_t bti, uint32_t elem_size,
+                                     uint32_t msg_type, uint32_t msg_length, uint32_t response_length);
     virtual void setDPUntypedRW(GenNativeInstruction *insn, uint32_t bti, uint32_t rgba,
                                 uint32_t msg_type, uint32_t msg_length,
                                 uint32_t response_length);
@@ -245,16 +261,21 @@ namespace gbe
                               unsigned msg_length, unsigned response_length,
                               bool header_present = false, bool end_of_thread = false);
     virtual unsigned setAtomicMessageDesc(GenNativeInstruction *insn, unsigned function, unsigned bti, unsigned srcNum);
+    virtual unsigned setAtomicA64MessageDesc(GenNativeInstruction *insn, unsigned function, unsigned bti, unsigned srcNum, int type_long);
     virtual unsigned setUntypedReadMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum);
     virtual unsigned setUntypedWriteMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum);
+    virtual unsigned setUntypedWriteSendsMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum);
     unsigned setByteGatherMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemSize);
     unsigned setByteScatterMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemSize);
+    virtual unsigned setByteScatterSendsMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemSize);
 
     unsigned generateAtomicMessageDesc(unsigned function, unsigned bti, unsigned srcNum);
     unsigned generateUntypedReadMessageDesc(unsigned bti, unsigned elemNum);
     unsigned generateUntypedWriteMessageDesc(unsigned bti, unsigned elemNum);
+    unsigned generateUntypedWriteSendsMessageDesc(unsigned bti, unsigned elemNum);
     unsigned generateByteGatherMessageDesc(unsigned bti, unsigned elemSize);
     unsigned generateByteScatterMessageDesc(unsigned bti, unsigned elemSize);
+    unsigned generateByteScatterSendsMessageDesc(unsigned bti, unsigned elemSize);
 
     virtual void setHeader(GenNativeInstruction *insn) = 0;
     virtual void setDst(GenNativeInstruction *insn, GenRegister dest) = 0;
@@ -267,14 +288,24 @@ namespace gbe
     virtual bool canHandleLong(uint32_t opcode, GenRegister dst, GenRegister src0,
                             GenRegister src1 = GenRegister::null());
     virtual void handleDouble(GenEncoder *p, uint32_t opcode, GenRegister dst, GenRegister src0, GenRegister src1 = GenRegister::null());
+
+    /*! OBlock helper function */
+    uint32_t getOBlockSize(uint32_t oword_size, bool low_half = true);
+    void setMBlockRW(GenNativeInstruction *insn, uint32_t bti, uint32_t msg_type, uint32_t msg_length, uint32_t response_length);
+    void setOBlockRW(GenNativeInstruction *insn, uint32_t bti, uint32_t block_size, uint32_t msg_type, uint32_t msg_length, uint32_t response_lengtha);
+
     /*! OBlock read */
-    void OBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t elemSize);
+    void OBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t ow_size);
     /*! OBlock write */
-    void OBWRITE(GenRegister header, uint32_t bti, uint32_t elemSize);
+    virtual void OBWRITE(GenRegister header, GenRegister data, uint32_t bti, uint32_t ow_size, bool useSends);
     /*! MBlock read */
-    virtual void MBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t elemSize);
+    virtual void MBREAD(GenRegister dst, GenRegister header, uint32_t bti, uint32_t response_size);
     /*! MBlock write */
-    virtual void MBWRITE(GenRegister header, uint32_t bti, uint32_t elemSize);
+    virtual void MBWRITE(GenRegister header, GenRegister data, uint32_t bti, uint32_t data_size, bool useSends);
+    /*! A64 OBlock read */
+    virtual void OBREADA64(GenRegister dst, GenRegister header, uint32_t bti, uint32_t ow_size);
+    /*! A64 OBlock write */
+    virtual void OBWRITEA64(GenRegister header, uint32_t bti, uint32_t ow_size);
 
     GBE_CLASS(GenEncoder); //!< Use custom allocators
     virtual void alu3(uint32_t opcode, GenRegister dst,

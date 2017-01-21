@@ -45,7 +45,7 @@ namespace gbe
           cout << "(abs)";
         cout << "%" << reg.value.reg;
         if (reg.subphysical)
-          cout << "." << reg.subnr;
+          cout << "." << reg.subnr + reg.nr * GEN_REG_SIZE;
 
         if (dst)
           cout << "<" << GenRegister::hstride_size(reg) << ">";
@@ -96,77 +96,91 @@ namespace gbe
   }
 
 #define OP_NAME_LENGTH 512
-  void outputSelectionIR(GenContext &ctx, Selection* sel)
+  void outputSelectionInst(SelectionInstruction &insn) {
+    cout<<"["<<insn.ID<<"]";
+    if (insn.state.predicate != GEN_PREDICATE_NONE) {
+      if (insn.state.physicalFlag == 0)
+        cout << "(f" << insn.state.flagIndex << ")\t";
+      else
+        cout << "(f" << insn.state.flag << "." << insn.state.subFlag << ")\t";
+    }
+    else
+      cout << "    \t";
+
+    char opname[OP_NAME_LENGTH];
+    if (insn.isLabel()) {
+        cout << "  L" << insn.index << ":" << endl;
+        return;
+    } else {
+      switch (insn.opcode) {
+        #define DECL_SELECTION_IR(OP, FAMILY) case SEL_OP_##OP: sprintf(opname, "%s", #OP); break;
+        #include "backend/gen_insn_selection.hxx"
+        #undef DECL_SELECTION_IR
+      }
+    }
+
+    if (insn.opcode == SEL_OP_CMP) {
+      switch (insn.extra.function) {
+        case GEN_CONDITIONAL_LE:
+          strcat(opname, ".le");
+          break;
+        case GEN_CONDITIONAL_L:
+          strcat(opname, ".l");
+          break;
+        case GEN_CONDITIONAL_GE:
+          strcat(opname, ".ge");
+          break;
+        case GEN_CONDITIONAL_G:
+          strcat(opname, ".g");
+          break;
+        case GEN_CONDITIONAL_EQ:
+          strcat(opname, ".eq");
+          break;
+        case GEN_CONDITIONAL_NEQ:
+          strcat(opname, ".neq");
+          break;
+      }
+    }
+
+    int n = strlen(opname);
+    if(n >= OP_NAME_LENGTH - 20) {
+      cout << "opname too long: " << opname << endl;
+      return;
+    }
+
+    sprintf(&opname[n], "(%d)", insn.state.execWidth);
+    cout << left << setw(20) << opname;
+
+    for (int i = 0; i < insn.dstNum; ++i)
+    {
+      GenRegister dst = insn.dst(i);
+      outputGenReg(dst, true);
+      cout << "\t";
+    }
+
+    cout << ":\t";
+
+    for (int i = 0; i < insn.srcNum; ++i)
+    {
+      GenRegister src = insn.src(i);
+      outputGenReg(src, false);
+      cout << "\t";
+    }
+
+    cout << endl;
+  }
+
+  void outputSelectionIR(GenContext &ctx, Selection* sel, const char* KernelName)
   {
-    cout << "SELECTION IR begin:" << endl;
+    cout << KernelName <<"'s SELECTION IR begin:" << endl;
     cout << "WARNING: not completed yet, welcome for the FIX!" << endl;
     for (SelectionBlock &block : *sel->blockList) {
       for (SelectionInstruction &insn : block.insnList) {
-        char opname[OP_NAME_LENGTH];
-        if (insn.isLabel()) {
-            cout << "  L" << insn.index << ":" << endl;
-            continue;
-        } else {
-          switch (insn.opcode) {
-            #define DECL_SELECTION_IR(OP, FAMILY) case SEL_OP_##OP: sprintf(opname, "%s", #OP); break;
-            #include "backend/gen_insn_selection.hxx"
-            #undef DECL_SELECTION_IR
-          }
-        }
-
-        if (insn.opcode == SEL_OP_CMP) {
-          switch (insn.extra.function) {
-            case GEN_CONDITIONAL_LE:
-              strcat(opname, ".le");
-              break;
-            case GEN_CONDITIONAL_L:
-              strcat(opname, ".l");
-              break;
-            case GEN_CONDITIONAL_GE:
-              strcat(opname, ".ge");
-              break;
-            case GEN_CONDITIONAL_G:
-              strcat(opname, ".g");
-              break;
-            case GEN_CONDITIONAL_EQ:
-              strcat(opname, ".eq");
-              break;
-            case GEN_CONDITIONAL_NEQ:
-              strcat(opname, ".neq");
-              break;
-          }
-        }
-
-        int n = strlen(opname);
-        if(n >= OP_NAME_LENGTH - 20) {
-          cout << "opname too long: " << opname << endl;
-          return;
-        }
-
-        sprintf(&opname[n], "(%d)", insn.state.execWidth);
-        cout << "    " << left << setw(20) << opname;
-
-        for (int i = 0; i < insn.dstNum; ++i)
-        {
-          GenRegister dst = insn.dst(i);
-          outputGenReg(dst, true);
-          cout << "\t";
-        }
-
-        cout << ":\t";
-
-        for (int i = 0; i < insn.srcNum; ++i)
-        {
-          GenRegister src = insn.src(i);
-          outputGenReg(src, false);
-          cout << "\t";
-        }
-
-        cout << endl;
+        outputSelectionInst(insn);
       }
       cout << endl;
     }
-    cout << "SELECTION IR end." << endl << endl;
+    cout <<KernelName << "'s SELECTION IR end." << endl << endl;
   }
 
 }

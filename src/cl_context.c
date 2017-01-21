@@ -22,6 +22,8 @@
 #include "cl_context.h"
 #include "cl_command_queue.h"
 #include "cl_mem.h"
+#include "cl_sampler.h"
+#include "cl_event.h"
 #include "cl_alloc.h"
 #include "cl_utils.h"
 #include "cl_driver.h"
@@ -37,6 +39,139 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+
+LOCAL void
+cl_context_add_queue(cl_context ctx, cl_command_queue queue) {
+  assert(queue->ctx == NULL);
+  cl_context_add_ref(ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  while (ctx->queue_modify_disable) {
+    CL_OBJECT_WAIT_ON_COND(ctx);
+  }
+  list_add_tail(&ctx->queues, &queue->base.node);
+  ctx->queue_num++;
+  CL_OBJECT_UNLOCK(ctx);
+
+  queue->ctx = ctx;
+}
+
+LOCAL void
+cl_context_remove_queue(cl_context ctx, cl_command_queue queue) {
+  assert(queue->ctx == ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  while (ctx->queue_modify_disable) {
+    CL_OBJECT_WAIT_ON_COND(ctx);
+  }
+  list_node_del(&queue->base.node);
+  ctx->queue_num--;
+  CL_OBJECT_UNLOCK(ctx);
+
+  cl_context_delete(ctx);
+  queue->ctx = NULL;
+}
+
+LOCAL void
+cl_context_add_mem(cl_context ctx, cl_mem mem) {
+  assert(mem->ctx == NULL);
+  cl_context_add_ref(ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  list_add_tail(&ctx->mem_objects, &mem->base.node);
+  ctx->mem_object_num++;
+  CL_OBJECT_UNLOCK(ctx);
+
+  mem->ctx = ctx;
+}
+
+LOCAL void
+cl_context_remove_mem(cl_context ctx, cl_mem mem) {
+  assert(mem->ctx == ctx);
+  CL_OBJECT_LOCK(ctx);
+  list_node_del(&mem->base.node);
+  ctx->mem_object_num--;
+  CL_OBJECT_UNLOCK(ctx);
+
+  cl_context_delete(ctx);
+  mem->ctx = NULL;
+}
+
+LOCAL void
+cl_context_add_sampler(cl_context ctx, cl_sampler sampler) {
+  assert(sampler->ctx == NULL);
+  cl_context_add_ref(ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  list_add_tail(&ctx->samplers, &sampler->base.node);
+  ctx->sampler_num++;
+  CL_OBJECT_UNLOCK(ctx);
+
+  sampler->ctx = ctx;
+}
+
+LOCAL void
+cl_context_remove_sampler(cl_context ctx, cl_sampler sampler) {
+  assert(sampler->ctx == ctx);
+  CL_OBJECT_LOCK(ctx);
+  list_node_del(&sampler->base.node);
+  ctx->sampler_num--;
+  CL_OBJECT_UNLOCK(ctx);
+
+  cl_context_delete(ctx);
+  sampler->ctx = NULL;
+}
+
+LOCAL void
+cl_context_add_event(cl_context ctx, cl_event event) {
+  assert(event->ctx == NULL);
+  cl_context_add_ref(ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  list_add_tail(&ctx->events, &event->base.node);
+  ctx->event_num++;
+  CL_OBJECT_UNLOCK(ctx);
+
+  event->ctx = ctx;
+}
+
+LOCAL void
+cl_context_remove_event(cl_context ctx, cl_event event) {
+  assert(event->ctx == ctx);
+  CL_OBJECT_LOCK(ctx);
+  list_node_del(&event->base.node);
+  ctx->event_num--;
+  CL_OBJECT_UNLOCK(ctx);
+
+  cl_context_delete(ctx);
+  event->ctx = NULL;
+}
+
+LOCAL void
+cl_context_add_program(cl_context ctx, cl_program program) {
+  assert(program->ctx == NULL);
+  cl_context_add_ref(ctx);
+
+  CL_OBJECT_LOCK(ctx);
+  list_add_tail(&ctx->programs, &program->base.node);
+  ctx->program_num++;
+  CL_OBJECT_UNLOCK(ctx);
+
+  program->ctx = ctx;
+}
+
+LOCAL void
+cl_context_remove_program(cl_context ctx, cl_program program) {
+  assert(program->ctx == ctx);
+  CL_OBJECT_LOCK(ctx);
+  list_node_del(&program->base.node);
+  ctx->program_num--;
+  CL_OBJECT_UNLOCK(ctx);
+
+  cl_context_delete(ctx);
+  program->ctx = NULL;
+}
+
 
 #define CHECK(var) \
   if (var) \
@@ -125,6 +260,10 @@ cl_create_context(const cl_context_properties *  properties,
   cl_context ctx = NULL;
   cl_int err = CL_SUCCESS;
   cl_uint prop_len = 0;
+  cl_uint dev_num = 0;
+  cl_device_id* all_dev = NULL;
+  cl_uint i, j;
+
   /* XXX */
   FATAL_IF (num_devices != 1, "Only one device is supported");
 
@@ -132,8 +271,32 @@ cl_create_context(const cl_context_properties *  properties,
   if (UNLIKELY(((err = cl_context_properties_process(properties, &props, &prop_len)) != CL_SUCCESS)))
     goto error;
 
+  /* Filter out repeated device. */
+  assert(num_devices > 0);
+  all_dev = cl_calloc(num_devices, sizeof(cl_device_id));
+  if (all_dev == NULL) {
+    *errcode_ret = CL_OUT_OF_HOST_MEMORY;
+    return NULL;
+  }
+  for (i = 0; i < num_devices; i++) {
+    for (j = 0; j < i; j++) {
+      if (devices[j] == devices[i]) {
+        break;
+      }
+    }
+
+    if (j != i) { // Find some duplicated one.
+      continue;
+    }
+
+    all_dev[dev_num] = devices[i];
+    dev_num++;
+  }
+  assert(dev_num == 1); // TODO: multi devices later.
+
   /* We are good */
-  if (UNLIKELY((ctx = cl_context_new(&props)) == NULL)) {
+  if (UNLIKELY((ctx = cl_context_new(&props, dev_num, all_dev)) == NULL)) {
+    cl_free(all_dev);
     err = CL_OUT_OF_HOST_MEMORY;
     goto error;
   }
@@ -143,13 +306,13 @@ cl_create_context(const cl_context_properties *  properties,
     memcpy(ctx->prop_user, properties, sizeof(cl_context_properties)*prop_len);
   }
   ctx->prop_len = prop_len;
-  /* Attach the device to the context */
-  ctx->device = *devices;
+  /* cl_context_new will use all_dev. */
+  all_dev = NULL;
 
   /* Save the user callback and user data*/
   ctx->pfn_notify = pfn_notify;
   ctx->user_data = user_data;
-  cl_driver_set_atomic_flag(ctx->drv, ctx->device->atomic_test_result);
+  cl_driver_set_atomic_flag(ctx->drv, ctx->devices[0]->atomic_test_result);
 
 exit:
   if (errcode_ret != NULL)
@@ -162,22 +325,23 @@ error:
 }
 
 LOCAL cl_context
-cl_context_new(struct _cl_context_prop *props)
+cl_context_new(struct _cl_context_prop *props, cl_uint dev_num, cl_device_id* all_dev)
 {
   cl_context ctx = NULL;
 
   TRY_ALLOC_NO_ERR (ctx, CALLOC(struct _cl_context));
+  CL_OBJECT_INIT_BASE(ctx, CL_OBJECT_CONTEXT_MAGIC);
+  ctx->devices = all_dev;
+  ctx->device_num = dev_num;
+  list_init(&ctx->queues);
+  list_init(&ctx->mem_objects);
+  list_init(&ctx->samplers);
+  list_init(&ctx->events);
+  list_init(&ctx->programs);
+  ctx->queue_modify_disable = CL_FALSE;
   TRY_ALLOC_NO_ERR (ctx->drv, cl_driver_new(props));
-  SET_ICD(ctx->dispatch)
   ctx->props = *props;
-  ctx->magic = CL_MAGIC_CONTEXT_HEADER;
-  ctx->ref_n = 1;
   ctx->ver = cl_driver_get_ver(ctx->drv);
-  pthread_mutex_init(&ctx->program_lock, NULL);
-  pthread_mutex_init(&ctx->queue_lock, NULL);
-  pthread_mutex_init(&ctx->buffer_lock, NULL);
-  pthread_mutex_init(&ctx->sampler_lock, NULL);
-  pthread_mutex_init(&ctx->accelerator_intel_lock, NULL);
 
 exit:
   return ctx;
@@ -195,7 +359,7 @@ cl_context_delete(cl_context ctx)
     return;
 
   /* We are not done yet */
-  if (atomic_dec(&ctx->ref_n) > 1)
+  if (CL_OBJECT_DEC_REF(ctx) > 1)
     return;
 
   /* delete the internal programs. */
@@ -218,16 +382,9 @@ cl_context_delete(cl_context ctx)
   cl_program_delete(ctx->built_in_prgs);
   ctx->built_in_prgs = NULL;
 
-  /* All object lists should have been freed. Otherwise, the reference counter
-   * of the context cannot be 0
-   */
-  assert(ctx->queues == NULL);
-  assert(ctx->programs == NULL);
-  assert(ctx->buffers == NULL);
-  assert(ctx->drv);
   cl_free(ctx->prop_user);
   cl_driver_delete(ctx->drv);
-  ctx->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+  CL_OBJECT_DESTROY_BASE(ctx);
   cl_free(ctx);
 }
 
@@ -235,32 +392,7 @@ LOCAL void
 cl_context_add_ref(cl_context ctx)
 {
   assert(ctx);
-  atomic_inc(&ctx->ref_n);
-}
-
-LOCAL cl_command_queue
-cl_context_create_queue(cl_context ctx,
-                        cl_device_id device,
-                        cl_command_queue_properties properties, /* XXX */
-                        cl_int *errcode_ret)
-{
-  cl_command_queue queue = NULL;
-  cl_int err = CL_SUCCESS;
-
-
-
-  /* We create the command queue and store it in the context list of queues */
-  TRY_ALLOC (queue, cl_command_queue_new(ctx));
-  queue->props = properties;
-
-exit:
-  if (errcode_ret)
-    *errcode_ret = err;
-  return queue;
-error:
-  cl_command_queue_delete(queue);
-  queue = NULL;
-  goto exit;
+  CL_OBJECT_INC_REF(ctx);
 }
 
 cl_buffer_mgr
@@ -276,9 +408,10 @@ cl_context_get_static_kernel_from_bin(cl_context ctx, cl_int index,
   cl_int ret;
   cl_int binary_status = CL_SUCCESS;
   cl_kernel ker;
-  pthread_mutex_lock(&ctx->program_lock);
+
+  CL_OBJECT_TAKE_OWNERSHIP(ctx, 1);
   if (ctx->internal_prgs[index] == NULL) {
-    ctx->internal_prgs[index] = cl_program_create_from_binary(ctx, 1, &ctx->device,
+    ctx->internal_prgs[index] = cl_program_create_from_binary(ctx, 1, &ctx->devices[0],
       &size, (const unsigned char **)&str_kernel, &binary_status, &ret);
 
     if (!ctx->internal_prgs[index]) {
@@ -326,6 +459,41 @@ cl_context_get_static_kernel_from_bin(cl_context ctx, cl_int index,
   ker = ctx->internal_kernels[index];
 
 unlock:
-  pthread_mutex_unlock(&ctx->program_lock);
+  CL_OBJECT_RELEASE_OWNERSHIP(ctx);
   return cl_kernel_dup(ker);
+}
+
+
+cl_mem
+cl_context_get_svm_from_ptr(cl_context ctx, const void * p)
+{
+  struct list_node *pos;
+  cl_mem buf;
+
+  list_for_each (pos, (&ctx->mem_objects)) {
+    buf = (cl_mem)list_entry(pos, _cl_base_object, node);
+    if(buf->host_ptr == NULL) continue;
+    if(buf->is_svm == 0) continue;
+    if(buf->type != CL_MEM_SVM_TYPE) continue;
+    if((size_t)buf->host_ptr <= (size_t)p &&
+       (size_t)p < ((size_t)buf->host_ptr + buf->size))
+      return buf;
+  }
+  return NULL;
+}
+
+cl_mem
+cl_context_get_mem_from_ptr(cl_context ctx, const void * p)
+{
+  struct list_node *pos;
+  cl_mem buf;
+
+  list_for_each (pos, (&ctx->mem_objects)) {
+    buf = (cl_mem)list_entry(pos, _cl_base_object, node);
+    if(buf->host_ptr == NULL) continue;
+    if((size_t)buf->host_ptr <= (size_t)p &&
+       (size_t)p < ((size_t)buf->host_ptr + buf->size))
+      return buf;
+  }
+  return NULL;
 }

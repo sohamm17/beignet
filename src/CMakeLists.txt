@@ -3,8 +3,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     ${DRM_INCLUDE_DIRS}/../
                     ${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/
                     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-                    ${MESA_SOURCE_INCLUDES}
-                    ${LLVM_INCLUDE_DIR})
+                    ${LLVM_INCLUDE_DIR}
+                    ${OPENGL_INCLUDE_DIRS}
+                    ${EGL_INCLUDE_DIRS})
 
 macro (MakeKernelBinStr KERNEL_PATH KERNEL_FILES)
 foreach (KF ${KERNEL_FILES})
@@ -65,7 +66,17 @@ MakeKernelBinStr ("${CMAKE_CURRENT_SOURCE_DIR}/kernels/" "${BUILT_IN_NAME}")
 
 set(OPENCL_SRC
     ${KERNEL_STR_FILES}
+    cl_base_object.c
     cl_api.c
+    cl_api_platform_id.c
+    cl_api_device_id.c
+    cl_api_mem.c
+    cl_api_kernel.c
+    cl_api_command_queue.c
+    cl_api_event.c
+    cl_api_context.c
+    cl_api_sampler.c
+    cl_api_program.c
     cl_alloc.c
     cl_kernel.c
     cl_program.c
@@ -82,8 +93,11 @@ set(OPENCL_SRC
     cl_context.c
     cl_command_queue.c
     cl_command_queue.h
+    cl_device_enqueue.c
+    cl_device_enqueue.h
     cl_command_queue_gen7.c
-    cl_thread.c
+    cl_command_queue_enqueue.c
+    cl_utils.c
     cl_driver.h
     cl_driver.cpp
     cl_driver_defs.c
@@ -108,14 +122,11 @@ if (CMRT_FOUND)
   set(OPENCL_SRC ${OPENCL_SRC} cl_cmrt.cpp)
 endif (CMRT_FOUND)
 
-if (EGL_FOUND AND MESA_SOURCE_FOUND)
-  set (OPENCL_SRC ${OPENCL_SRC} cl_mem_gl.c cl_gl_api.c x11/mesa_egl_extension.c x11/mesa_egl_res_share.c intel/intel_dri_resource_sharing.c)
-  SET(CMAKE_CXX_FLAGS "-DHAS_EGL ${CMAKE_CXX_FLAGS}")
-  SET(CMAKE_C_FLAGS "-DHAS_EGL ${CMAKE_C_FLAGS}")
-  SET(OPTIONAL_EGL_LIBRARY "${EGL_LIBRARY}")
-else(EGL_FOUND AND MESA_SOURCE_FOUND)
-  SET(OPTIONAL_EGL_LIBRARY "")
-endif (EGL_FOUND AND MESA_SOURCE_FOUND)
+if (OPENGL_FOUND AND EGL_FOUND)
+  set (OPENCL_SRC ${OPENCL_SRC} cl_mem_gl.c cl_gl_api.c )
+  SET(CMAKE_CXX_FLAGS "-DHAS_GL_EGL ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_GL_EGL ${CMAKE_C_FLAGS}")
+endif (OPENGL_FOUND AND EGL_FOUND)
 
 if (OCLIcd_FOUND)
   set (OPENCL_SRC ${OPENCL_SRC} cl_khr_icd.c)
@@ -148,6 +159,11 @@ if (HAVE_DRM_INTEL_MIN_EU_IN_POOL)
   SET(CMAKE_C_FLAGS "-DHAS_MIN_EU_IN_POOL ${CMAKE_C_FLAGS}")
 endif (HAVE_DRM_INTEL_MIN_EU_IN_POOL)
 
+if (HAVE_DRM_INTEL_BO_SET_SOFTPIN)
+  SET(CMAKE_CXX_FLAGS "-DHAS_BO_SET_SOFTPIN ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DHAS_BO_SET_SOFTPIN ${CMAKE_C_FLAGS}")
+endif (HAVE_DRM_INTEL_BO_SET_SOFTPIN)
+
 set(GIT_SHA1 "git_sha1.h")
 add_custom_target(${GIT_SHA1} ALL
   COMMAND chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/git_sha1.sh
@@ -156,7 +172,7 @@ add_custom_target(${GIT_SHA1} ALL
 
 SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic,--allow-shlib-undefined")
 
-link_directories (${LLVM_LIBRARY_DIR} ${DRM_LIBDIR})
+link_directories (${LLVM_LIBRARY_DIR} ${DRM_LIBDIR} ${OPENGL_LIBDIR} ${EGL_LIBDIR})
 add_library(cl SHARED ${OPENCL_SRC})
 ADD_DEPENDENCIES(cl ${GIT_SHA1})
 target_link_libraries(
@@ -170,5 +186,5 @@ target_link_libraries(
                       ${CMAKE_THREAD_LIBS_INIT}
                       ${CMAKE_DL_LIBS}
                       ${OPENGL_LIBRARIES}
-                      ${OPTIONAL_EGL_LIBRARY})
+                      ${EGL_LIBRARIES})
 install (TARGETS cl LIBRARY DESTINATION ${BEIGNET_INSTALL_DIR})

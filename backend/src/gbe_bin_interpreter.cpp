@@ -23,6 +23,7 @@
 #include "ir/constant.cpp"
 #include "ir/printf.cpp"
 #include "ir/profiling.cpp"
+#include "ir/reloc.cpp"
 
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -39,6 +40,7 @@ struct BinInterpCallBackInitializer
     gbe_program_get_kernel_num = gbe::programGetKernelNum;
     gbe_program_get_kernel_by_name = gbe::programGetKernelByName;
     gbe_program_get_kernel = gbe::programGetKernel;
+    gbe_program_get_device_enqueue_kernel_name = gbe::programGetDeviceEnqueueKernelName;
     gbe_kernel_get_code_size = gbe::kernelGetCodeSize;
     gbe_kernel_get_code = gbe::kernelGetCode;
     gbe_kernel_get_arg_num = gbe::kernelGetArgNum;
@@ -62,8 +64,11 @@ struct BinInterpCallBackInitializer
     gbe_program_get_global_constant_size = gbe::programGetGlobalConstantSize;
     gbe_program_delete = gbe::programDelete;
     gbe_program_get_global_constant_data = gbe::programGetGlobalConstantData;
+    gbe_program_get_global_reloc_count = gbe::programGetGlobalRelocCount;
+    gbe_program_get_global_reloc_table = gbe::programGetGlobalRelocTable;
     gbe_kernel_get_sampler_data = gbe::kernelGetSamplerData;
     gbe_kernel_get_image_data = gbe::kernelGetImageData;
+    gbe_kernel_get_ocl_version = gbe::kernelGetOclVersion;
     gbe_kernel_get_arg_info = gbe::kernelGetArgInfo;
     gbe_get_profiling_bti = gbe::kernelGetProfilingBTI;
     gbe_dup_profiling = gbe::kernelDupProfiling;
@@ -73,6 +78,7 @@ struct BinInterpCallBackInitializer
     gbe_dup_printfset = gbe::kernelDupPrintfSet;
     gbe_release_printf_info = gbe::kernelReleasePrintfSet;
     gbe_output_printf = gbe::kernelOutputPrintf;
+    gbe_kernel_use_device_enqueue = gbe::kernelUseDeviceEnqueue;
   }
 
   ~BinInterpCallBackInitializer() {

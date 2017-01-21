@@ -345,7 +345,7 @@ namespace gbe
   Context::Context(const ir::Unit &unit, const std::string &name) :
     unit(unit), fn(*unit.getFunction(name)), name(name), liveness(NULL), dag(NULL), useDWLabel(false)
   {
-    GBE_ASSERT(unit.getPointerSize() == ir::POINTER_32_BITS);
+    GBE_ASSERT(unit.getPointerSize() == ir::POINTER_32_BITS || unit.getPointerSize() == ir::POINTER_64_BITS);
     this->liveness = GBE_NEW(ir::Liveness, const_cast<ir::Function&>(fn), true);
     this->dag = GBE_NEW(ir::FunctionDAG, *this->liveness);
     // r0 (GEN_REG_SIZE) is always set by the HW and used at the end by EOT
@@ -393,6 +393,7 @@ namespace gbe
     if(this->kernel != NULL) {
       this->kernel->scratchSize = this->alignScratchSize(scratchAllocator->getMaxScatchMemUsed());
       this->kernel->ctx = this;
+      this->kernel->setUseDeviceEnqueue(fn.getUseDeviceEnqueue());
     }
     return this->kernel;
   }
@@ -471,6 +472,7 @@ namespace gbe
       kernel->args[argID].info.accessQual = arg.info.accessQual;
       kernel->args[argID].info.typeQual = arg.info.typeQual;
       kernel->args[argID].info.argName = arg.info.argName;
+      kernel->args[argID].info.typeSize = arg.info.typeSize;
       switch (arg.type) {
         case ir::FunctionArgument::VALUE:
         case ir::FunctionArgument::STRUCTURE:
@@ -497,6 +499,11 @@ namespace gbe
         case ir::FunctionArgument::SAMPLER:
           kernel->args[argID].type = GBE_ARG_SAMPLER;
           kernel->args[argID].size = sizeof(void*);
+          break;
+        case ir::FunctionArgument::PIPE:
+          kernel->args[argID].type = GBE_ARG_PIPE;
+          kernel->args[argID].size = sizeof(void*);
+          kernel->args[argID].bti = arg.bti;
           break;
       }
     }
