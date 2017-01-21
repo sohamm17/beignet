@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -233,6 +233,7 @@ ELSE(OCLIcd_FOUND)
+@@ -222,6 +222,7 @@ ELSE(OCLIcd_FOUND)
    MESSAGE(STATUS "Looking for OCL ICD header file - not found")
  ENDIF(OCLIcd_FOUND)
  

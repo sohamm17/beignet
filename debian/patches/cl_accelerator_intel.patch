@@ -9,8 +9,8 @@ cl_ext.h that does have it, but this has not been tested.
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 Forwarded: not-needed
 
---- beignet-1.2.0.orig/include/CL/cl_intel.h
-+++ beignet-1.2.0/include/CL/cl_intel.h
+--- a/include/CL/cl_intel.h
++++ b/include/CL/cl_intel.h
 @@ -26,6 +26,111 @@
  extern "C" {
  #endif
@@ -123,18 +123,18 @@ Forwarded: not-needed
  #define CL_MEM_PINNABLE (1 << 10)
  
  /* Track allocations and report current number of unfreed allocations */
---- beignet-1.2.0.orig/src/cl_accelerator_intel.h
-+++ beignet-1.2.0/src/cl_accelerator_intel.h
-@@ -3,6 +3,7 @@
- 
+--- a/src/cl_accelerator_intel.h
++++ b/src/cl_accelerator_intel.h
+@@ -4,6 +4,7 @@
+ #include "cl_base_object.h"
  #include "CL/cl.h"
  #include "CL/cl_ext.h"
 +#include "CL/cl_intel.h"
  #include <stdint.h>
  
  struct _cl_accelerator_intel {
---- beignet-1.2.0.orig/src/cl_driver.h
-+++ beignet-1.2.0/src/cl_driver.h
+--- a/src/cl_driver.h
++++ b/src/cl_driver.h
 @@ -24,6 +24,7 @@
  #include <stdlib.h>
  #include "cl_driver_type.h"

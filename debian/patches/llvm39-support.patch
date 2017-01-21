@@ -19,4 +19,3 @@ Author: Rebecca Palmer
                 DOC "llvm-config executable")
  endif (LLVM_INSTALL_DIR)
  
-

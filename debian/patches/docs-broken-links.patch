@@ -21,7 +21,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  * Run as root without X.
  * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
  
-@@ -285,13 +286,13 @@ Please specify your hardware when report
+@@ -297,14 +298,14 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------
@@ -32,6 +32,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -- [[V4l2 Buffer Sharing|Beignet/howto/v4l2-buffer-sharing-howto]]
 -- [[Video Motion Estimation|Beignet/howto/video-motion-estimation-howto]]
 -- [[Stand Alone Unit Test|Beignet/howto/stand-alone-utest-howto]]
+-- [[Android build|Beignet/android-build-howto]]
 +- [[Cross compile (yocto)|howto/cross-compiler-howto]]
 +- [[Work with old system without c++11|howto/oldgcc-howto]]
 +- [[Kernel Optimization Guide|optimization-guide]]
@@ -39,6 +40,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +- [[V4l2 Buffer Sharing|howto/v4l2-buffer-sharing-howto]]
 +- [[Video Motion Estimation|howto/video-motion-estimation-howto]]
 +- [[Stand Alone Unit Test|howto/stand-alone-utest-howto]]
++- [[Android build|android-build-howto]]
  
  The wiki URL is as below:
  [http://www.freedesktop.org/wiki/Software/Beignet/](http://www.freedesktop.org/wiki/Software/Beignet/)

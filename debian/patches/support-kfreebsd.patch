@@ -9,7 +9,7 @@ Author: Koop Mast, Rebecca Palmer
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -35,7 +35,12 @@
+@@ -34,7 +34,12 @@
  #include <stdio.h>
  #include <string.h>
  #include <stdlib.h>
@@ -22,7 +22,7 @@ Author: Koop Mast, Rebecca Palmer
  
  #ifndef CL_VERSION_1_2
  #define CL_DEVICE_BUILT_IN_KERNELS 0x103F
-@@ -787,11 +792,24 @@ kbl_gt4_break:
+@@ -767,11 +772,24 @@ kbl_gt4_break:
    #define toMB(size) (size)&(UINT64_MAX<<20)
    /* Get the global_mem_size and max_mem_alloc size from
     * driver, system ram and hardware*/
@@ -50,23 +50,11 @@ Author: Koop Mast, Rebecca Palmer
      ret->global_mem_size = toMB((totalram / 2 > totalgpumem) ?
 --- a/src/cl_event.c
 +++ b/src/cl_event.c
-@@ -27,6 +27,7 @@
- 
- #include <assert.h>
+@@ -22,6 +22,7 @@
+ #include "cl_alloc.h"
+ #include <string.h>
  #include <stdio.h>
 +#include <time.h>
  
- void cl_event_update_last_events(cl_command_queue queue, int wait)
- {
-@@ -657,7 +658,11 @@ cl_ulong cl_event_get_cpu_timestamp(cl_u
- {
-   struct timespec ts;
- 
-+#if defined(linux) || defined(__linux__) || defined(__LINUX__)
-  if(clock_gettime(CLOCK_MONOTONIC_RAW,&ts) != 0){
-+#else
-+ if(clock_gettime(CLOCK_MONOTONIC,&ts) != 0){
-+#endif
-   printf("CPU Timmer error\n");
-   return CL_FALSE;
-   }
+ // TODO: Need to move it to some device related file later.
+ static void

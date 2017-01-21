@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -770,10 +770,10 @@ kbl_gt4_break:
+@@ -749,10 +749,10 @@ kbl_gt4_break:
      case PCI_CHIP_SANDYBRIDGE_BRIDGE_S:
      case PCI_CHIP_SANDYBRIDGE_S_GT:
        // Intel(R) HD Graphics SandyBridge not supported yet
@@ -23,19 +23,19 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    if (ret == NULL)
 --- a/src/intel/intel_driver.c
 +++ b/src/intel/intel_driver.c
-@@ -240,7 +240,6 @@ intel_driver_open(intel_driver_t *intel,
-   }
+@@ -254,7 +254,6 @@ if(!intel_driver_is_active(intel)) {
+ }
  
-   if(!intel_driver_is_active(intel)) {
--    fprintf(stderr, "Device open failed, aborting...\n");
-     return CL_DEVICE_NOT_FOUND;
-   }
+ if(!intel_driver_is_active(intel)) {
+-  fprintf(stderr, "Device open failed, aborting...\n");
+   return CL_DEVICE_NOT_FOUND;
+ }
  
-@@ -301,7 +300,6 @@ intel_driver_init_master(intel_driver_t
-   // usually dev_name = "/dev/dri/card%d"
-   dev_fd = open(dev_name, O_RDWR);
-   if (dev_fd == -1) {
--    fprintf(stderr, "open(\"%s\", O_RDWR) failed: %s\n", dev_name, strerror(errno));
-     return 0;
-   }
+@@ -315,7 +314,6 @@ drm_client_t client;
+ // usually dev_name = "/dev/dri/card%d"
+ dev_fd = open(dev_name, O_RDWR);
+ if (dev_fd == -1) {
+-  fprintf(stderr, "open(\"%s\", O_RDWR) failed: %s\n", dev_name, strerror(errno));
+   return 0;
+ }
  

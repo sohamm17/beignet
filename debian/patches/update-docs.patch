@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -879,7 +879,7 @@ cl_self_test(cl_device_id device, cl_sel
+@@ -859,7 +859,7 @@ cl_self_test(cl_device_id device, cl_sel
                      } else {
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
@@ -94,7 +94,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
   * 3rd Generation Intel Core Processors "Ivybridge".
   * 3rd Generation Intel Atom Processors "BayTrail".
   * 4th Generation Intel Core Processors "Haswell", need kernel patch if your linux kernel older than 4.2, see the "Known Issues" section.
-@@ -158,6 +154,12 @@ Supported Targets
+@@ -158,6 +154,12 @@
   * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
   * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
  
@@ -104,10 +104,10 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +
 +Attempting to run Beignet on unsupported hardware should return CL_DEVICE_NOT_FOUND; if it does anything else (especially crashing) please [report a bug](#howtocontribute).
 +
- Known Issues
- ------------
- 
-@@ -177,7 +179,7 @@ Known Issues
+ OpenCL 2.0
+ ----------
+ From release v1.3.0, beignet support OpenCL 2.0. By default, OpenCL 2.0 support is disabled, you can enable it when cmake with option
+@@ -189,7 +191,7 @@ Known Issues
    forever until a reboot.
  
  * "Beignet: self-test failed" and almost all unit tests fail.
@@ -116,7 +116,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
    enable the register whitelist by default but miss some registers needed
    for Beignet.
-@@ -191,10 +193,11 @@ Known Issues
+@@ -203,10 +205,11 @@ Known Issues
    Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
    on Linux 4.1.
    
@@ -131,7 +131,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -210,10 +213,26 @@ Known Issues
+@@ -222,10 +225,26 @@ Known Issues
    This loses some precision but gains performance.
  
  * cl\_khr\_gl\_sharing.
@@ -162,7 +162,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Project repository
  ------------------
-@@ -260,9 +279,9 @@ The official mail list is as below:
+@@ -272,9 +291,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
