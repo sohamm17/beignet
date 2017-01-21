@@ -169,6 +169,12 @@ namespace gbe
           NOT_IMPLEMENTED;
       }
     }
+    void useVirtualFlag(ir::Register flag, unsigned pred) {
+      modFlag = 0;
+      physicalFlag = 0;
+      flagIndex = flag;
+      predicate = pred;
+    }
     void useFlag(int nr, int subnr) {
       flag = nr;
       subFlag = subnr;
@@ -268,6 +274,10 @@ namespace gbe
 
     static INLINE GenRegister offset(GenRegister reg, int nr, int subnr = 0) {
       GenRegister r = reg;
+      if(subnr >= 32){
+        nr += subnr / 32;
+        subnr = subnr % 32;
+      }
       r.nr += nr;
       r.subnr += subnr;
       r.subphysical = 1;
@@ -281,6 +291,14 @@ namespace gbe
       r.vstride = GEN_VERTICAL_STRIDE_0;
       r.width = GEN_WIDTH_1;
       return r;
+    }
+
+    INLINE bool isSameRegion(GenRegister reg) const {
+      return reg.file == file &&
+             typeSize(reg.type) == typeSize(type) &&
+             reg.vstride == vstride &&
+             reg.width == width &&
+             reg.hstride == hstride;
     }
 
     static INLINE uint32_t grfOffset(GenRegister reg) {

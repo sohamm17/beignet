@@ -38,10 +38,13 @@ gbe_program_clean_llvm_resource_cb *compiler_program_clean_llvm_resource = NULL;
 gbe_program_new_from_binary_cb *interp_program_new_from_binary = NULL;
 gbe_program_get_global_constant_size_cb *interp_program_get_global_constant_size = NULL;
 gbe_program_get_global_constant_data_cb *interp_program_get_global_constant_data = NULL;
+gbe_program_get_global_reloc_count_cb *interp_program_get_global_reloc_count = NULL;
+gbe_program_get_global_reloc_table_cb *interp_program_get_global_reloc_table = NULL;
 gbe_program_delete_cb *interp_program_delete = NULL;
 gbe_program_get_kernel_num_cb *interp_program_get_kernel_num = NULL;
 gbe_program_get_kernel_by_name_cb *interp_program_get_kernel_by_name = NULL;
 gbe_program_get_kernel_cb *interp_program_get_kernel = NULL;
+gbe_program_get_device_enqueue_kernel_name_cb *interp_program_get_device_enqueue_kernel_name = NULL;
 gbe_kernel_get_name_cb *interp_kernel_get_name = NULL;
 gbe_kernel_get_attributes_cb *interp_kernel_get_attributes = NULL;
 gbe_kernel_get_code_cb *interp_kernel_get_code = NULL;
@@ -64,6 +67,7 @@ gbe_kernel_get_sampler_data_cb *interp_kernel_get_sampler_data = NULL;
 gbe_kernel_get_compile_wg_size_cb *interp_kernel_get_compile_wg_size = NULL;
 gbe_kernel_get_image_size_cb *interp_kernel_get_image_size = NULL;
 gbe_kernel_get_image_data_cb *interp_kernel_get_image_data = NULL;
+gbe_kernel_get_ocl_version_cb *interp_kernel_get_ocl_version = NULL;
 gbe_output_profiling_cb* interp_output_profiling = NULL;
 gbe_get_profiling_bti_cb* interp_get_profiling_bti = NULL;
 gbe_dup_profiling_cb* interp_dup_profiling = NULL;
@@ -73,6 +77,7 @@ gbe_dup_printfset_cb* interp_dup_printfset = NULL;
 gbe_release_printf_info_cb* interp_release_printf_info = NULL;
 gbe_output_printf_cb* interp_output_printf = NULL;
 gbe_kernel_get_arg_info_cb *interp_kernel_get_arg_info = NULL;
+gbe_kernel_use_device_enqueue_cb *interp_kernel_use_device_enqueue = NULL;
 
 struct GbeLoaderInitializer
 {
@@ -110,6 +115,14 @@ struct GbeLoaderInitializer
     if (interp_program_get_global_constant_data == NULL)
       return false;
 
+    interp_program_get_global_reloc_count = *(gbe_program_get_global_reloc_count_cb**)dlsym(dlhInterp, "gbe_program_get_global_reloc_count");
+    if (interp_program_get_global_reloc_count == NULL)
+      return false;
+
+    interp_program_get_global_reloc_table = *(gbe_program_get_global_reloc_table_cb**)dlsym(dlhInterp, "gbe_program_get_global_reloc_table");
+    if (interp_program_get_global_reloc_table == NULL)
+      return false;
+
     interp_program_delete = *(gbe_program_delete_cb**)dlsym(dlhInterp, "gbe_program_delete");
     if (interp_program_delete == NULL)
       return false;
@@ -124,6 +137,10 @@ struct GbeLoaderInitializer
 
     interp_program_get_kernel = *(gbe_program_get_kernel_cb**)dlsym(dlhInterp, "gbe_program_get_kernel");
     if (interp_program_get_kernel == NULL)
+      return false;
+
+    interp_program_get_device_enqueue_kernel_name = *(gbe_program_get_device_enqueue_kernel_name_cb**)dlsym(dlhInterp, "gbe_program_get_device_enqueue_kernel_name");
+    if (interp_program_get_device_enqueue_kernel_name == NULL)
       return false;
 
     interp_kernel_get_name = *(gbe_kernel_get_name_cb**)dlsym(dlhInterp, "gbe_kernel_get_name");
@@ -214,6 +231,10 @@ struct GbeLoaderInitializer
     if (interp_kernel_get_image_data == NULL)
       return false;
 
+    interp_kernel_get_ocl_version = *(gbe_kernel_get_ocl_version_cb**)dlsym(dlhInterp, "gbe_kernel_get_ocl_version");
+    if (interp_kernel_get_ocl_version == NULL)
+      return false;
+
     interp_output_profiling = *(gbe_output_profiling_cb**)dlsym(dlhInterp, "gbe_output_profiling");
     if (interp_output_profiling == NULL)
       return false;
@@ -248,6 +269,10 @@ struct GbeLoaderInitializer
 
     interp_kernel_get_arg_info = *(gbe_kernel_get_arg_info_cb**)dlsym(dlhInterp, "gbe_kernel_get_arg_info");
     if (interp_kernel_get_arg_info == NULL)
+      return false;
+
+    interp_kernel_use_device_enqueue = *(gbe_kernel_use_device_enqueue_cb**)dlsym(dlhInterp, "gbe_kernel_use_device_enqueue");
+    if (interp_kernel_use_device_enqueue == NULL)
       return false;
 
     return true;

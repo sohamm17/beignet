@@ -47,7 +47,15 @@ namespace gbe
                 uint32_t return_format,
                 bool isLD,
                 bool isUniform);
-
+    void setSendsOperands(Gen9NativeInstruction *gen9_insn, GenRegister dst, GenRegister src0, GenRegister src1);
+    virtual void UNTYPED_WRITE(GenRegister addr, GenRegister data, GenRegister bti, uint32_t elemNum, bool useSends);
+    virtual void TYPED_WRITE(GenRegister header, GenRegister data, bool header_present, unsigned char bti, bool useSends);
+    virtual unsigned setUntypedWriteSendsMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemNum);
+    virtual void BYTE_SCATTER(GenRegister addr, GenRegister data, GenRegister bti, uint32_t elemSize, bool useSends);
+    virtual unsigned setByteScatterSendsMessageDesc(GenNativeInstruction *insn, unsigned bti, unsigned elemSize);
+    virtual void ATOMIC(GenRegister dst, uint32_t function, GenRegister addr, GenRegister data, GenRegister bti, uint32_t srcNum, bool useSends);
+    virtual void OBWRITE(GenRegister header, GenRegister data, uint32_t bti, uint32_t ow_size, bool useSends);
+    virtual void MBWRITE(GenRegister header, GenRegister data, uint32_t bti, uint32_t data_size, bool useSends);
   };
 }
 #endif /* __GBE_GEN9_ENCODER_HPP__ */

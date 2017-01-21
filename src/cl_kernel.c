@@ -45,14 +45,16 @@ cl_kernel_delete(cl_kernel k)
 #ifdef HAS_CMRT
   if (k->cmrt_kernel != NULL) {
     cmrt_destroy_kernel(k);
-    k->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+    CL_OBJECT_DESTROY_BASE(k);
     cl_free(k);
     return;
   }
 #endif
 
   /* We are not done with the kernel */
-  if (atomic_dec(&k->ref_n) > 1) return;
+  if (CL_OBJECT_DEC_REF(k) > 1)
+    return;
+
   /* Release one reference on all bos we own */
   if (k->bo)       cl_buffer_unreference(k->bo);
   /* This will be true for kernels created by clCreateKernel */
@@ -68,7 +70,17 @@ cl_kernel_delete(cl_kernel k)
   }
   if (k->image_sz)
     cl_free(k->images);
-  k->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+
+  if (k->exec_info)
+    cl_free(k->exec_info);
+
+  if (k->device_enqueue_ptr)
+    cl_mem_svm_delete(k->program->ctx, k->device_enqueue_ptr);
+  if (k->device_enqueue_infos)
+    cl_free(k->device_enqueue_infos);
+
+  CL_OBJECT_DESTROY_BASE(k);
+
   cl_free(k);
 }
 
@@ -77,9 +89,7 @@ cl_kernel_new(cl_program p)
 {
   cl_kernel k = NULL;
   TRY_ALLOC_NO_ERR (k, CALLOC(struct _cl_kernel));
-  SET_ICD(k->dispatch)
-  k->ref_n = 1;
-  k->magic = CL_MAGIC_KERNEL_HEADER;
+  CL_OBJECT_INIT_BASE(k, CL_OBJECT_KERNEL_MAGIC);
   k->program = p;
   k->cmrt_kernel = NULL;
 
@@ -108,7 +118,7 @@ cl_kernel_get_attributes(cl_kernel k)
 LOCAL void
 cl_kernel_add_ref(cl_kernel k)
 {
-  atomic_inc(&k->ref_n);
+  CL_OBJECT_INC_REF(k);
 }
 
 LOCAL cl_int
@@ -156,16 +166,23 @@ cl_kernel_set_arg(cl_kernel k, cl_uint index, size_t sz, const void *value)
       return CL_INVALID_ARG_VALUE;
 
     cl_sampler s = *(cl_sampler*)value;
-    if(s->magic != CL_MAGIC_SAMPLER_HEADER)
+    if(!CL_OBJECT_IS_SAMPLER(s))
       return CL_INVALID_SAMPLER;
   } else {
     // should be image, GLOBAL_PTR, CONSTANT_PTR
-    if (UNLIKELY(value == NULL && arg_type == GBE_ARG_IMAGE))
+    if (UNLIKELY(value == NULL && (arg_type == GBE_ARG_IMAGE ||
+            arg_type == GBE_ARG_PIPE)))
       return CL_INVALID_ARG_VALUE;
     if(value != NULL)
       mem = *(cl_mem*)value;
+    if(arg_type == GBE_ARG_PIPE) {
+      _cl_mem_pipe* pipe= cl_mem_pipe(mem);
+      size_t type_size = (size_t)interp_kernel_get_arg_info(k->opaque, index,5);
+      if(pipe->packet_size != type_size)
+          return CL_INVALID_ARG_VALUE;
+    }
     if(value != NULL && mem) {
-      if( CL_SUCCESS != is_valid_mem(mem, ctx->buffers))
+      if(CL_SUCCESS != cl_mem_is_valid(mem, ctx))
         return CL_INVALID_MEM_OBJECT;
 
       if (UNLIKELY((arg_type == GBE_ARG_IMAGE && !IS_IMAGE(mem))
@@ -252,9 +269,60 @@ cl_kernel_set_arg(cl_kernel k, cl_uint index, size_t sz, const void *value)
     cl_mem_delete(k->args[index].mem);
   k->args[index].mem = mem;
   k->args[index].is_set = 1;
+  k->args[index].is_svm = mem->is_svm;
+  if(mem->is_svm)
+    k->args[index].ptr = mem->host_ptr;
   k->args[index].local_sz = 0;
   k->args[index].bti = interp_kernel_get_arg_bti(k->opaque, index);
   return CL_SUCCESS;
+}
+
+
+LOCAL cl_int
+cl_kernel_set_arg_svm_pointer(cl_kernel k, cl_uint index, const void *value)
+{
+  enum gbe_arg_type arg_type; /* kind of argument */
+  //size_t arg_sz;              /* size of the argument */
+  cl_context ctx = k->program->ctx;
+  cl_mem mem= cl_context_get_svm_from_ptr(ctx, value);
+
+  if (UNLIKELY(index >= k->arg_n))
+    return CL_INVALID_ARG_INDEX;
+  arg_type = interp_kernel_get_arg_type(k->opaque, index);
+  //arg_sz = interp_kernel_get_arg_size(k->opaque, index);
+
+  if(arg_type != GBE_ARG_GLOBAL_PTR && arg_type != GBE_ARG_CONSTANT_PTR )
+    return CL_INVALID_ARG_VALUE;
+
+  if(mem == NULL)
+    return CL_INVALID_ARG_VALUE;
+
+  cl_mem_add_ref(mem);
+  if (k->args[index].mem)
+    cl_mem_delete(k->args[index].mem);
+
+  k->args[index].ptr = (void *)value;
+  k->args[index].mem = mem;
+  k->args[index].is_set = 1;
+  k->args[index].is_svm = 1;
+  k->args[index].local_sz = 0;
+  k->args[index].bti = interp_kernel_get_arg_bti(k->opaque, index);
+  return 0;
+}
+
+LOCAL cl_int
+cl_kernel_set_exec_info(cl_kernel k, size_t n, const void *value)
+{
+  cl_int err = CL_SUCCESS;
+  assert(k != NULL);
+
+  if (n == 0) return err;
+  TRY_ALLOC(k->exec_info, cl_calloc(n, 1));
+  memcpy(k->exec_info, value, n);
+  k->exec_info_n = n / sizeof(void *);
+
+error:
+  return err;
 }
 
 LOCAL int
@@ -275,13 +343,13 @@ cl_get_kernel_arg_info(cl_kernel k, cl_uint arg_index, cl_kernel_arg_info param_
     if (!param_value) return CL_SUCCESS;
     if (param_value_size < sizeof(cl_kernel_arg_address_qualifier))
       return CL_INVALID_VALUE;
-    if ((cl_ulong)ret_info == 0) {
+    if ((size_t)ret_info == 0) {
       *(cl_kernel_arg_address_qualifier *)param_value = CL_KERNEL_ARG_ADDRESS_PRIVATE;
-    } else if ((cl_ulong)ret_info == 1 || (cl_ulong)ret_info == 4) {
+    } else if ((size_t)ret_info == 1 || (size_t)ret_info == 4) {
       *(cl_kernel_arg_address_qualifier *)param_value = CL_KERNEL_ARG_ADDRESS_GLOBAL;
-    } else if ((cl_ulong)ret_info == 2) {
+    } else if ((size_t)ret_info == 2) {
       *(cl_kernel_arg_address_qualifier *)param_value = CL_KERNEL_ARG_ADDRESS_CONSTANT;
-    } else if ((cl_ulong)ret_info == 3) {
+    } else if ((size_t)ret_info == 3) {
       *(cl_kernel_arg_address_qualifier *)param_value = CL_KERNEL_ARG_ADDRESS_LOCAL;
     } else {
       /* If no address qualifier is specified, the default address qualifier
@@ -334,6 +402,8 @@ cl_get_kernel_arg_info(cl_kernel k, cl_uint arg_index, cl_kernel_arg_info param_
       type_qual = type_qual | CL_KERNEL_ARG_TYPE_VOLATILE;
     if (strstr((char*)ret_info, "restrict"))
       type_qual = type_qual | CL_KERNEL_ARG_TYPE_RESTRICT;
+    if (strstr((char*)ret_info, "pipe"))
+      type_qual = CL_KERNEL_ARG_TYPE_PIPE;
     *(cl_kernel_arg_type_qualifier *)param_value = type_qual;
     return CL_SUCCESS;
 
@@ -371,7 +441,8 @@ cl_kernel_setup(cl_kernel k, gbe_kernel opaque)
   k->opaque = opaque;
 
   const char* kname = cl_kernel_get_name(k);
-  if (strncmp(kname, "block_motion_estimate_intel", sizeof("block_motion_estimate_intel")) == 0)
+  if (kname != NULL &&
+      strncmp(kname, "block_motion_estimate_intel", sizeof("block_motion_estimate_intel")) == 0)
     k->vme = 1;
   else
     k->vme = 0;
@@ -389,7 +460,7 @@ cl_kernel_setup(cl_kernel k, gbe_kernel opaque)
   /* Get image data & size */
   k->image_sz = interp_kernel_get_image_size(k->opaque);
   assert(k->sampler_sz <= GEN_MAX_SURFACES);
-  assert(k->image_sz <= ctx->device->max_read_image_args + ctx->device->max_write_image_args);
+  assert(k->image_sz <= ctx->devices[0]->max_read_image_args + ctx->devices[0]->max_write_image_args);
   if (k->image_sz > 0) {
     TRY_ALLOC_NO_ERR(k->images, cl_calloc(k->image_sz, sizeof(k->images[0])));
     interp_kernel_get_image_data(k->opaque, k->images);
@@ -409,17 +480,16 @@ cl_kernel_dup(cl_kernel from)
   if (UNLIKELY(from == NULL))
     return NULL;
   TRY_ALLOC_NO_ERR (to, CALLOC(struct _cl_kernel));
-  SET_ICD(to->dispatch)
+  CL_OBJECT_INIT_BASE(to, CL_OBJECT_KERNEL_MAGIC);
   to->bo = from->bo;
   to->opaque = from->opaque;
   to->vme = from->vme;
-  to->ref_n = 1;
-  to->magic = CL_MAGIC_KERNEL_HEADER;
   to->program = from->program;
   to->arg_n = from->arg_n;
   to->curbe_sz = from->curbe_sz;
   to->sampler_sz = from->sampler_sz;
   to->image_sz = from->image_sz;
+  to->exec_info_n = from->exec_info_n;
   memcpy(to->compile_wg_sz, from->compile_wg_sz, sizeof(from->compile_wg_sz));
   to->stack_size = from->stack_size;
   if (to->sampler_sz)
@@ -429,6 +499,10 @@ cl_kernel_dup(cl_kernel from)
     memcpy(to->images, from->images, to->image_sz * sizeof(to->images[0]));
   } else
     to->images = NULL;
+  if (to->exec_info_n) { /* Must always 0 here */
+    TRY_ALLOC_NO_ERR(to->exec_info, cl_calloc(to->exec_info_n, sizeof(void *)));
+    memcpy(to->exec_info, from->exec_info, to->exec_info_n * sizeof(void *));
+  }
   TRY_ALLOC_NO_ERR(to->args, cl_calloc(to->arg_n, sizeof(cl_argument)));
   if (to->curbe_sz) TRY_ALLOC_NO_ERR(to->curbe, cl_calloc(1, to->curbe_sz));
 

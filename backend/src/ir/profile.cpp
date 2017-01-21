@@ -35,6 +35,7 @@ namespace ir {
         "group_id_0", "group_id_1", "group_id_2",
         "num_groups_0", "num_groups_1", "num_groups_2",
         "local_size_0", "local_size_1", "local_size_2",
+        "enqueued_local_size_0", "enqueued_local_size_1", "enqueued_local_size_2",
         "global_size_0", "global_size_1", "global_size_2",
         "global_offset_0", "global_offset_1", "global_offset_2",
         "stack_pointer", "stack_buffer",
@@ -47,7 +48,9 @@ namespace ir {
         "profiling_timestamps0", "profiling_timestamps1",
         "profiling_timestamps2", "profiling_timestamps3",
         "profiling_timestamps4",
-        "threadid"
+        "threadid",
+        "constant_addrspace_start",
+        "stack_size", "enqueue_buffer_pointer",
     };
 
 #if GBE_DEBUG
@@ -72,13 +75,20 @@ namespace ir {
       DECL_NEW_REG(FAMILY_DWORD, lsize0, 1, GBE_CURBE_LOCAL_SIZE_X);
       DECL_NEW_REG(FAMILY_DWORD, lsize1, 1, GBE_CURBE_LOCAL_SIZE_Y);
       DECL_NEW_REG(FAMILY_DWORD, lsize2, 1, GBE_CURBE_LOCAL_SIZE_Z);
+      DECL_NEW_REG(FAMILY_DWORD, enqlsize0, 1, GBE_CURBE_ENQUEUED_LOCAL_SIZE_X);
+      DECL_NEW_REG(FAMILY_DWORD, enqlsize1, 1, GBE_CURBE_ENQUEUED_LOCAL_SIZE_Y);
+      DECL_NEW_REG(FAMILY_DWORD, enqlsize2, 1, GBE_CURBE_ENQUEUED_LOCAL_SIZE_Z);
       DECL_NEW_REG(FAMILY_DWORD, gsize0, 1, GBE_CURBE_GLOBAL_SIZE_X);
       DECL_NEW_REG(FAMILY_DWORD, gsize1, 1, GBE_CURBE_GLOBAL_SIZE_Y);
       DECL_NEW_REG(FAMILY_DWORD, gsize2, 1, GBE_CURBE_GLOBAL_SIZE_Z);
       DECL_NEW_REG(FAMILY_DWORD, goffset0, 1, GBE_CURBE_GLOBAL_OFFSET_X);
       DECL_NEW_REG(FAMILY_DWORD, goffset1, 1, GBE_CURBE_GLOBAL_OFFSET_Y);
       DECL_NEW_REG(FAMILY_DWORD, goffset2, 1, GBE_CURBE_GLOBAL_OFFSET_Z);
-      DECL_NEW_REG(FAMILY_DWORD, stackptr, 0);
+      if(fn.getOclVersion() >= 200) {
+        DECL_NEW_REG(FAMILY_QWORD, stackptr, 0);
+      } else {
+        DECL_NEW_REG(FAMILY_DWORD, stackptr, 0);
+      }
       DECL_NEW_REG(FAMILY_QWORD, stackbuffer, 1, GBE_CURBE_EXTRA_ARGUMENT, GBE_STACK_BUFFER);
       DECL_NEW_REG(FAMILY_WORD,  blockip, 0, GBE_CURBE_BLOCK_IP);
       DECL_NEW_REG(FAMILY_DWORD, barrierid, 1);
@@ -95,6 +105,9 @@ namespace ir {
       DECL_NEW_REG(FAMILY_DWORD, profilingts3, 0, GBE_CURBE_PROFILING_TIMESTAMP3);
       DECL_NEW_REG(FAMILY_DWORD, profilingts4, 0, GBE_CURBE_PROFILING_TIMESTAMP4);
       DECL_NEW_REG(FAMILY_DWORD, threadid, 1, GBE_CURBE_THREAD_ID);
+      DECL_NEW_REG(FAMILY_QWORD, constant_addrspace, 1, GBE_CURBE_CONSTANT_ADDRSPACE);
+      DECL_NEW_REG(FAMILY_QWORD, stacksize, 1, GBE_CURBE_STACK_SIZE);
+      DECL_NEW_REG(FAMILY_QWORD, enqueuebufptr, 1, GBE_CURBE_ENQUEUE_BUF_POINTER);
     }
 #undef DECL_NEW_REG
 

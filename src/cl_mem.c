@@ -28,6 +28,7 @@
 #include "cl_kernel.h"
 #include "cl_command_queue.h"
 #include "cl_cmrt.h"
+#include "cl_enqueue.h"
 
 #include "CL/cl.h"
 #include "CL/cl_intel.h"
@@ -35,6 +36,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 
 #define FIELD_SIZE(CASE,TYPE)               \
   case JOIN(CL_,CASE):                      \
@@ -48,7 +50,7 @@
 
 #define MAX_TILING_SIZE                             128 * MB
 
-static cl_mem_object_type
+LOCAL cl_mem_object_type
 cl_get_mem_object_type(cl_mem mem)
 {
   switch (mem->type) {
@@ -67,165 +69,38 @@ cl_get_mem_object_type(cl_mem mem)
 }
 
 LOCAL cl_int
-cl_get_mem_object_info(cl_mem mem,
-                cl_mem_info param_name,
-                size_t param_value_size,
-                void *param_value,
-                size_t *param_value_size_ret)
+cl_get_pipe_info(cl_mem mem,
+                    cl_mem_info param_name,
+                    size_t param_value_size,
+                    void *param_value,
+                    size_t *param_value_size_ret)
 {
+  _cl_mem_pipe *pipe;
   switch(param_name)
   {
-    FIELD_SIZE(MEM_TYPE, cl_mem_object_type);
-    FIELD_SIZE(MEM_FLAGS, cl_mem_flags);
-    FIELD_SIZE(MEM_SIZE, size_t);
-    FIELD_SIZE(MEM_HOST_PTR, void *);
-    FIELD_SIZE(MEM_MAP_COUNT, cl_uint);
-    FIELD_SIZE(MEM_REFERENCE_COUNT, cl_uint);
-    FIELD_SIZE(MEM_CONTEXT, cl_context);
-    FIELD_SIZE(MEM_ASSOCIATED_MEMOBJECT, cl_mem);
-    FIELD_SIZE(MEM_OFFSET, size_t);
+    FIELD_SIZE(PIPE_PACKET_SIZE, cl_uint);
+    FIELD_SIZE(PIPE_MAX_PACKETS, cl_uint);
   default:
     return CL_INVALID_VALUE;
   }
 
+  if(mem->type != CL_MEM_PIPE_TYPE)
+    return CL_INVALID_MEM_OBJECT;
+
+  pipe = cl_mem_pipe(mem);
+
   switch(param_name)
   {
-  case CL_MEM_TYPE:
-    *((cl_mem_object_type *)param_value) = cl_get_mem_object_type(mem);
+  case CL_PIPE_PACKET_SIZE:
+    *((cl_uint *)param_value) = pipe->packet_size;
     break;
-  case CL_MEM_FLAGS:
-    *((cl_mem_flags *)param_value) = mem->flags;
-    break;
-  case CL_MEM_SIZE:
-    *((size_t *)param_value) = mem->size;
-    break;
-  case CL_MEM_HOST_PTR:
-    if(mem->type == CL_MEM_IMAGE_TYPE) {
-      *((size_t *)param_value) = (size_t)mem->host_ptr;
-    } else {
-      struct _cl_mem_buffer* buf = (struct _cl_mem_buffer*)mem;
-      *((size_t *)param_value) = (size_t)mem->host_ptr + buf->sub_offset;
-    }
-    break;
-  case CL_MEM_MAP_COUNT:
-    *((cl_uint *)param_value) = mem->map_ref;
-    break;
-  case CL_MEM_REFERENCE_COUNT:
-    *((cl_uint *)param_value) = mem->ref_n;
-    break;
-  case CL_MEM_CONTEXT:
-    *((cl_context *)param_value) = mem->ctx;
-    break;
-  case CL_MEM_ASSOCIATED_MEMOBJECT:
-    if(mem->type != CL_MEM_SUBBUFFER_TYPE) {
-      *((cl_mem *)param_value) = NULL;
-    } else {
-      struct _cl_mem_buffer* buf = (struct _cl_mem_buffer*)mem;
-      *((cl_mem *)param_value) = (cl_mem)(buf->parent);
-    }
-    break;
-  case CL_MEM_OFFSET:
-    if(mem->type != CL_MEM_SUBBUFFER_TYPE) {
-      *((size_t *)param_value) = 0;
-    } else {
-      struct _cl_mem_buffer* buf = (struct _cl_mem_buffer*)mem;
-      *((size_t *)param_value) = buf->sub_offset;
-    }
+  case CL_PIPE_MAX_PACKETS:
+    *((cl_uint *)param_value) = pipe->max_packets;
     break;
   }
 
   return CL_SUCCESS;
 }
-
-#define IS_1D(image) (image->image_type == CL_MEM_OBJECT_IMAGE1D ||        \
-                      image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ||  \
-                      image->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER)
-
-#define IS_2D(image) (image->image_type == CL_MEM_OBJECT_IMAGE2D ||        \
-                      image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY)
-
-#define IS_3D(image) (image->image_type == CL_MEM_OBJECT_IMAGE3D)
-
-#define IS_ARRAY(image) (image->image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY || \
-                         image->image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY)
-
-LOCAL cl_int
-cl_get_image_info(cl_mem mem,
-                  cl_image_info param_name,
-                  size_t param_value_size,
-                  void *param_value,
-                  size_t *param_value_size_ret)
-{
-  int err;
-  CHECK_IMAGE(mem, image);
-
-  switch(param_name)
-  {
-    FIELD_SIZE(IMAGE_FORMAT, cl_image_format);
-    FIELD_SIZE(IMAGE_ELEMENT_SIZE, size_t);
-    FIELD_SIZE(IMAGE_ROW_PITCH, size_t);
-    FIELD_SIZE(IMAGE_SLICE_PITCH, size_t);
-    FIELD_SIZE(IMAGE_WIDTH, size_t);
-    FIELD_SIZE(IMAGE_HEIGHT, size_t);
-    FIELD_SIZE(IMAGE_DEPTH, size_t);
-    FIELD_SIZE(IMAGE_ARRAY_SIZE, size_t);
-    FIELD_SIZE(IMAGE_BUFFER, cl_mem);
-    FIELD_SIZE(IMAGE_NUM_MIP_LEVELS, cl_uint);
-    FIELD_SIZE(IMAGE_NUM_SAMPLES, cl_uint);
-  default:
-    return CL_INVALID_VALUE;
-  }
-
-  switch(param_name)
-  {
-  case CL_IMAGE_FORMAT:
-    *(cl_image_format *)param_value = image->fmt;
-    break;
-  case CL_IMAGE_ELEMENT_SIZE:
-    *(size_t *)param_value = image->bpp;
-    break;
-  case CL_IMAGE_ROW_PITCH:
-    *(size_t *)param_value = image->row_pitch;
-    break;
-  case CL_IMAGE_SLICE_PITCH:
-    *(size_t *)param_value = image->slice_pitch;
-    break;
-  case CL_IMAGE_WIDTH:
-
-    if (mem->type == CL_MEM_BUFFER1D_IMAGE_TYPE) {
-      struct _cl_mem_buffer1d_image *buffer1d_image = (struct _cl_mem_buffer1d_image*) image;
-      *(size_t *)param_value = buffer1d_image->size;
-    } else
-      *(size_t *)param_value = image->w;
-    break;
-  case CL_IMAGE_HEIGHT:
-    if (mem->type == CL_MEM_BUFFER1D_IMAGE_TYPE)
-      *(size_t *)param_value = 0;
-    else
-      *(size_t *)param_value = IS_1D(image) ? 0 : image->h;
-    break;
-  case CL_IMAGE_DEPTH:
-    *(size_t *)param_value = IS_3D(image) ? image->depth : 0;
-    break;
-  case CL_IMAGE_ARRAY_SIZE:
-    *(size_t *)param_value = IS_ARRAY(image) ? image->depth : 0;
-    break;
-  case CL_IMAGE_BUFFER:
-    *(cl_mem *)param_value = image->buffer_1d;
-    break;
-  case CL_IMAGE_NUM_MIP_LEVELS:
-  case CL_IMAGE_NUM_SAMPLES:
-    *(cl_mem *)param_value = 0;
-    break;
-  }
-
-  return CL_SUCCESS;
-
-error:
-    return err;
-}
-
-#undef FIELD_SIZE
 
 LOCAL cl_mem
 cl_mem_allocate(enum cl_mem_type type,
@@ -257,18 +132,23 @@ cl_mem_allocate(enum cl_mem_type type,
     struct _cl_mem_buffer1d_image *buffer1d_image = NULL;
     TRY_ALLOC(buffer1d_image, CALLOC(struct _cl_mem_buffer1d_image));
     mem = &buffer1d_image->base.base;
+  } else if (type == CL_MEM_PIPE_TYPE) {
+    _cl_mem_pipe *pipe = NULL;
+    TRY_ALLOC(pipe, CALLOC(struct _cl_mem_pipe));
+    mem = &pipe->base;
   } else {
     struct _cl_mem_buffer *buffer = NULL;
     TRY_ALLOC (buffer, CALLOC(struct _cl_mem_buffer));
     mem = &buffer->base;
   }
+
+  CL_OBJECT_INIT_BASE(mem, CL_OBJECT_MEM_MAGIC);
+  list_init(&mem->dstr_cb_head);
   mem->type = type;
-  SET_ICD(mem->dispatch)
-  mem->ref_n = 1;
-  mem->magic = CL_MAGIC_MEM_HEADER;
   mem->flags = flags;
   mem->is_userptr = 0;
   mem->offset = 0;
+  mem->is_svm = 0;
   mem->cmrt_mem = NULL;
   if (mem->type == CL_MEM_IMAGE_TYPE) {
     cl_mem_image(mem)->is_image_from_buffer = 0;
@@ -285,17 +165,26 @@ cl_mem_allocate(enum cl_mem_type type,
 
 #ifdef HAS_USERPTR
     uint8_t bufCreated = 0;
-    if (ctx->device->host_unified_memory) {
+    if (ctx->devices[0]->host_unified_memory) {
       int page_size = getpagesize();
       int cacheline_size = 0;
-      cl_get_device_info(ctx->device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
+      cl_get_device_info(ctx->devices[0], CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
 
       if (type == CL_MEM_BUFFER_TYPE) {
         if (flags & CL_MEM_USE_HOST_PTR) {
           assert(host_ptr != NULL);
+          cl_mem svm_mem = NULL;
+          if((svm_mem = cl_context_get_svm_from_ptr(ctx, host_ptr)) != NULL)
+            mem->is_svm = 1;
           /* userptr not support tiling */
           if (!is_tiled) {
-            if ((ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr) &&
+            if(svm_mem != NULL) {  //SVM always paged alignment
+              mem->offset = 0;
+              mem->is_userptr = 1;
+              mem->bo = svm_mem->bo;
+              cl_mem_add_ref(svm_mem);
+              bufCreated = 1;
+            } else if ((ALIGN((unsigned long)host_ptr, cacheline_size) == (unsigned long)host_ptr) &&
                 (ALIGN((unsigned long)sz, cacheline_size) == (unsigned long)sz)) {
               void* aligned_host_ptr = (void*)(((unsigned long)host_ptr) & (~(page_size - 1)));
               mem->offset = host_ptr - aligned_host_ptr;
@@ -333,7 +222,7 @@ cl_mem_allocate(enum cl_mem_type type,
       // if create image from USE_HOST_PTR buffer, the buffer's base address need be aligned.
       if(buffer->is_userptr) {
         int base_alignement = 0;
-        cl_get_device_info(ctx->device, CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT, sizeof(base_alignement), &base_alignement, NULL);
+        cl_get_device_info(ctx->devices[0], CL_DEVICE_IMAGE_BASE_ADDRESS_ALIGNMENT, sizeof(base_alignement), &base_alignement, NULL);
         if(ALIGN((unsigned long)buffer->host_ptr, base_alignement) != (unsigned long)buffer->host_ptr) {
           err = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
           goto error;
@@ -363,15 +252,8 @@ cl_mem_allocate(enum cl_mem_type type,
     mem->size = sz;
   }
 
-  cl_context_add_ref(ctx);
-  mem->ctx = ctx;
-    /* Append the buffer in the context buffer list */
-  pthread_mutex_lock(&ctx->buffer_lock);
-  mem->next = ctx->buffers;
-  if (ctx->buffers != NULL)
-    ctx->buffers->prev = mem;
-  ctx->buffers = mem;
-  pthread_mutex_unlock(&ctx->buffer_lock);
+  /* Append the buffer in the context buffer list */
+  cl_context_add_mem(ctx, mem);
 
 exit:
   if (errcode)
@@ -385,17 +267,26 @@ error:
 }
 
 LOCAL cl_int
-is_valid_mem(cl_mem mem, cl_mem buffers)
+cl_mem_is_valid(cl_mem mem, cl_context ctx)
 {
-  cl_mem tmp = buffers;
-  while(tmp){
-    if(mem == tmp){
-      if (UNLIKELY(mem->magic != CL_MAGIC_MEM_HEADER))
+  struct list_node *pos;
+  cl_base_object pbase_object;
+
+  CL_OBJECT_LOCK(ctx);
+  list_for_each (pos, (&ctx->mem_objects)) {
+    pbase_object = list_entry(pos, _cl_base_object, node);
+    if (pbase_object == (cl_base_object)mem) {
+      if (UNLIKELY(!CL_OBJECT_IS_MEM(mem))) {
+        CL_OBJECT_UNLOCK(ctx);
         return CL_INVALID_MEM_OBJECT;
+      }
+
+      CL_OBJECT_UNLOCK(ctx);
       return CL_SUCCESS;
     }
-    tmp = tmp->next;
   }
+
+  CL_OBJECT_UNLOCK(ctx);
   return CL_INVALID_MEM_OBJECT;
 }
 
@@ -448,7 +339,7 @@ cl_mem_new_buffer(cl_context ctx,
     goto error;
   }
 
-  if ((err = cl_get_device_info(ctx->device,
+  if ((err = cl_get_device_info(ctx->devices[0],
                                 CL_DEVICE_MAX_MEM_ALLOC_SIZE,
                                 sizeof(max_mem_size),
                                 &max_mem_size,
@@ -550,7 +441,7 @@ cl_mem_new_sub_buffer(cl_mem buffer,
     goto error;
   }
 
-  if (info->origin & (buffer->ctx->device->mem_base_addr_align / 8 - 1)) {
+  if (info->origin & (buffer->ctx->devices[0]->mem_base_addr_align / 8 - 1)) {
     err = CL_MISALIGNED_SUB_BUFFER_OFFSET;
     goto error;
   }
@@ -558,10 +449,10 @@ cl_mem_new_sub_buffer(cl_mem buffer,
   /* Now create the sub buffer and link it to the buffer. */
   TRY_ALLOC (sub_buf, CALLOC(struct _cl_mem_buffer));
   mem = &sub_buf->base;
+
+  CL_OBJECT_INIT_BASE(mem, CL_OBJECT_MEM_MAGIC);
+  list_init(&mem->dstr_cb_head);
   mem->type = CL_MEM_SUBBUFFER_TYPE;
-  SET_ICD(mem->dispatch)
-  mem->ref_n = 1;
-  mem->magic = CL_MAGIC_MEM_HEADER;
   mem->flags = flags;
   mem->offset = buffer->offset;
   mem->is_userptr = buffer->is_userptr;
@@ -579,19 +470,12 @@ cl_mem_new_sub_buffer(cl_mem buffer,
   mem->bo = buffer->bo;
   mem->size = info->size;
   sub_buf->sub_offset = info->origin;
-  if (buffer->flags & CL_MEM_USE_HOST_PTR || buffer->flags & CL_MEM_COPY_HOST_PTR) {
+  if (buffer->flags & CL_MEM_USE_HOST_PTR || buffer->flags & CL_MEM_COPY_HOST_PTR || buffer->flags & CL_MEM_ALLOC_HOST_PTR) {
     mem->host_ptr = buffer->host_ptr;
   }
 
-  cl_context_add_ref(buffer->ctx);
-  mem->ctx = buffer->ctx;
   /* Append the buffer in the context buffer list */
-  pthread_mutex_lock(&buffer->ctx->buffer_lock);
-  mem->next = buffer->ctx->buffers;
-  if (buffer->ctx->buffers != NULL)
-    buffer->ctx->buffers->prev = mem;
-  buffer->ctx->buffers = mem;
-  pthread_mutex_unlock(&buffer->ctx->buffer_lock);
+  cl_context_add_mem(buffer->ctx, mem);
 
 exit:
   if (errcode_ret)
@@ -601,6 +485,68 @@ error:
   cl_mem_delete(mem);
   mem = NULL;
   goto exit;
+}
+
+cl_mem cl_mem_new_pipe(cl_context ctx,
+                             cl_mem_flags flags,
+                             cl_uint packet_size,
+                             cl_uint max_packets,
+                             cl_int *errcode_ret)
+{
+  _cl_mem_pipe* pipe = NULL;
+  cl_uint *ptr = NULL;
+  cl_mem mem = NULL;
+  cl_int err;
+  cl_uint sz;
+  if(UNLIKELY((pipe = CALLOC(_cl_mem_pipe)) == NULL)) {
+    err = CL_OUT_OF_RESOURCES;
+    goto error;
+  }
+
+  sz = packet_size * max_packets;
+  assert(sz != 0);
+
+  /* HSW: Byte scattered Read/Write has limitation that
+     the buffer size must be a multiple of 4 bytes. */
+  sz = ALIGN(sz, 4);
+
+  sz += 128;   //The head of pipe is for data struct, and alignment to 128 byte for max data type double16
+
+  mem = cl_mem_allocate(CL_MEM_PIPE_TYPE, ctx, flags, sz, CL_FALSE,NULL , NULL, &err);
+
+  if (mem == NULL || err != CL_SUCCESS)
+    goto error;
+
+  ptr = cl_mem_map_auto(mem, 1);
+  if(ptr == NULL){
+    err = CL_OUT_OF_RESOURCES;
+    goto error;
+  }
+  ptr[0] = max_packets;
+  ptr[1] = packet_size;
+  ptr[2] = 0;              //write ptr
+  ptr[3] = 0;              //read ptr
+  ptr[4] = 0;              //reservation read ptr
+  ptr[5] = 0;              //reservation write ptr
+  ptr[6] = 0;              //packet num
+  cl_mem_unmap(mem);
+
+  pipe = cl_mem_pipe(mem);
+  pipe->flags = flags;
+  pipe->packet_size = packet_size;
+  pipe->max_packets = max_packets;
+
+  return mem;
+
+exit:
+  if (errcode_ret)
+    *errcode_ret = err;
+  return mem;
+error:
+  cl_mem_delete(mem);
+  mem = NULL;
+  goto exit;
+
 }
 
 void cl_mem_replace_buffer(cl_mem buffer, cl_buffer new_bo)
@@ -618,6 +564,81 @@ void cl_mem_replace_buffer(cl_mem buffer, cl_buffer new_bo)
     it->base.bo = new_bo;
     cl_buffer_reference(new_bo);
   }
+}
+
+void* cl_mem_svm_allocate(cl_context ctx, cl_svm_mem_flags flags,
+                                 size_t size, unsigned int alignment)
+{
+  cl_int err = CL_SUCCESS;
+  size_t max_mem_size;
+
+  if(UNLIKELY(alignment & (alignment - 1)))
+    return NULL;
+
+  if ((err = cl_get_device_info(ctx->devices[0],
+                                 CL_DEVICE_MAX_MEM_ALLOC_SIZE,
+                                 sizeof(max_mem_size),
+                                 &max_mem_size,
+                                 NULL)) != CL_SUCCESS) {
+      return NULL;
+  }
+
+  if(UNLIKELY(size == 0 || size > max_mem_size)) {
+    return NULL;
+  }
+
+  if (flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) {
+    return NULL;
+  }
+  if (flags && ((flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_FINE_GRAIN_BUFFER))
+          || ((flags & CL_MEM_WRITE_ONLY) && (flags & CL_MEM_READ_ONLY))
+          || ((flags & CL_MEM_WRITE_ONLY) && (flags & CL_MEM_READ_WRITE))
+          || ((flags & CL_MEM_READ_ONLY) && (flags & CL_MEM_READ_WRITE)))) {
+    return NULL;
+  }
+
+  void * ptr = NULL;
+#ifdef HAS_BO_SET_SOFTPIN
+  cl_buffer_mgr bufmgr = NULL;
+  cl_mem mem;
+  _cl_mem_svm* svm;
+  if(UNLIKELY((svm = CALLOC(_cl_mem_svm)) == NULL))
+    return NULL;
+  mem = &svm->base;
+
+  mem->type = CL_MEM_SVM_TYPE;
+  CL_OBJECT_INIT_BASE(mem, CL_OBJECT_MEM_MAGIC);
+  list_init(&mem->dstr_cb_head);
+  mem->flags = flags | CL_MEM_USE_HOST_PTR;
+  mem->is_userptr = 0;
+  mem->is_svm = 0;
+  mem->offset = 0;
+
+  bufmgr = cl_context_get_bufmgr(ctx);
+  assert(bufmgr);
+
+  int page_size = getpagesize();
+  const size_t alignedSZ = ALIGN(size, page_size);
+  if(alignment == 0)
+    alignment = page_size;
+  else
+    alignment = ALIGN(alignment, page_size);
+  ptr = cl_aligned_malloc(alignedSZ, alignment);
+  if(ptr == NULL) return NULL;
+
+  mem->host_ptr = ptr;
+  mem->is_svm = 1;
+  mem->is_userptr = 1;
+  mem->bo = cl_buffer_alloc_userptr(bufmgr, "CL SVM memory object", ptr, alignedSZ, 0);
+  mem->size = size;
+  cl_buffer_set_softpin_offset(mem->bo, (size_t)ptr);
+  cl_buffer_set_bo_use_full_range(mem->bo, 1);
+
+  /* Append the svm in the context buffer list */
+  cl_context_add_mem(ctx, mem);
+#endif
+
+  return ptr;
 }
 
 void
@@ -790,7 +811,7 @@ _cl_mem_new_image(cl_context ctx,
 
     h = 1;
     depth = 1;
-    if (UNLIKELY(w > ctx->device->image2d_max_width)) DO_IMAGE_ERROR;
+    if (UNLIKELY(w > ctx->devices[0]->image2d_max_width)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_pitch > pitch)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && (slice_pitch % pitch != 0))) DO_IMAGE_ERROR;
     if (UNLIKELY(!data && pitch != 0)) DO_IMAGE_ERROR;
@@ -800,11 +821,11 @@ _cl_mem_new_image(cl_context ctx,
              image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
 
     if (image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-      if (UNLIKELY(w > ctx->device->image_mem_size)) DO_IMAGE_ERROR;
+      if (UNLIKELY(w > ctx->devices[0]->image_mem_size)) DO_IMAGE_ERROR;
       /* This is an image1d buffer which exceeds normal image size restrication
          We have to use a 2D image to simulate this 1D image. */
-      h = (w + ctx->device->image2d_max_width - 1) / ctx->device->image2d_max_width;
-      w = w > ctx->device->image2d_max_width ? ctx->device->image2d_max_width : w;
+      h = (w + ctx->devices[0]->image2d_max_width - 1) / ctx->devices[0]->image2d_max_width;
+      w = w > ctx->devices[0]->image2d_max_width ? ctx->devices[0]->image2d_max_width : w;
       tiling = CL_NO_TILE;
     } else if(image_type == CL_MEM_OBJECT_IMAGE2D && buffer != NULL) {
       tiling = CL_NO_TILE;
@@ -817,8 +838,8 @@ _cl_mem_new_image(cl_context ctx,
     if (data && pitch == 0)
       pitch = min_pitch;
 
-    if (UNLIKELY(w > ctx->device->image2d_max_width)) DO_IMAGE_ERROR;
-    if (UNLIKELY(h > ctx->device->image2d_max_height)) DO_IMAGE_ERROR;
+    if (UNLIKELY(w > ctx->devices[0]->image2d_max_width)) DO_IMAGE_ERROR;
+    if (UNLIKELY(h > ctx->devices[0]->image2d_max_height)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_pitch > pitch)) DO_IMAGE_ERROR;
     if (UNLIKELY(!data && pitch != 0 && buffer == NULL)) DO_IMAGE_ERROR;
 
@@ -838,11 +859,11 @@ _cl_mem_new_image(cl_context ctx,
     size_t min_slice_pitch = pitch * h;
     if (data && slice_pitch == 0)
       slice_pitch = min_slice_pitch;
-    if (UNLIKELY(w > ctx->device->image3d_max_width)) DO_IMAGE_ERROR;
-    if (UNLIKELY(h > ctx->device->image3d_max_height)) DO_IMAGE_ERROR;
+    if (UNLIKELY(w > ctx->devices[0]->image3d_max_width)) DO_IMAGE_ERROR;
+    if (UNLIKELY(h > ctx->devices[0]->image3d_max_height)) DO_IMAGE_ERROR;
     if (image_type == CL_MEM_OBJECT_IMAGE3D &&
-       (UNLIKELY(depth > ctx->device->image3d_max_depth))) DO_IMAGE_ERROR
-    else if (UNLIKELY(depth > ctx->device->image_max_array_size)) DO_IMAGE_ERROR;
+       (UNLIKELY(depth > ctx->devices[0]->image3d_max_depth))) DO_IMAGE_ERROR
+    else if (UNLIKELY(depth > ctx->devices[0]->image_max_array_size)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_pitch > pitch)) DO_IMAGE_ERROR;
     if (UNLIKELY(data && min_slice_pitch > slice_pitch)) DO_IMAGE_ERROR;
     if (UNLIKELY(!data && pitch != 0)) DO_IMAGE_ERROR;
@@ -854,9 +875,9 @@ _cl_mem_new_image(cl_context ctx,
 #undef DO_IMAGE_ERROR
 
   uint8_t enableUserptr = 0;
-  if (enable_true_hostptr && ctx->device->host_unified_memory && data != NULL && (flags & CL_MEM_USE_HOST_PTR)) {
+  if (enable_true_hostptr && ctx->devices[0]->host_unified_memory && data != NULL && (flags & CL_MEM_USE_HOST_PTR)) {
     int cacheline_size = 0;
-    cl_get_device_info(ctx->device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
+    cl_get_device_info(ctx->devices[0], CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(cacheline_size), &cacheline_size, NULL);
     if (ALIGN((unsigned long)data, cacheline_size) == (unsigned long)data &&
         ALIGN(h, cl_buffer_get_tiling_align(ctx, CL_NO_TILE, 1)) == h &&
         ALIGN(h * pitch * depth, cacheline_size) == h * pitch * depth && //h and pitch should same as aligned_h and aligned_pitch if enable userptr
@@ -1033,7 +1054,7 @@ _cl_mem_new_image_from_buffer(cl_context ctx,
     goto error;
   }
 
-  if ((err = cl_get_device_info(ctx->device,
+  if ((err = cl_get_device_info(ctx->devices[0],
                                 CL_DEVICE_IMAGE_MAX_BUFFER_SIZE,
                                 sizeof(max_size),
                                 &max_size,
@@ -1103,6 +1124,8 @@ _cl_mem_new_image_from_buffer(cl_context ctx,
     memcpy(dst, src, mem_buffer->base.size);
     cl_mem_unmap(image);
     cl_mem_unmap(buffer);
+    struct _cl_mem_buffer1d_image* image_buffer = (struct _cl_mem_buffer1d_image*)image;
+    image_buffer->descbuffer = buffer;
   }
   else
     assert(0);
@@ -1172,14 +1195,28 @@ cl_mem_new_image(cl_context context,
 }
 
 LOCAL void
+cl_mem_svm_delete(cl_context ctx, void *svm_pointer)
+{
+  cl_mem mem;
+  if(UNLIKELY(svm_pointer == NULL))
+    return;
+  mem = cl_context_get_svm_from_ptr(ctx, svm_pointer);
+  if(mem == NULL)
+    return;
+  cl_mem_delete(mem);
+}
+
+LOCAL void
 cl_mem_delete(cl_mem mem)
 {
   cl_int i;
+  cl_mem_dstr_cb cb = NULL;
+
   if (UNLIKELY(mem == NULL))
     return;
-  if (atomic_dec(&mem->ref_n) > 1)
+  if (CL_OBJECT_DEC_REF(mem) > 1)
     return;
-#ifdef HAS_EGL
+#ifdef HAS_GL_EGL
   if (UNLIKELY(IS_GL_IMAGE(mem))) {
      cl_mem_gl_delete(cl_mem_gl_image(mem));
   }
@@ -1189,6 +1226,14 @@ cl_mem_delete(cl_mem mem)
   if (mem->cmrt_mem != NULL)
     cmrt_destroy_memory(mem);
 #endif
+
+  /* First, call all the callbacks registered by user. */
+  while (!list_empty(&mem->dstr_cb_head)) {
+    cb = list_entry(mem->dstr_cb_head.head_node.n, _cl_mem_dstr_cb, node);
+    list_node_del(&cb->node);
+    cb->pfn_notify(mem, cb->user_data);
+    cl_free(cb);
+  }
 
   /* iff we are a image, delete the 1d buffer if has. */
   if (IS_IMAGE(mem)) {
@@ -1202,21 +1247,6 @@ cl_mem_delete(cl_mem mem)
           mem->bo = NULL;
         }
     }
-  }
-
-  /* Remove it from the list */
-  if (mem->ctx) {
-    pthread_mutex_lock(&mem->ctx->buffer_lock);
-      if (mem->prev)
-        mem->prev->next = mem->next;
-      if (mem->next)
-        mem->next->prev = mem->prev;
-      if (mem->ctx->buffers == mem)
-        mem->ctx->buffers = mem->next;
-    pthread_mutex_unlock(&mem->ctx->buffer_lock);
-    cl_context_delete(mem->ctx);
-  } else {
-    assert((mem->prev == 0) && (mem->next == 0));
   }
 
   /* Someone still mapped, unmap */
@@ -1234,16 +1264,6 @@ cl_mem_delete(cl_mem mem)
   if (mem->mapped_ptr)
     free(mem->mapped_ptr);
 
-  if (mem->dstr_cb) {
-    cl_mem_dstr_cb *cb = mem->dstr_cb;
-    while (mem->dstr_cb) {
-      cb = mem->dstr_cb;
-      cb->pfn_notify(mem, cb->user_data);
-      mem->dstr_cb = cb->next;
-      free(cb);
-    }
-  }
-
   /* Iff we are sub, do nothing for bo release. */
   if (mem->type == CL_MEM_SUBBUFFER_TYPE) {
     struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
@@ -1258,15 +1278,24 @@ cl_mem_delete(cl_mem mem)
       buffer->parent->subs = buffer->sub_next;
     pthread_mutex_unlock(&buffer->parent->sub_lock);
     cl_mem_delete((cl_mem )(buffer->parent));
+  } else if (mem->is_svm && mem->type != CL_MEM_SVM_TYPE) {
+    cl_mem svm_mem = cl_context_get_svm_from_ptr(mem->ctx, mem->host_ptr);
+    if (svm_mem != NULL)
+      cl_mem_delete(svm_mem);
   } else if (LIKELY(mem->bo != NULL)) {
     cl_buffer_unreference(mem->bo);
   }
 
-  if (mem->is_userptr &&
+  /* Remove it from the list */
+  cl_context_remove_mem(mem->ctx, mem);
+
+  if ((mem->is_userptr &&
       (mem->flags & CL_MEM_ALLOC_HOST_PTR) &&
-      (mem->type != CL_MEM_SUBBUFFER_TYPE))
+      (mem->type != CL_MEM_SUBBUFFER_TYPE)) ||
+      (mem->is_svm && mem->type == CL_MEM_SVM_TYPE))
     cl_free(mem->host_ptr);
 
+  CL_OBJECT_DESTROY_BASE(mem);
   cl_free(mem);
 }
 
@@ -1274,7 +1303,7 @@ LOCAL void
 cl_mem_add_ref(cl_mem mem)
 {
   assert(mem);
-  atomic_inc(&mem->ref_n);
+  CL_OBJECT_INC_REF(mem);
 }
 
 #define LOCAL_SZ_0   16
@@ -1282,7 +1311,7 @@ cl_mem_add_ref(cl_mem mem)
 #define LOCAL_SZ_2   4
 
 LOCAL cl_int
-cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
+cl_mem_copy(cl_command_queue queue, cl_event event, cl_mem src_buf, cl_mem dst_buf,
             size_t src_offset, size_t dst_offset, size_t cb)
 {
   cl_int ret = CL_SUCCESS;
@@ -1335,7 +1364,8 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 2, sizeof(cl_mem), &dst_buf);
     cl_kernel_set_arg(ker, 3, sizeof(int), &dw_dst_offset);
     cl_kernel_set_arg(ker, 4, sizeof(int), &cb);
-    ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                    global_off, global_sz, global_sz, local_sz, local_sz);
     cl_kernel_delete(ker);
     return ret;
   }
@@ -1376,7 +1406,8 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 4, sizeof(int), &dw_num);
     cl_kernel_set_arg(ker, 5, sizeof(int), &first_mask);
     cl_kernel_set_arg(ker, 6, sizeof(int), &last_mask);
-    ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                    global_off, global_sz, global_sz, local_sz, local_sz);
     cl_kernel_delete(ker);
     return ret;
   }
@@ -1406,7 +1437,8 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 6, sizeof(int), &last_mask);
     cl_kernel_set_arg(ker, 7, sizeof(int), &shift);
     cl_kernel_set_arg(ker, 8, sizeof(int), &dw_mask);
-    ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                    global_off, global_sz, global_sz, local_sz, local_sz);
     cl_kernel_delete(ker);
     return ret;
   }
@@ -1438,7 +1470,8 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_kernel_set_arg(ker, 7, sizeof(int), &shift);
     cl_kernel_set_arg(ker, 8, sizeof(int), &dw_mask);
     cl_kernel_set_arg(ker, 9, sizeof(int), &src_less);
-    ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+    ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                    global_off, global_sz, global_sz, local_sz, local_sz);
     cl_kernel_delete(ker);
     return ret;
   }
@@ -1450,7 +1483,7 @@ cl_mem_copy(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
 }
 
 LOCAL cl_int
-cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image* src_image,
+cl_image_fill(cl_command_queue queue, cl_event e, const void * pattern, struct _cl_mem_image* src_image,
            const size_t * origin, const size_t * region)
 {
   cl_int ret = CL_SUCCESS;
@@ -1458,6 +1491,8 @@ cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image
   size_t global_off[] = {0,0,0};
   size_t global_sz[] = {1,1,1};
   size_t local_sz[] = {LOCAL_SZ_0,LOCAL_SZ_1,LOCAL_SZ_2};
+  uint32_t savedIntelFmt = src_image->intel_fmt;
+
 
   if(region[1] == 1) local_sz[1] = 1;
   if(region[2] == 1) local_sz[2] = 1;
@@ -1503,7 +1538,24 @@ cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image
     return CL_OUT_OF_RESOURCES;
 
   cl_kernel_set_arg(ker, 0, sizeof(cl_mem), &src_image);
-  cl_kernel_set_arg(ker, 1, sizeof(float)*4, pattern);
+  if(src_image->fmt.image_channel_order >= CL_sRGBA) {
+#define RGB2sRGB(linear)  ( linear <= 0.0031308f )? ( 12.92f * linear ):( 1.055f * powf( linear, 1.0f/2.4f ) - 0.055f);
+    cl_image_format fmt;
+    float newpattern[4] = {0.0,0.0,0.0,((float*)pattern)[3]};
+    int i;
+    for(i = 0;i < 3; i++){
+      if(src_image->fmt.image_channel_order == CL_sRGBA) {
+        newpattern[i] = RGB2sRGB(((float*)pattern)[i]);
+      } else
+        newpattern[2-i] = RGB2sRGB(((float*)pattern)[i]);
+    }
+    cl_kernel_set_arg(ker, 1, sizeof(float)*4, newpattern);
+    fmt.image_channel_order = CL_RGBA;
+    fmt.image_channel_data_type = CL_UNORM_INT8;
+    src_image->intel_fmt = cl_image_get_intel_format(&fmt);
+#undef RGB2sRGB
+  } else
+    cl_kernel_set_arg(ker, 1, sizeof(float)*4, pattern);
   cl_kernel_set_arg(ker, 2, sizeof(cl_int), &region[0]);
   cl_kernel_set_arg(ker, 3, sizeof(cl_int), &region[1]);
   cl_kernel_set_arg(ker, 4, sizeof(cl_int), &region[2]);
@@ -1511,13 +1563,15 @@ cl_image_fill(cl_command_queue queue, const void * pattern, struct _cl_mem_image
   cl_kernel_set_arg(ker, 6, sizeof(cl_int), &origin[1]);
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &origin[2]);
 
-  ret = cl_command_queue_ND_range(queue, ker, 3, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, e, 3, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
   cl_kernel_delete(ker);
+  src_image->intel_fmt = savedIntelFmt;
   return ret;
 }
 
 LOCAL cl_int
-cl_mem_fill(cl_command_queue queue, const void * pattern, size_t pattern_size,
+cl_mem_fill(cl_command_queue queue, cl_event e, const void * pattern, size_t pattern_size,
             cl_mem buffer, size_t offset, size_t size)
 {
   cl_int ret = CL_SUCCESS;
@@ -1614,13 +1668,14 @@ cl_mem_fill(cl_command_queue queue, const void * pattern, size_t pattern_size,
   if (is_128)
     cl_kernel_set_arg(ker, 4, pattern_size, pattern1);
 
-  ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, e, 1, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
   cl_kernel_delete(ker);
   return ret;
 }
 
 LOCAL cl_int
-cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
+cl_mem_copy_buffer_rect(cl_command_queue queue, cl_event event, cl_mem src_buf, cl_mem dst_buf,
                        const size_t *src_origin, const size_t *dst_origin, const size_t *region,
                        size_t src_row_pitch, size_t src_slice_pitch,
                        size_t dst_row_pitch, size_t dst_slice_pitch) {
@@ -1635,7 +1690,7 @@ cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
     cl_int src_offset = src_origin[2]*src_slice_pitch + src_origin[1]*src_row_pitch + src_origin[0];
     cl_int dst_offset = dst_origin[2]*dst_slice_pitch + dst_origin[1]*dst_row_pitch + dst_origin[0];
     cl_int size = region[0]*region[1]*region[2];
-    ret = cl_mem_copy(queue, src_buf, dst_buf,src_offset, dst_offset, size);
+    ret = cl_mem_copy(queue, NULL, src_buf, dst_buf,src_offset, dst_offset, size);
     return ret;
   }
 
@@ -1687,14 +1742,16 @@ cl_mem_copy_buffer_rect(cl_command_queue queue, cl_mem src_buf, cl_mem dst_buf,
   cl_kernel_set_arg(ker, 9, sizeof(cl_int), &dst_row_pitch);
   cl_kernel_set_arg(ker, 10, sizeof(cl_int), &dst_slice_pitch);
 
-  ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
   cl_kernel_delete(ker);
   return ret;
 }
 
 LOCAL cl_int
-cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image, struct _cl_mem_image* dst_image,
-                         const size_t *src_origin, const size_t *dst_origin, const size_t *region) {
+cl_mem_kernel_copy_image(cl_command_queue queue, cl_event event, struct _cl_mem_image* src_image,
+                         struct _cl_mem_image* dst_image, const size_t *src_origin,
+                         const size_t *dst_origin, const size_t *region) {
   cl_int ret;
   cl_kernel ker = NULL;
   size_t global_off[] = {0,0,0};
@@ -1722,7 +1779,9 @@ cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image
 
   if (fixupDataType) {
     cl_image_format fmt;
-    if (src_image->fmt.image_channel_order != CL_BGRA)
+    if (src_image->fmt.image_channel_order != CL_BGRA &&
+        src_image->fmt.image_channel_order != CL_sBGRA &&
+        src_image->fmt.image_channel_order != CL_sRGBA)
       fmt.image_channel_order = src_image->fmt.image_channel_order;
     else
       fmt.image_channel_order = CL_RGBA;
@@ -1835,7 +1894,8 @@ cl_mem_kernel_copy_image(cl_command_queue queue, struct _cl_mem_image* src_image
   cl_kernel_set_arg(ker, 9, sizeof(cl_int), &dst_origin[1]);
   cl_kernel_set_arg(ker, 10, sizeof(cl_int), &dst_origin[2]);
 
-  ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
 
 fail:
 
@@ -1848,7 +1908,7 @@ fail:
 }
 
 LOCAL cl_int
-cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image, cl_mem buffer,
+cl_mem_copy_image_to_buffer(cl_command_queue queue, cl_event event, struct _cl_mem_image* image, cl_mem buffer,
                          const size_t *src_origin, const size_t dst_offset, const size_t *region) {
   cl_int ret;
   cl_kernel ker = NULL;
@@ -1937,7 +1997,8 @@ cl_mem_copy_image_to_buffer(cl_command_queue queue, struct _cl_mem_image* image,
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &src_origin[2]);
   cl_kernel_set_arg(ker, 8, sizeof(cl_int), &kn_dst_offset);
 
-  ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
 
 fail:
 
@@ -1951,7 +2012,7 @@ fail:
 
 
 LOCAL cl_int
-cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_mem_image* image,
+cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_event event, cl_mem buffer, struct _cl_mem_image* image,
                          const size_t src_offset, const size_t *dst_origin, const size_t *region) {
   cl_int ret;
   cl_kernel ker = NULL;
@@ -2037,7 +2098,8 @@ cl_mem_copy_buffer_to_image(cl_command_queue queue, cl_mem buffer, struct _cl_me
   cl_kernel_set_arg(ker, 7, sizeof(cl_int), &dst_origin[2]);
   cl_kernel_set_arg(ker, 8, sizeof(cl_int), &kn_src_offset);
 
-  ret = cl_command_queue_ND_range(queue, ker, 1, global_off, global_sz, local_sz);
+  ret = cl_command_queue_ND_range(queue, ker, event, 1, global_off,
+                                  global_off, global_sz, global_sz, local_sz, local_sz);
   cl_kernel_delete(ker);
 
   image->intel_fmt = intel_fmt;
@@ -2325,4 +2387,104 @@ error:
   cl_mem_delete(mem);
   mem = NULL;
   goto exit;
+}
+
+LOCAL cl_int
+cl_mem_record_map_mem(cl_mem mem, void *ptr, void **mem_ptr, size_t offset,
+                      size_t size, const size_t *origin, const size_t *region)
+{
+  // TODO: Need to add MT safe logic.
+
+  cl_int slot = -1;
+  int err = CL_SUCCESS;
+  size_t sub_offset = 0;
+
+  if(mem->type == CL_MEM_SUBBUFFER_TYPE) {
+    struct _cl_mem_buffer* buffer = (struct _cl_mem_buffer*)mem;
+    sub_offset = buffer->sub_offset;
+  }
+
+  ptr = (char*)ptr + offset + sub_offset;
+  if(mem->flags & CL_MEM_USE_HOST_PTR) {
+    assert(mem->host_ptr);
+    //only calc ptr here, will do memcpy in enqueue
+    *mem_ptr = (char *)mem->host_ptr + offset + sub_offset;
+  } else {
+    *mem_ptr = ptr;
+  }
+  /* Record the mapped address. */
+  if (!mem->mapped_ptr_sz) {
+    mem->mapped_ptr_sz = 16;
+    mem->mapped_ptr = (cl_mapped_ptr *)malloc(
+        sizeof(cl_mapped_ptr) * mem->mapped_ptr_sz);
+    if (!mem->mapped_ptr) {
+      cl_mem_unmap_auto(mem);
+      err = CL_OUT_OF_HOST_MEMORY;
+      goto error;
+    }
+    memset(mem->mapped_ptr, 0, mem->mapped_ptr_sz * sizeof(cl_mapped_ptr));
+    slot = 0;
+  } else {
+    int i = 0;
+    for (; i < mem->mapped_ptr_sz; i++) {
+      if (mem->mapped_ptr[i].ptr == NULL) {
+        slot = i;
+        break;
+      }
+    }
+    if (i == mem->mapped_ptr_sz) {
+      cl_mapped_ptr *new_ptr = (cl_mapped_ptr *)malloc(
+          sizeof(cl_mapped_ptr) * mem->mapped_ptr_sz * 2);
+      if (!new_ptr) {
+        cl_mem_unmap_auto(mem);
+        err = CL_OUT_OF_HOST_MEMORY;
+        goto error;
+      }
+      memset(new_ptr, 0, 2 * mem->mapped_ptr_sz * sizeof(cl_mapped_ptr));
+      memcpy(new_ptr, mem->mapped_ptr,
+          mem->mapped_ptr_sz * sizeof(cl_mapped_ptr));
+      slot = mem->mapped_ptr_sz;
+      mem->mapped_ptr_sz *= 2;
+      free(mem->mapped_ptr);
+      mem->mapped_ptr = new_ptr;
+    }
+  }
+  assert(slot != -1);
+  mem->mapped_ptr[slot].ptr = *mem_ptr;
+  mem->mapped_ptr[slot].v_ptr = ptr;
+  mem->mapped_ptr[slot].size = size;
+  if(origin) {
+    assert(region);
+    mem->mapped_ptr[slot].origin[0] = origin[0];
+    mem->mapped_ptr[slot].origin[1] = origin[1];
+    mem->mapped_ptr[slot].origin[2] = origin[2];
+    mem->mapped_ptr[slot].region[0] = region[0];
+    mem->mapped_ptr[slot].region[1] = region[1];
+    mem->mapped_ptr[slot].region[2] = region[2];
+  }
+  mem->map_ref++;
+error:
+  if (err != CL_SUCCESS)
+    *mem_ptr = NULL;
+  return err;
+}
+
+LOCAL cl_int
+cl_mem_set_destructor_callback(cl_mem memobj,
+                               void(CL_CALLBACK *pfn_notify)(cl_mem, void *), void *user_data)
+{
+  cl_mem_dstr_cb cb = cl_calloc(1, sizeof(_cl_mem_dstr_cb));
+  if (cb == NULL) {
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  memset(cb, 0, sizeof(_cl_mem_dstr_cb));
+  list_node_init(&cb->node);
+  cb->pfn_notify = pfn_notify;
+  cb->user_data = user_data;
+
+  CL_OBJECT_LOCK(memobj);
+  list_add(&memobj->dstr_cb_head, &cb->node);
+  CL_OBJECT_UNLOCK(memobj);
+  return CL_SUCCESS;
 }

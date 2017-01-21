@@ -54,6 +54,7 @@
 #include <stdint.h>
 #include "backend/gen7_instruction.hpp"
 #include "backend/gen8_instruction.hpp"
+#include "backend/gen9_instruction.hpp"
 
 /////////////////////////////////////////////////////////////////////////////
 // Gen EU defines
@@ -129,6 +130,7 @@ enum opcode {
   GEN_OPCODE_CMPN = 17,
   GEN_OPCODE_F32TO16 = 19,
   GEN_OPCODE_F16TO32 = 20,
+  GEN_OPCODE_BFREV = 23,
   GEN_OPCODE_JMPI = 32,
   GEN_OPCODE_BRD = 33,
   GEN_OPCODE_IF = 34,
@@ -147,6 +149,7 @@ enum opcode {
   GEN_OPCODE_WAIT = 48,
   GEN_OPCODE_SEND = 49,
   GEN_OPCODE_SENDC = 50,
+  GEN_OPCODE_SENDS = 51,
   GEN_OPCODE_MATH = 56,
   GEN_OPCODE_ADD = 64,
   GEN_OPCODE_MUL = 65,
@@ -357,6 +360,14 @@ enum GenMessageTarget {
 #define GEN75_P1_ATOMIC_COUNTER_4X2    12 //1100: Atomic Counter Operation 4X2
 #define GEN75_P1_TYPED_SURFACE_WRITE   13 //1101: Typed Surface Write
 
+#define GEN8_P1_BLOCK_READ_A64        20 //10100
+#define GEN8_P1_BLOCK_WRITE_A64       21 //10101
+#define GEN8_P1_BYTE_GATHER_A64       16 //10000
+#define GEN8_P1_UNTYPED_READ_A64      17 //10001
+#define GEN8_P1_UNTYPED_ATOMIC_A64    18 //10010
+#define GEN8_P1_UNTYPED_WRITE_A64     25 //11001
+#define GEN8_P1_BYTE_SCATTER_A64      26 //11010
+
 /* Data port data cache scratch messages*/
 #define GEN_SCRATCH_READ                  0
 #define GEN_SCRATCH_WRITE                 1
@@ -417,6 +428,7 @@ enum GenMessageTarget {
 #define GEN5_SAMPLER_MESSAGE_SAMPLE_LOD_COMPARE  6
 #define GEN5_SAMPLER_MESSAGE_SAMPLE_LD           7
 #define GEN5_SAMPLER_MESSAGE_SAMPLE_RESINFO      10
+#define GEN_SAMPLER_MESSAGE_CACHE_FLUSH          0x1f
 
 /* for GEN5 only */
 #define GEN_SAMPLER_SIMD_MODE_SIMD4X2                   0
@@ -549,6 +561,7 @@ union GenNativeInstruction
   };
   union Gen7NativeInstruction gen7_insn;
   union Gen8NativeInstruction gen8_insn;
+  union Gen9NativeInstruction gen9_insn;
 
   //Gen7 & Gen8 common field
   struct {

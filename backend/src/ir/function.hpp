@@ -170,8 +170,9 @@ namespace ir {
       LOCAL_POINTER     = 2, // __local
       VALUE             = 3, // int, float
       STRUCTURE         = 4, // struct foo
-      IMAGE             = 5,  // image*d_t
-      SAMPLER           = 6
+      IMAGE             = 5, // image*d_t
+      SAMPLER           = 6,
+      PIPE              = 7  // pipe
     };
 
     struct InfoFromLLVM { // All the info about passed by llvm, using -cl-kernel-arg-info
@@ -181,6 +182,7 @@ namespace ir {
       std::string accessQual;
       std::string typeQual;
       std::string argName; // My different from arg->getName()
+      uint32_t typeSize;
 
 
       // only llvm-3.6 or later has kernel_arg_base_type in metadata.
@@ -235,6 +237,9 @@ namespace ir {
                isImage2dT() || isImage2dArrayT() || isImage3dT();
       }
 
+      bool isPipeType() const {
+        return typeQual.compare("pipe") == 0;
+      }
     };
 
     /*! Create a function input argument */
@@ -551,6 +556,13 @@ namespace ir {
     }
     /*! Output the control flow graph to .dot file */
     void outputCFG();
+    uint32_t getOclVersion(void) const;
+    /*! Does it use device enqueue */
+    INLINE bool getUseDeviceEnqueue(void) const { return this->useDeviceEnqueue; }
+    /*! Change the device enqueue infor of the function */
+    INLINE bool setUseDeviceEnqueue(bool useDeviceEnqueue) {
+      return this->useDeviceEnqueue = useDeviceEnqueue;
+    }
   private:
     friend class Context;           //!< Can freely modify a function
     std::string name;               //!< Function name
@@ -578,6 +590,7 @@ namespace ir {
     std::string functionAttributes; //!< function attribute qualifiers combined.
     int32_t wgBroadcastSLM;         //!< Used for broadcast the workgroup value.
     int32_t tidMapSLM;              //!< Used to store the map between groupid and hw thread.
+    bool useDeviceEnqueue;          //!< Has device enqueue?
     GBE_CLASS(Function);            //!< Use custom allocator
   };
 

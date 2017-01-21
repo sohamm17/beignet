@@ -66,7 +66,7 @@ cl_program_delete(cl_program p)
     return;
 
   /* We are not done with it yet */
-  if ((ref = atomic_dec(&p->ref_n)) > 1) return;
+  if ((ref = CL_OBJECT_DEC_REF(p)) > 1) return;
 
   /* Destroy the sources and binary if still allocated */
   cl_program_release_sources(p);
@@ -83,17 +83,6 @@ cl_program_delete(cl_program p)
     p->build_log = NULL;
   }
 
-  /* Remove it from the list */
-  assert(p->ctx);
-  pthread_mutex_lock(&p->ctx->program_lock);
-    if (p->prev)
-      p->prev->next = p->next;
-    if (p->next)
-      p->next->prev = p->prev;
-    if (p->ctx->programs == p)
-      p->ctx->programs = p->next;
-  pthread_mutex_unlock(&p->ctx->program_lock);
-
 #ifdef HAS_CMRT
   if (p->cmrt_program != NULL)
     cmrt_destroy_program(p);
@@ -106,8 +95,12 @@ cl_program_delete(cl_program p)
     cl_free(p->ker);
   }
 
-  /* Program belongs to their parent context */
-  cl_context_delete(p->ctx);
+  if (p->global_data_ptr)
+    cl_buffer_unreference(p->global_data);
+  cl_free(p->global_data_ptr);
+
+  /* Remove it from the list */
+  cl_context_remove_program(p->ctx, p);
 
   /* Free the program as allocated by the compiler */
   if (p->opaque) {
@@ -120,7 +113,7 @@ cl_program_delete(cl_program p)
       interp_program_delete(p->opaque);
   }
 
-  p->magic = CL_MAGIC_DEAD_HEADER; /* For safety */
+  CL_OBJECT_DESTROY_BASE(p);
   cl_free(p);
 }
 
@@ -132,17 +125,15 @@ cl_program_new(cl_context ctx)
 
   /* Allocate the structure */
   TRY_ALLOC_NO_ERR (p, CALLOC(struct _cl_program));
-  SET_ICD(p->dispatch)
+  CL_OBJECT_INIT_BASE(p, CL_OBJECT_PROGRAM_MAGIC);
   p->build_status = CL_BUILD_NONE;
-  p->ref_n = 1;
-  p->magic = CL_MAGIC_PROGRAM_HEADER;
-  p->ctx = ctx;
   p->cmrt_program = NULL;
   p->build_log = calloc(BUILD_LOG_MAX_SIZE, sizeof(char));
   if (p->build_log)
     p->build_log_max_sz = BUILD_LOG_MAX_SIZE;
+
   /* The queue also belongs to its context */
-  cl_context_add_ref(ctx);
+  cl_context_add_program(ctx, p);
 
 exit:
   return p;
@@ -155,7 +146,7 @@ LOCAL void
 cl_program_add_ref(cl_program p)
 {
   assert(p);
-  atomic_inc(&p->ref_n);
+  CL_OBJECT_INC_REF(p);
 }
 
 static cl_int
@@ -217,6 +208,51 @@ LOCAL cl_bool headerCompare(const unsigned char *BufPtr, BINARY_HEADER_INDEX ind
 #define isGenBinary(BufPtr) headerCompare(BufPtr, BHI_GEN_BINARY)
 #define isCMRT(BufPtr)      headerCompare(BufPtr, BHI_CMRT)
 
+static cl_int get_program_global_data(cl_program prog) {
+//OpenCL 1.2 would never call this function, and OpenCL 2.0 alwasy HAS_BO_SET_SOFTPIN.
+#ifdef HAS_BO_SET_SOFTPIN
+  cl_buffer_mgr bufmgr = NULL;
+  bufmgr = cl_context_get_bufmgr(prog->ctx);
+  assert(bufmgr);
+  size_t const_size = interp_program_get_global_constant_size(prog->opaque);
+  if (const_size == 0) return CL_SUCCESS;
+
+  int page_size = getpagesize();
+  size_t alignedSz = ALIGN(const_size, page_size);
+  char * p = (char*)cl_aligned_malloc(alignedSz, page_size);
+  prog->global_data_ptr = p;
+  interp_program_get_global_constant_data(prog->opaque, (char*)p);
+
+  prog->global_data = cl_buffer_alloc_userptr(bufmgr, "program global data", p, alignedSz, 0);
+  cl_buffer_set_softpin_offset(prog->global_data, (size_t)p);
+  cl_buffer_set_bo_use_full_range(prog->global_data, 1);
+
+  uint32_t reloc_count = interp_program_get_global_reloc_count(prog->opaque);
+  if (reloc_count > 0) {
+    uint32_t x;
+    struct RelocEntry {int refOffset; int defOffset;};
+    char *temp = (char*) malloc(reloc_count *sizeof(int)*2);
+    interp_program_get_global_reloc_table(prog->opaque, temp);
+    for (x = 0; x < reloc_count; x++) {
+      int ref_offset = ((struct RelocEntry *)temp)[x].refOffset;
+      *(uint64_t*)&(p[ref_offset]) = ((struct RelocEntry *)temp)[x].defOffset + (uint64_t)p;
+    }
+    free(temp);
+  }
+#if 0
+  int x = 0;
+  for (x = 0; x < const_size; x++) {
+    printf("offset %d data: %x\n", x, (unsigned)p[x]);
+  }
+#endif
+#endif
+  return CL_SUCCESS;
+}
+
+LOCAL size_t cl_program_get_global_variable_size(cl_program prog) {
+  return interp_program_get_global_constant_size(prog->opaque);
+}
+
 LOCAL cl_program
 cl_program_create_from_binary(cl_context             ctx,
                               cl_uint                num_devices,
@@ -232,7 +268,7 @@ cl_program_create_from_binary(cl_context             ctx,
   assert(ctx);
   INVALID_DEVICE_IF (num_devices != 1);
   INVALID_DEVICE_IF (devices == NULL);
-  INVALID_DEVICE_IF (devices[0] != ctx->device);
+  INVALID_DEVICE_IF (devices[0] != ctx->devices[0]);
   INVALID_VALUE_IF (binaries == NULL);
   INVALID_VALUE_IF (lengths == NULL);
 
@@ -269,7 +305,7 @@ cl_program_create_from_binary(cl_context             ctx,
     TRY_ALLOC(typed_binary, cl_calloc(lengths[0]+1, sizeof(char)));
     memcpy(typed_binary+1, binaries[0], lengths[0]);
     *typed_binary = 1;
-    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->device_id, typed_binary, program->binary_sz+1);
+    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->devices[0]->device_id, typed_binary, program->binary_sz+1);
     cl_free(typed_binary);
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
@@ -287,7 +323,7 @@ cl_program_create_from_binary(cl_context             ctx,
       err= CL_INVALID_BINARY;
       goto error;
     }
-    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->device->device_id, program->binary, program->binary_sz);
+    program->opaque = compiler_program_new_from_llvm_binary(program->ctx->devices[0]->device_id, program->binary, program->binary_sz);
 
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
@@ -296,7 +332,7 @@ cl_program_create_from_binary(cl_context             ctx,
     program->source_type = FROM_LLVM;
   }
   else if (isGenBinary((unsigned char*)program->binary)) {
-    program->opaque = interp_program_new_from_binary(program->ctx->device->device_id, program->binary, program->binary_sz);
+    program->opaque = interp_program_new_from_binary(program->ctx->devices[0]->device_id, program->binary, program->binary_sz);
     if (UNLIKELY(program->opaque == NULL)) {
       err = CL_INVALID_PROGRAM;
       goto error;
@@ -338,7 +374,7 @@ cl_program_create_with_built_in_kernles(cl_context     ctx,
   assert(ctx);
   INVALID_DEVICE_IF (num_devices != 1);
   INVALID_DEVICE_IF (devices == NULL);
-  INVALID_DEVICE_IF (devices[0] != ctx->device);
+  INVALID_DEVICE_IF (devices[0] != ctx->devices[0]);
 
   cl_int binary_status = CL_SUCCESS;
   extern char cl_internal_built_in_kernel_str[];
@@ -346,7 +382,7 @@ cl_program_create_with_built_in_kernles(cl_context     ctx,
   char* p_built_in_kernel_str =cl_internal_built_in_kernel_str;
 
   ctx->built_in_prgs = cl_program_create_from_binary(ctx, 1,
-                                                          &ctx->device,
+                                                          &ctx->devices[0],
                                                           (size_t*)&cl_internal_built_in_kernel_str_size,
                                                           (const unsigned char **)&p_built_in_kernel_str,
                                                           &binary_status, &err);
@@ -372,12 +408,12 @@ cl_program_create_with_built_in_kernles(cl_context     ctx,
 
   kernel = strtok_r( local_kernel_names, delims , &saveptr);
   while( kernel != NULL ) {
-    matched_kernel = strstr(ctx->device->built_in_kernels, kernel);
+    matched_kernel = strstr(ctx->devices[0]->built_in_kernels, kernel);
     if(matched_kernel){
       for (i = 0; i < ctx->built_in_prgs->ker_n; ++i) {
         assert(ctx->built_in_prgs->ker[i]);
         const char *ker_name = cl_kernel_get_name(ctx->built_in_prgs->ker[i]);
-        if (strcmp(ker_name, kernel) == 0) {
+        if (ker_name != NULL && strcmp(ker_name, kernel) == 0) {
           break;
         }
       }
@@ -412,7 +448,7 @@ cl_program_create_from_llvm(cl_context ctx,
   assert(ctx);
   INVALID_DEVICE_IF (num_devices != 1);
   INVALID_DEVICE_IF (devices == NULL);
-  INVALID_DEVICE_IF (devices[0] != ctx->device);
+  INVALID_DEVICE_IF (devices[0] != ctx->devices[0]);
   INVALID_VALUE_IF (file_name == NULL);
 
   program = cl_program_new(ctx);
@@ -421,7 +457,7 @@ cl_program_create_from_llvm(cl_context ctx,
       goto error;
   }
 
-  program->opaque = compiler_program_new_from_llvm(ctx->device->device_id, file_name, NULL, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1, NULL);
+  program->opaque = compiler_program_new_from_llvm(ctx->devices[0]->device_id, file_name, NULL, NULL, NULL, program->build_log_max_sz, program->build_log, &program->build_log_sz, 1, NULL);
   if (UNLIKELY(program->opaque == NULL)) {
     err = CL_INVALID_PROGRAM;
     goto error;
@@ -503,7 +539,7 @@ static int check_cl_version_option(cl_program p, const char* options) {
   const char* s = NULL;
   int ver1 = 0;
   int ver2 = 0;
-  char version_str[64];
+  char version_str[64] = {0};
 
   if (options && (s = strstr(options, "-cl-std="))) {
 
@@ -518,7 +554,7 @@ static int check_cl_version_option(cl_program p, const char* options) {
 
     ver1 = (s[10] - '0') * 10 + (s[12] - '0');
 
-    if (cl_get_device_info(p->ctx->device, CL_DEVICE_OPENCL_C_VERSION, sizeof(version_str),
+    if (cl_get_device_info(p->ctx->devices[0], CL_DEVICE_OPENCL_C_VERSION, sizeof(version_str),
                                   version_str, NULL) != CL_SUCCESS)
       return 0;
 
@@ -541,7 +577,7 @@ cl_program_build(cl_program p, const char *options)
   int i = 0;
   int copyed = 0;
 
-  if (p->ref_n > 1) {
+  if (CL_OBJECT_GET_REF(p) > 1) {
     err = CL_INVALID_OPERATION;
     goto error;
   }
@@ -586,7 +622,7 @@ cl_program_build(cl_program p, const char *options)
       goto error;
     }
 
-    p->opaque = compiler_program_new_from_source(p->ctx->device->device_id, p->source, p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
+    p->opaque = compiler_program_new_from_source(p->ctx->devices[0]->device_id, p->source, p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
     if (UNLIKELY(p->opaque == NULL)) {
       if (p->build_log_sz > 0 && strstr(p->build_log, "error: error reading 'options'"))
         err = CL_INVALID_BUILD_OPTIONS;
@@ -614,7 +650,7 @@ cl_program_build(cl_program p, const char *options)
     /* Create all the kernels */
     TRY (cl_program_load_gen_program, p);
   } else if (p->source_type == FROM_BINARY && p->binary_type != CL_PROGRAM_BINARY_TYPE_EXECUTABLE) {
-    p->opaque = interp_program_new_from_binary(p->ctx->device->device_id, p->binary, p->binary_sz);
+    p->opaque = interp_program_new_from_binary(p->ctx->devices[0]->device_id, p->binary, p->binary_sz);
     if (UNLIKELY(p->opaque == NULL)) {
       err = CL_BUILD_PROGRAM_FAILURE;
       goto error;
@@ -638,6 +674,9 @@ cl_program_build(cl_program p, const char *options)
     memcpy(p->bin + copyed, interp_kernel_get_code(opaque), sz);
     copyed += sz;
   }
+  if ((err = get_program_global_data(p)) != CL_SUCCESS)
+    goto error;
+
   p->is_built = 1;
   p->build_status = CL_BUILD_SUCCESS;
   return CL_SUCCESS;
@@ -706,7 +745,7 @@ cl_program_link(cl_context            context,
     goto error;
   }
 
-  p->opaque = compiler_program_new_gen_program(context->device->device_id, NULL, NULL, NULL);
+  p->opaque = compiler_program_new_gen_program(context->devices[0]->device_id, NULL, NULL, NULL);
   for(i = 0; i < num_input_programs; i++) {
     // if program create with llvm binary, need deserilize first to get module.
     if(input_programs[i])
@@ -743,6 +782,10 @@ cl_program_link(cl_context            context,
     memcpy(p->bin + copyed, interp_kernel_get_code(opaque), sz);
     copyed += sz;
   }
+
+  if ((err = get_program_global_data(p)) != CL_SUCCESS)
+    goto error;
+
 done:
   if(p) p->is_built = 1;
   if(p) p->build_status = CL_BUILD_SUCCESS;
@@ -768,7 +811,7 @@ cl_program_compile(cl_program            p,
   cl_int err = CL_SUCCESS;
   int i = 0;
 
-  if (p->ref_n > 1) {
+  if (CL_OBJECT_GET_REF(p) > 1) {
     err = CL_INVALID_OPERATION;
     goto error;
   }
@@ -841,7 +884,7 @@ cl_program_compile(cl_program            p,
       }
     }
 
-    p->opaque = compiler_program_compile_from_source(p->ctx->device->device_id, p->source, temp_header_path,
+    p->opaque = compiler_program_compile_from_source(p->ctx->devices[0]->device_id, p->source, temp_header_path,
         p->build_log_max_sz, options, p->build_log, &p->build_log_sz);
 
     char rm_path[255]="rm ";
@@ -902,7 +945,7 @@ cl_program_create_kernel(cl_program p, const char *name, cl_int *errcode_ret)
   for (i = 0; i < p->ker_n; ++i) {
     assert(p->ker[i]);
     const char *ker_name = cl_kernel_get_name(p->ker[i]);
-    if (strcmp(ker_name, name) == 0) {
+    if (ker_name != NULL && strcmp(ker_name, name) == 0) {
       from = p->ker[i];
       break;
     }
@@ -961,10 +1004,13 @@ cl_program_get_kernel_names(cl_program p, size_t size, char *names, size_t *size
     return;
   }
 
-  ker_name = cl_kernel_get_name(p->ker[i]);
-  len = strlen(ker_name);
-  if(names) {
-    strncpy(names, cl_kernel_get_name(p->ker[0]), size - 1);
+  ker_name = cl_kernel_get_name(p->ker[0]);
+  if (ker_name != NULL)
+    len = strlen(ker_name);
+  else
+    len = 0;
+  if(names && ker_name) {
+    strncpy(names, ker_name, size - 1);
     names[size - 1] = '\0';
     if(size < len - 1) {
       if(size_ret) *size_ret = size;
@@ -972,12 +1018,15 @@ cl_program_get_kernel_names(cl_program p, size_t size, char *names, size_t *size
     }
     size = size - len - 1;  //sub \0
   }
-  if(size_ret) *size_ret = strlen(ker_name) + 1;  //add NULL
+  if(size_ret) *size_ret = len + 1;  //add NULL
 
   for (i = 1; i < p->ker_n; ++i) {
     ker_name = cl_kernel_get_name(p->ker[i]);
-    len = strlen(ker_name);
-    if(names) {
+    if (ker_name != NULL)
+      len = strlen(ker_name);
+    else
+      len = 0;
+    if(names && ker_name) {
       strncat(names, ";", size);
       if(size >= 1)
         strncat(names, ker_name, size - 1);

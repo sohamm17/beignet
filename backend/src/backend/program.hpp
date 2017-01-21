@@ -57,6 +57,7 @@ namespace gbe {
       std::string accessQual;
       std::string typeQual;
       std::string argName;
+      uint32_t typeSize;
     };
     ArgInfo info;
   };
@@ -125,6 +126,9 @@ namespace gbe {
     INLINE bool getUseSLM(void) const { return this->useSLM; }
     /*! get slm size for kernel local variable */
     INLINE uint32_t getSLMSize(void) const { return this->slmSize; }
+    /*! Return the OpenCL version */
+    INLINE void setOclVersion(uint32_t version) { this->oclVersion = version; }
+    INLINE uint32_t getOclVersion(void) const { return this->oclVersion; }
     /*! Set sampler set. */
     void setSamplerSet(ir::SamplerSet *from) {
       samplerSet = from;
@@ -228,6 +232,12 @@ namespace gbe {
     virtual uint32_t serializeToBin(std::ostream& outs);
     virtual uint32_t deserializeFromBin(std::istream& ins);
     virtual void printStatus(int indent, std::ostream& outs);
+    /*! Does kernel use device enqueue */
+    INLINE bool getUseDeviceEnqueue(void) const { return this->useDeviceEnqueue; }
+    /*! Change the device enqueue info of the function */
+    INLINE bool setUseDeviceEnqueue(bool useDeviceEnqueue) {
+      return this->useDeviceEnqueue = useDeviceEnqueue;
+    }
 
   protected:
     friend class Context;      //!< Owns the kernels
@@ -240,6 +250,7 @@ namespace gbe {
     uint32_t simdWidth;        //!< SIMD size for the kernel (lane number)
     uint32_t stackSize;        //!< Stack size (0 if unused)
     uint32_t scratchSize;      //!< Scratch memory size (may be 0 if unused)
+    uint32_t oclVersion;       //!< Opencl Version (120 for 1.2, 200 for 2.0)
     bool useSLM;               //!< SLM requires a special HW config
     uint32_t slmSize;          //!< slm size for kernel variable
     Context *ctx;              //!< Save context after compiler to alloc constant buffer curbe
@@ -249,6 +260,7 @@ namespace gbe {
     ir::ProfilingInfo *profilingInfo;  //!< Copy from the corresponding function.
     uint32_t compileWgSize[3]; //!< required work group size by kernel attribute.
     std::string functionAttributes; //!< function attribute qualifiers combined.
+    bool useDeviceEnqueue;          //!< Has device enqueue?
     GBE_CLASS(Kernel);         //!< Use custom allocators
   };
 
@@ -285,6 +297,12 @@ namespace gbe {
       }
       return kernel;
     }
+
+    const char *getDeviceEnqueueKernelName(uint32_t index) const {
+      if(index >= blockFuncs.size())
+        return NULL;
+      return blockFuncs[index].c_str();
+    }
     /*! Build a program from a ir::Unit */
     bool buildFromUnit(const ir::Unit &unit, std::string &error);
     /*! Buils a program from a LLVM source code */
@@ -296,6 +314,8 @@ namespace gbe {
     /*! Get the content of global constant arrays */
     void getGlobalConstantData(char *mem) const { constantSet->getData(mem); }
 
+    uint32_t getGlobalRelocCount(void) const { return relocTable->getCount(); }
+    void getGlobalRelocTable(char *p) const { relocTable->getData(p); }
     static const uint32_t magic_begin = TO_MAGIC('P', 'R', 'O', 'G');
     static const uint32_t magic_end = TO_MAGIC('G', 'O', 'R', 'P');
 
@@ -327,6 +347,10 @@ namespace gbe {
     map<std::string, Kernel*> kernels;
     /*! Global (constants) outside any kernel */
     ir::ConstantSet *constantSet;
+    /*! relocation table */
+    ir::RelocTable *relocTable;
+    /*! device enqueue functions */
+    vector<std::string> blockFuncs;
     /*! Use custom allocators */
     GBE_CLASS(Program);
   };

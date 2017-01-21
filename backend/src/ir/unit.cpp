@@ -30,6 +30,7 @@ namespace ir {
   Unit::Unit(PointerSize pointerSize) : pointerSize(pointerSize), valid(true) {
     profilingInfo = GBE_NEW(ProfilingInfo);
     inProfilingMode = false;
+    oclVersion = 120;
   }
   Unit::~Unit(void) {
     for (const auto &pair : functions) GBE_DELETE(pair.second);
@@ -50,12 +51,11 @@ namespace ir {
     functions[name] = fn;
     return fn;
   }
-  void Unit::newConstant(const char *data,
-                         const std::string &name,
+  void Unit::newConstant(const std::string &name,
                          uint32_t size,
                          uint32_t alignment)
   {
-    constantSet.append(data, name, size, alignment);
+    constantSet.append(name, size, alignment);
   }
 
   std::ostream &operator<< (std::ostream &out, const Unit &unit) {

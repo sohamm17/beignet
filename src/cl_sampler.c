@@ -71,44 +71,31 @@ int cl_set_sampler_arg_slot(cl_kernel k, int index, cl_sampler sampler)
 }
 
 LOCAL cl_sampler
-cl_sampler_new(cl_context ctx,
-               cl_bool normalized_coords,
-               cl_addressing_mode address,
-               cl_filter_mode filter,
-               cl_int *errcode_ret)
+cl_create_sampler(cl_context ctx, cl_bool normalized_coords, cl_addressing_mode address,
+                  cl_filter_mode filter, cl_int *errcode_ret)
 {
   cl_sampler sampler = NULL;
-  cl_int err = CL_SUCCESS;
 
   /* Allocate and inialize the structure itself */
-  TRY_ALLOC (sampler, CALLOC(struct _cl_sampler));
-  SET_ICD(sampler->dispatch)
-  sampler->ref_n = 1;
-  sampler->magic = CL_MAGIC_SAMPLER_HEADER;
+  sampler = cl_calloc(1, sizeof(_cl_sampler));
+  if (sampler == NULL) {
+    *errcode_ret = CL_OUT_OF_HOST_MEMORY;
+    return NULL;
+  }
+
+  CL_OBJECT_INIT_BASE(sampler, CL_OBJECT_SAMPLER_MAGIC);
   sampler->normalized_coords = normalized_coords;
   sampler->address = address;
   sampler->filter = filter;
 
   /* Append the sampler in the context sampler list */
-  pthread_mutex_lock(&ctx->sampler_lock);
-    sampler->next = ctx->samplers;
-    if (ctx->samplers != NULL)
-      ctx->samplers->prev = sampler;
-    ctx->samplers = sampler;
-  pthread_mutex_unlock(&ctx->sampler_lock);
-  sampler->ctx = ctx;
-  cl_context_add_ref(ctx);
+  cl_context_add_sampler(ctx, sampler);
 
+  // TODO: May move it to other place, it's not a common sampler logic.
   sampler->clkSamplerValue = cl_to_clk(normalized_coords, address, filter);
 
-exit:
-  if (errcode_ret)
-    *errcode_ret = err;
+  *errcode_ret = CL_SUCCESS;
   return sampler;
-error:
-  cl_sampler_delete(sampler);
-  sampler = NULL;
-  goto exit;
 }
 
 LOCAL void
@@ -116,20 +103,11 @@ cl_sampler_delete(cl_sampler sampler)
 {
   if (UNLIKELY(sampler == NULL))
     return;
-  if (atomic_dec(&sampler->ref_n) > 1)
+  if (CL_OBJECT_DEC_REF(sampler) > 1)
     return;
 
-  assert(sampler->ctx);
-  pthread_mutex_lock(&sampler->ctx->sampler_lock);
-    if (sampler->prev)
-      sampler->prev->next = sampler->next;
-    if (sampler->next)
-      sampler->next->prev = sampler->prev;
-    if (sampler->ctx->samplers == sampler)
-      sampler->ctx->samplers = sampler->next;
-  pthread_mutex_unlock(&sampler->ctx->sampler_lock);
-  cl_context_delete(sampler->ctx);
-
+  cl_context_remove_sampler(sampler->ctx, sampler);
+  CL_OBJECT_DESTROY_BASE(sampler);
   cl_free(sampler);
 }
 
@@ -137,6 +115,6 @@ LOCAL void
 cl_sampler_add_ref(cl_sampler sampler)
 {
   assert(sampler);
-  atomic_inc(&sampler->ref_n);
+  CL_OBJECT_INC_REF(sampler);
 }
 

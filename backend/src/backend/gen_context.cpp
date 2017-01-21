@@ -248,6 +248,23 @@ namespace gbe
       p->MOV(tmpReg_ud, GenRegister::immud(perLaneSize));
       p->curr.execWidth = this->simdWidth;
       p->MUL(stackptr, tmpReg_ud, stackptr); // (threadId * simdWidth + laneId)*perLaneSize
+      if (fn.getPointerFamily() == ir::FAMILY_QWORD) {
+        const GenRegister selStatckPtr2 = this->simdWidth == 8 ?
+          GenRegister::ul8grf(ir::ocl::stackptr) :
+          GenRegister::ul16grf(ir::ocl::stackptr);
+        const GenRegister stackptr2 = ra->genReg(selStatckPtr2);
+        int simdWidth = p->curr.execWidth;
+        if (simdWidth == 16) {
+          // we need do second quarter first, because the dst type is QW,
+          // while the src is DW. If we do first quater first, the 1st
+          // quarter's dst would contain the 2nd quarter's src.
+          p->curr.execWidth = 8;
+          p->curr.quarterControl = GEN_COMPRESSION_Q2;
+          p->MOV(GenRegister::Qn(stackptr2, 1), GenRegister::Qn(stackptr,1));
+        }
+        p->curr.quarterControl = GEN_COMPRESSION_Q1;
+        p->MOV(stackptr2, stackptr);
+      }
     p->pop();
   }
 
@@ -274,6 +291,7 @@ namespace gbe
       case SEL_OP_F16TO32: p->F16TO32(dst, src); break;
       case SEL_OP_F32TO16: p->F32TO16(dst, src); break;
       case SEL_OP_LOAD_INT64_IMM: p->LOAD_INT64_IMM(dst, src); break;
+      case SEL_OP_BFREV: p->BFREV(dst, src); break;
       case SEL_OP_CONVI64_TO_I:
        {
         p->MOV(dst, src.bottom_half());
@@ -719,7 +737,7 @@ namespace gbe
 
         p->curr.quarterControl = 1;
         p->ADD(a0, GenRegister::unpacked_uw(src1.nr+1, src1.subnr / typeSize(GEN_TYPE_UW)), baseReg);
-        p->MOV(GenRegister::offset(dst, 1, 0), indirect);
+        p->MOV(GenRegister::offset(dst, 0, 8 * typeSize(src0.type)), indirect);
       } else
         NOT_IMPLEMENTED;
     p->pop();
@@ -1817,9 +1835,10 @@ namespace gbe
     const GenRegister fenceDst = ra->genReg(insn.dst(0));
     uint32_t barrierType = insn.extra.barrierType;
     const GenRegister barrierId = ra->genReg(GenRegister::ud1grf(ir::ocl::barrierid));
+    bool imageFence = barrierType & ir::SYNC_IMAGE_FENCE;
 
-    if (barrierType == ir::syncGlobalBarrier) {
-      p->FENCE(fenceDst);
+    if (barrierType & ir::SYNC_GLOBAL_READ_FENCE) {
+      p->FENCE(fenceDst, imageFence);
       p->MOV(fenceDst, fenceDst);
     }
     p->push();
@@ -1837,11 +1856,15 @@ namespace gbe
       p->curr.predicate = GEN_PREDICATE_NONE;
       p->WAIT();
     p->pop();
+    if (imageFence) {
+      p->FLUSH_SAMPLERCACHE(fenceDst);
+      p->MOV(fenceDst, fenceDst);
+    }
   }
 
   void GenContext::emitFenceInstruction(const SelectionInstruction &insn) {
     const GenRegister dst = ra->genReg(insn.dst(0));
-    p->FENCE(dst);
+    p->FENCE(dst, false);
     p->MOV(dst, dst);
   }
 
@@ -1870,26 +1893,34 @@ namespace gbe
   }
 
   void GenContext::emitAtomicInstruction(const SelectionInstruction &insn) {
-    const GenRegister src = ra->genReg(insn.src(0));
+    const GenRegister addr = ra->genReg(insn.src(0));
     const GenRegister dst = ra->genReg(insn.dst(0));
     const uint32_t function = insn.extra.function;
     unsigned srcNum = insn.extra.elem;
 
+    GenRegister data = addr;
+    if (srcNum > 1)
+      data = ra->genReg(insn.src(1));
+
     const GenRegister bti = ra->genReg(insn.src(srcNum));
 
     if (bti.file == GEN_IMMEDIATE_VALUE) {
-      p->ATOMIC(dst, function, src, bti, srcNum);
+      p->ATOMIC(dst, function, addr, data, bti, srcNum, insn.extra.splitSend);
     } else {
       GenRegister flagTemp = ra->genReg(insn.dst(1));
       GenRegister btiTmp = ra->genReg(insn.dst(2));
 
-      unsigned desc = p->generateAtomicMessageDesc(function, 0, srcNum);
+      unsigned desc = 0;
+      if (insn.extra.splitSend)
+        desc = p->generateAtomicMessageDesc(function, 0, 1);
+      else
+        desc = p->generateAtomicMessageDesc(function, 0, srcNum);
 
       unsigned jip0 = beforeMessage(insn, bti, flagTemp, btiTmp, desc);
       p->push();
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
-        p->ATOMIC(dst, function, src, GenRegister::addr1(0), srcNum);
+        p->ATOMIC(dst, function, addr, data, GenRegister::addr1(0), srcNum, insn.extra.splitSend);
       p->pop();
       afterMessage(insn, bti, flagTemp, btiTmp, jip0);
     }
@@ -1986,10 +2017,10 @@ namespace gbe
     else { //size == 8
       payload.type = GEN_TYPE_UD;
       GBE_ASSERT(payload.hstride == GEN_HORIZONTAL_STRIDE_1);
-      loadBottomHalf(payload, src);
+      loadBottomHalf(payload, src.isdf()? GenRegister::retype(src, GEN_TYPE_UL) : src );
       uint32_t regNum = (regSize/2*simdWidth) > 32 ? 2 : 1;
       this->scratchWrite(msg, scratchOffset, regNum, GEN_TYPE_UD, GEN_SCRATCH_CHANNEL_MODE_DWORD);
-      loadTopHalf(payload, src);
+      loadTopHalf(payload, src.isdf() ? GenRegister::retype(src, GEN_TYPE_UL) : src);
       this->scratchWrite(msg, scratchOffset + 4*simdWidth, regNum, GEN_TYPE_UD, GEN_SCRATCH_CHANNEL_MODE_DWORD);
     }
     p->pop();
@@ -2016,9 +2047,9 @@ namespace gbe
     } else {
       uint32_t regNum = (regSize/2*simdWidth) > 32 ? 2 : 1;
       this->scratchRead(payload, msg, scratchOffset, regNum, GEN_TYPE_UD, GEN_SCRATCH_CHANNEL_MODE_DWORD);
-      storeBottomHalf(dst, payload);
+      storeBottomHalf(GenRegister::ul8grf(dst.nr, dst.subnr), payload);
       this->scratchRead(payload, msg, scratchOffset + 4*simdWidth, regNum, GEN_TYPE_UD, GEN_SCRATCH_CHANNEL_MODE_DWORD);
-      storeTopHalf(dst, payload);
+      storeTopHalf(GenRegister::ul8grf(dst.nr, dst.subnr), payload);
     }
     p->pop();
   }
@@ -2032,8 +2063,8 @@ namespace gbe
     if (bti.file == GEN_IMMEDIATE_VALUE) {
       p->UNTYPED_READ(dst, src, bti, elemNum);
     } else {
-      const GenRegister tmp = ra->genReg(insn.dst(elemNum));
-      const GenRegister btiTmp = ra->genReg(insn.dst(elemNum + 1));
+      const GenRegister tmp = ra->genReg(insn.dst(insn.extra.elem));
+      const GenRegister btiTmp = ra->genReg(insn.dst(insn.extra.elem + 1));
       unsigned desc = p->generateUntypedReadMessageDesc(0, elemNum);
 
       unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
@@ -2123,7 +2154,7 @@ namespace gbe
     const GenRegister bti = ra->genReg(insn.src(elemNum+1));
 
     if (bti.file == GEN_IMMEDIATE_VALUE) {
-      p->UNTYPED_WRITE(src, bti, elemNum*2);
+      p->UNTYPED_WRITE(src, src, bti, elemNum*2, false);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
       const GenRegister btiTmp = ra->genReg(insn.dst(1));
@@ -2135,22 +2166,27 @@ namespace gbe
       p->push();
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
-        p->UNTYPED_WRITE(src, GenRegister::addr1(0), elemNum*2);
+        p->UNTYPED_WRITE(src, src, GenRegister::addr1(0), elemNum*2, false);
       p->pop();
       afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
   }
 
   void GenContext::emitUntypedWriteInstruction(const SelectionInstruction &insn) {
-    const GenRegister src = ra->genReg(insn.src(0));
+    const GenRegister addr = ra->genReg(insn.src(0));
+    GenRegister data = ra->genReg(insn.src(1));
     const uint32_t elemNum = insn.extra.elem;
     const GenRegister bti = ra->genReg(insn.src(elemNum+1));
     if (bti.file == GEN_IMMEDIATE_VALUE) {
-      p->UNTYPED_WRITE(src, bti, elemNum);
+      p->UNTYPED_WRITE(addr, data, bti, elemNum, insn.extra.splitSend);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
       const GenRegister btiTmp = ra->genReg(insn.dst(1));
-      unsigned desc = p->generateUntypedWriteMessageDesc(0, elemNum);
+      unsigned desc = 0;
+      if (insn.extra.splitSend)
+        desc = p->generateUntypedWriteSendsMessageDesc(0, elemNum);
+      else
+        desc = p->generateUntypedWriteMessageDesc(0, elemNum);
 
       unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
@@ -2158,7 +2194,7 @@ namespace gbe
       p->push();
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
-        p->UNTYPED_WRITE(src, GenRegister::addr1(0), elemNum);
+        p->UNTYPED_WRITE(addr, data, GenRegister::addr1(0), elemNum, insn.extra.splitSend);
       p->pop();
       afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
@@ -2190,16 +2226,21 @@ namespace gbe
   }
 
   void GenContext::emitByteScatterInstruction(const SelectionInstruction &insn) {
-    const GenRegister src = ra->genReg(insn.src(0));
+    const GenRegister addr = ra->genReg(insn.src(0));
+    GenRegister data = ra->genReg(insn.src(1));
     const uint32_t elemSize = insn.extra.elem;
     const GenRegister bti = ra->genReg(insn.src(2));
 
     if (bti.file == GEN_IMMEDIATE_VALUE) {
-      p->BYTE_SCATTER(src, bti, elemSize);
+      p->BYTE_SCATTER(addr, data, bti, elemSize, insn.extra.splitSend);
     } else {
       const GenRegister tmp = ra->genReg(insn.dst(0));
       const GenRegister btiTmp = ra->genReg(insn.dst(1));
-      unsigned desc = p->generateByteScatterMessageDesc(0, elemSize);
+      unsigned desc = 0;
+      if (insn.extra.splitSend)
+        desc = p->generateByteScatterSendsMessageDesc(0, elemSize);
+      else
+        desc = p->generateByteScatterMessageDesc(0, elemSize);
 
       unsigned jip0 = beforeMessage(insn, bti, tmp, btiTmp, desc);
 
@@ -2207,11 +2248,36 @@ namespace gbe
       p->push();
         p->curr.predicate = GEN_PREDICATE_NORMAL;
         p->curr.useFlag(insn.state.flag, insn.state.subFlag);
-        p->BYTE_SCATTER(src, GenRegister::addr1(0), elemSize);
+        p->BYTE_SCATTER(addr, data, GenRegister::addr1(0), elemSize, insn.extra.splitSend);
       p->pop();
       afterMessage(insn, bti, tmp, btiTmp, jip0);
     }
 
+  }
+
+  void GenContext::emitUntypedReadA64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+
+  void GenContext::emitUntypedWriteA64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+
+  void GenContext::emitByteGatherA64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+
+  void GenContext::emitByteScatterA64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+  void GenContext::emitRead64A64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+  void GenContext::emitWrite64A64Instruction(const SelectionInstruction &insn) {
+    assert(0);
+  }
+  void GenContext::emitAtomicA64Instruction(const SelectionInstruction &insn) {
+    assert(0);
   }
 
   void GenContext::emitUnpackByteInstruction(const SelectionInstruction &insn) {
@@ -2399,8 +2465,9 @@ namespace gbe
 
   void GenContext::emitTypedWriteInstruction(const SelectionInstruction &insn) {
     const GenRegister header = GenRegister::retype(ra->genReg(insn.src(0)), GEN_TYPE_UD);
+    GenRegister data = ra->genReg(insn.src(5));
     const uint32_t bti = insn.getbti();
-    p->TYPED_WRITE(header, true, bti);
+    p->TYPED_WRITE(header, data, true, bti, insn.extra.typedWriteSplitSend);
   }
 
   static void calcGID(GenRegister& reg, GenRegister& tmp, int flag, int subFlag, int dim, GenContext *gc)
@@ -2587,6 +2654,7 @@ namespace gbe
     uint32_t tsType = insn.extra.timestampType;
     GenRegister flagReg = GenRegister::flag(insn.state.flag, insn.state.subFlag);
 
+    (void) tsType;
     GBE_ASSERT(tsType == 1);
     GenRegister tmArf = GenRegister::tm0();
     GenRegister profilingReg[5];
@@ -2712,6 +2780,7 @@ namespace gbe
     GenRegister tmp = ra->genReg(insn.dst(0));
     uint32_t profilingType = insn.extra.profilingType;
     uint32_t bti = insn.extra.profilingBTI;
+    (void) profilingType;
     GBE_ASSERT(profilingType == 1);
     GenRegister flagReg = GenRegister::flag(insn.state.flag, insn.state.subFlag);
     GenRegister lastTsReg = GenRegister::toUniform(profilingReg[3], GEN_TYPE_UL);
@@ -2775,7 +2844,7 @@ namespace gbe
       p->pop();
       p->curr.useFlag(insn.state.flag, insn.state.subFlag);
       p->curr.predicate = GEN_PREDICATE_NORMAL;
-      p->ATOMIC(incRes, GEN_ATOMIC_OP_INC, sndMsg, GenRegister::immud(bti), 1);
+      p->ATOMIC(incRes, GEN_ATOMIC_OP_INC, sndMsg, sndMsg, GenRegister::immud(bti), 1, false);
     } p->pop();
 
     // Calculate the final addr
@@ -2833,14 +2902,14 @@ namespace gbe
       // Write it out.
       p->curr.execWidth = 8;
       p->curr.noMask = 1;
-      p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+      p->UNTYPED_WRITE(addr, addr, GenRegister::immud(bti), 1, false);
       p->ADD(addr, addr, GenRegister::immud(32));
 
       // time stamps
       for (int i = 0; i < 3; i++) {
         p->curr.execWidth = 8;
         p->MOV(data, GenRegister::retype(profilingReg[i], GEN_TYPE_UD));
-        p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+        p->UNTYPED_WRITE(addr, addr, GenRegister::immud(bti), 1, false);
         p->ADD(addr, addr, GenRegister::immud(32));
       }
     } p->pop();
@@ -2878,6 +2947,10 @@ namespace gbe
         p->MOV(dataReg, GenRegister::immint64(0x0));
       else if (dataReg.type == GEN_TYPE_UL)
         p->MOV(dataReg, GenRegister::immuint64(0x0));
+      else if (dataReg.type == GEN_TYPE_W)
+        p->MOV(dataReg, GenRegister::immw(0x0));
+      else if (dataReg.type == GEN_TYPE_UW)
+        p->MOV(dataReg, GenRegister::immuw(0x0));
       else
         GBE_ASSERT(0); /* unsupported data-type */
     }
@@ -2896,6 +2969,10 @@ namespace gbe
         p->MOV(dataReg, GenRegister::immint64(0x7FFFFFFFFFFFFFFFL));
       else if (dataReg.type == GEN_TYPE_UL)
         p->MOV(dataReg, GenRegister::immuint64(0xFFFFFFFFFFFFFFFFL));
+      else if (dataReg.type == GEN_TYPE_W)
+        p->MOV(dataReg, GenRegister::immw(0x7FFF));
+      else if (dataReg.type == GEN_TYPE_UW)
+        p->MOV(dataReg, GenRegister::immuw(0xFFFF));
       else
         GBE_ASSERT(0); /* unsupported data-type */
     }
@@ -2914,6 +2991,10 @@ namespace gbe
         p->MOV(dataReg, GenRegister::immint64(0x8000000000000000L));
       else if (dataReg.type == GEN_TYPE_UL)
         p->MOV(dataReg, GenRegister::immuint64(0x0));
+      else if (dataReg.type == GEN_TYPE_W)
+        p->MOV(dataReg, GenRegister::immw(0x8000));
+      else if (dataReg.type == GEN_TYPE_UW)
+        p->MOV(dataReg, GenRegister::immuw(0x0));
       else
         GBE_ASSERT(0); /* unsupported data-type */
     }
@@ -3173,7 +3254,7 @@ namespace gbe
     GenRegister barrierId = ra->genReg(GenRegister::ud1grf(ir::ocl::barrierid));
     GenRegister localBarrier = ra->genReg(insn.src(5));
 
-    uint32_t wg_op = insn.extra.workgroupOp;
+    uint32_t wg_op = insn.extra.wgop.workgroupOp;
     uint32_t simd = p->curr.execWidth;
     int32_t jip0, jip1;
 
@@ -3192,8 +3273,8 @@ namespace gbe
     /* use of continuous GRF allocation from insn selection */
     GenRegister msg = GenRegister::retype(ra->genReg(insn.dst(2)), dst.type);
     GenRegister msgSlmOff = GenRegister::retype(ra->genReg(insn.src(4)), GEN_TYPE_UD);
-    GenRegister msgAddr = GenRegister::retype(GenRegister::offset(msg, 0), GEN_TYPE_UD);
-    GenRegister msgData = GenRegister::retype(GenRegister::offset(msg, 1), dst.type);
+    GenRegister msgAddr = GenRegister::retype(msg, GEN_TYPE_UD);
+    GenRegister msgData = GenRegister::retype(ra->genReg(insn.dst(3)), dst.type);
 
     /* do some calculation within each thread */
     wgOpPerformThread(dst, theVal, threadData, tmp, simd, wg_op, p);
@@ -3228,13 +3309,15 @@ namespace gbe
     {
       GenRegister threadDataL = GenRegister::retype(threadData, GEN_TYPE_D);
       GenRegister threadDataH = threadDataL.offset(threadDataL, 0, 4);
-      p->MOV(msgData.offset(msgData, 0), threadDataL);
-      p->MOV(msgData.offset(msgData, 1), threadDataH);
-
+      GenRegister msgDataL = GenRegister::retype(msgData, GEN_TYPE_D);
+      GenRegister msgDataH = msgDataL.offset(msgDataL, 1);
       p->curr.execWidth = 8;
+      p->MOV(msgDataL, threadDataL);
+      p->MOV(msgDataH, threadDataH);
+
       p->MUL(msgAddr, threadId, GenRegister::immd(0x8));
       p->ADD(msgAddr, msgAddr, msgSlmOff);
-      p->UNTYPED_WRITE(msg, GenRegister::immw(0xFE), 2);
+      p->UNTYPED_WRITE(msg, msg, GenRegister::immw(0xFE), 2, false);
     }
     else
     {
@@ -3242,7 +3325,7 @@ namespace gbe
       p->MOV(msgData, threadData);
       p->MUL(msgAddr, threadId, GenRegister::immd(0x4));
       p->ADD(msgAddr, msgAddr, msgSlmOff);
-      p->UNTYPED_WRITE(msg, GenRegister::immw(0xFE), 1);
+      p->UNTYPED_WRITE(msg, msg, GenRegister::immw(0xFE), 1, false);
     }
 
     /* init partialData register, it will hold the final result */
@@ -3327,30 +3410,38 @@ namespace gbe
       else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MIN
         || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MIN)
       {
-        p->SEL_CMP(GEN_CONDITIONAL_LE, dst, dst, partialData);
         /* workaround QW datatype on CMP */
         if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L){
-            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 1, 0),
-                       dst.offset(dst, 1, 0), partialData);
-            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 2, 0),
-                       dst.offset(dst, 2, 0), partialData);
-            p->SEL_CMP(GEN_CONDITIONAL_LE, dst.offset(dst, 3, 0),
-                       dst.offset(dst, 3, 0), partialData);
-        }
+          p->push();
+            p->curr.execWidth = 8;
+            p->SEL_CMP(GEN_CONDITIONAL_LE, dst, dst, partialData);
+            if (simd == 16) {
+              p->curr.execWidth = 8;
+              p->curr.quarterControl = GEN_COMPRESSION_Q2;
+              p->SEL_CMP(GEN_CONDITIONAL_LE, GenRegister::Qn(dst, 1),
+                         GenRegister::Qn(dst, 1), GenRegister::Qn(partialData, 1));
+            }
+          p->pop();
+        } else
+          p->SEL_CMP(GEN_CONDITIONAL_LE, dst, dst, partialData);
       }
       else if(wg_op == ir::WORKGROUP_OP_INCLUSIVE_MAX
         || wg_op == ir::WORKGROUP_OP_EXCLUSIVE_MAX)
       {
-        p->SEL_CMP(GEN_CONDITIONAL_GE, dst, dst, partialData);
         /* workaround QW datatype on CMP */
         if(dst.type == GEN_TYPE_UL || dst.type == GEN_TYPE_L){
-            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 1, 0),
-                       dst.offset(dst, 1, 0), partialData);
-            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 2, 0),
-                       dst.offset(dst, 2, 0), partialData);
-            p->SEL_CMP(GEN_CONDITIONAL_GE, dst.offset(dst, 3, 0),
-                       dst.offset(dst, 3, 0), partialData);
-        }
+          p->push();
+            p->curr.execWidth = 8;
+            p->SEL_CMP(GEN_CONDITIONAL_GE, dst, dst, partialData);
+            if (simd == 16) {
+              p->curr.execWidth = 8;
+              p->curr.quarterControl = GEN_COMPRESSION_Q2;
+              p->SEL_CMP(GEN_CONDITIONAL_GE, GenRegister::Qn(dst, 1),
+                         GenRegister::Qn(dst, 1), GenRegister::Qn(partialData, 1));
+            }
+          p->pop();
+        } else
+          p->SEL_CMP(GEN_CONDITIONAL_GE, dst, dst, partialData);
       }
     }
 
@@ -3380,7 +3471,7 @@ namespace gbe
     const GenRegister theVal = GenRegister::retype(ra->genReg(insn.src(0)), dst.type);
     GenRegister threadData = ra->genReg(insn.src(1));
 
-    uint32_t wg_op = insn.extra.workgroupOp;
+    uint32_t wg_op = insn.extra.wgop.workgroupOp;
     uint32_t simd = p->curr.execWidth;
 
     /* masked elements should be properly set to init value */
@@ -3398,27 +3489,25 @@ namespace gbe
   }
 
   void GenContext::emitPrintfLongInstruction(GenRegister& addr, GenRegister& data,
-                                             GenRegister& src, uint32_t bti) {
+                                             GenRegister& src, uint32_t bti, bool useSends) {
     p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src.bottom_half());
-    p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+    p->UNTYPED_WRITE(addr, data, GenRegister::immud(bti), 1, useSends);
     p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
 
     p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src.top_half(this->simdWidth));
-    p->UNTYPED_WRITE(addr, GenRegister::immud(bti), 1);
+    p->UNTYPED_WRITE(addr, data, GenRegister::immud(bti), 1, useSends);
     p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
   }
 
   void GenContext::emitPrintfInstruction(const SelectionInstruction &insn) {
-    const GenRegister dst = ra->genReg(insn.dst(0));
-    const GenRegister tmp0 = ra->genReg(insn.dst(1));
-    const GenRegister tmp1 = ra->genReg(insn.dst(2));
+    const GenRegister tmp0 = ra->genReg(insn.dst(0));
+    const GenRegister tmp1 = ra->genReg(insn.dst(1));
     GenRegister src;
     uint32_t srcNum = insn.srcNum;
-    if (insn.extra.continueFlag)
-      srcNum--;
 
     GenRegister addr = GenRegister::retype(tmp0, GEN_TYPE_UD);
     GenRegister data = GenRegister::retype(tmp1, GEN_TYPE_UD);
+    bool useSends = insn.extra.printfSplitSend;
 
     if (!insn.extra.continueFlag) {
       p->push(); {
@@ -3429,18 +3518,18 @@ namespace gbe
         p->MOV(data, GenRegister::immud(insn.extra.printfSize + 12));
       } p->pop();
 
-      p->ATOMIC(addr, GEN_ATOMIC_OP_ADD, addr, GenRegister::immud(insn.extra.printfBTI), 2);
+      p->ATOMIC(addr, GEN_ATOMIC_OP_ADD, addr, data, GenRegister::immud(insn.extra.printfBTI), 2, useSends);
       /* Write out the header. */
       p->MOV(data, GenRegister::immud(0xAABBCCDD));
-      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+      p->UNTYPED_WRITE(addr, data, GenRegister::immud(insn.extra.printfBTI), 1, useSends);
 
       p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
       p->MOV(data, GenRegister::immud(insn.extra.printfSize + 12));
-      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+      p->UNTYPED_WRITE(addr, data, GenRegister::immud(insn.extra.printfBTI), 1, useSends);
 
       p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
       p->MOV(data, GenRegister::immud(insn.extra.printfNum));
-      p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+      p->UNTYPED_WRITE(addr, data, GenRegister::immud(insn.extra.printfBTI), 1, useSends);
 
       p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
     }
@@ -3450,24 +3539,15 @@ namespace gbe
       src = ra->genReg(insn.src(i));
       if (src.type == GEN_TYPE_UD || src.type == GEN_TYPE_D || src.type == GEN_TYPE_F) {
         p->MOV(GenRegister::retype(data, src.type), src);
-        p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+        p->UNTYPED_WRITE(addr, data, GenRegister::immud(insn.extra.printfBTI), 1, useSends);
         p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
       } else if (src.type == GEN_TYPE_B || src.type == GEN_TYPE_UB ) {
         p->MOV(GenRegister::retype(data, GEN_TYPE_UD), src);
-        p->UNTYPED_WRITE(addr, GenRegister::immud(insn.extra.printfBTI), 1);
+        p->UNTYPED_WRITE(addr, data, GenRegister::immud(insn.extra.printfBTI), 1, useSends);
         p->ADD(addr, addr, GenRegister::immud(sizeof(uint32_t)));
       } else if (src.type == GEN_TYPE_L || src.type == GEN_TYPE_UL ) {
-        emitPrintfLongInstruction(addr, data, src, insn.extra.printfBTI);
+        emitPrintfLongInstruction(addr, data, src, insn.extra.printfBTI, useSends);
       }
-    }
-
-    if (dst.hstride == GEN_HORIZONTAL_STRIDE_0) {
-      p->push();
-      p->curr.execWidth = 1;
-    }
-    p->MOV(dst, GenRegister::immd(0));
-    if (dst.hstride == GEN_HORIZONTAL_STRIDE_0) {
-      p->pop();
     }
   }
 
@@ -3489,323 +3569,41 @@ namespace gbe
   }
 
   void GenContext::emitOBReadInstruction(const SelectionInstruction &insn) {
-    const GenRegister dst= GenRegister::retype(ra->genReg(insn.dst(1)), GEN_TYPE_UD);
-    const GenRegister addr = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_UD);
-    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
-    const GenRegister headeraddr = GenRegister::offset(header, 0, 2*4);
-    const uint32_t vec_size = insn.extra.elem;
-    const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(1 + vec_size)), GEN_TYPE_UD);
-    const uint32_t simdWidth = p->curr.execWidth;
-
-    // Make header
-    p->push();
-    {
-      // Copy r0 into the header first
-      p->curr.execWidth = 8;
-      p->curr.predicate = GEN_PREDICATE_NONE;
-      p->curr.noMask = 1;
-      p->MOV(header, GenRegister::ud8grf(0, 0));
-
-      // Update the header with the current address
-      p->curr.execWidth = 1;
-      p->MOV(headeraddr, addr);
-
-      // Put zero in the general state base address
-      p->MOV(GenRegister::offset(header, 0, 5 * 4), GenRegister::immud(0));
-    }
-    p->pop();
-    // Now read the data, oword block read can only work with simd16 and no mask
-    if (vec_size == 1) {
-      p->push();
-      {
-        p->curr.execWidth = 16;
-        p->curr.noMask = 1;
-        p->OBREAD(dst, header, insn.getbti(), simdWidth / 4);
-      }
-      p->pop();
-    } else if (vec_size == 2) {
-      p->push();
-      {
-        p->curr.execWidth = 16;
-        p->curr.noMask = 1;
-        p->OBREAD(tmp, header, insn.getbti(), simdWidth / 2);
-      }
-      p->pop();
-      p->MOV(ra->genReg(insn.dst(1)), GenRegister::offset(tmp, 0));
-      p->MOV(ra->genReg(insn.dst(2)), GenRegister::offset(tmp, simdWidth / 8));
-    } else if (vec_size == 4 || vec_size == 8) {
-      if (simdWidth == 8) {
-        for (uint32_t i = 0; i < vec_size / 4; i++) {
-          if (i > 0) {
-            p->push();
-            {
-              // Update the address in header
-              p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(128));
-            }
-            p->pop();
-          }
-          p->push();
-          {
-            p->curr.execWidth = 16;
-            p->curr.noMask = 1;
-            p->OBREAD(tmp, header, insn.getbti(), 8);
-          }
-          p->pop();
-          for (uint32_t j = 0; j < 4; j++)
-            p->MOV(ra->genReg(insn.dst(1 + j + i * 4)), GenRegister::offset(tmp, j));
-        }
-      } else {
-        for (uint32_t i = 0; i < vec_size / 2; i++) {
-          if (i > 0) {
-            p->push();
-            {
-              // Update the address in header
-              p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(128));
-            }
-            p->pop();
-          }
-          p->OBREAD(tmp, header, insn.getbti(), 8);
-          for (uint32_t j = 0; j < 2; j++)
-            p->MOV(ra->genReg(insn.dst(1 + j + i * 2)), GenRegister::offset(tmp, j*2));
-        }
-      }
-    } else NOT_SUPPORTED;
+    const GenRegister header = ra->genReg(insn.src(0));
+    const GenRegister tmp = ra->genReg(insn.dst(0));
+    const uint32_t bti = insn.getbti();
+    const uint32_t ow_size = insn.extra.elem;
+    bool isA64 = bti == 255;
+    if (isA64)
+       p->OBREADA64(tmp, header, bti, ow_size);
+    else
+       p->OBREAD(tmp, header, bti, ow_size);
   }
 
   void GenContext::emitOBWriteInstruction(const SelectionInstruction &insn) {
-    const GenRegister addr = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_UD);
-    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
-    const GenRegister headeraddr = GenRegister::offset(header, 0, 2*4);
-    const uint32_t vec_size = insn.extra.elem;
-    const GenRegister tmp = GenRegister::offset(header, 1);
-    const uint32_t simdWidth = p->curr.execWidth;
-    uint32_t tmp_size = simdWidth * vec_size / 8;
-    tmp_size = tmp_size > 4 ? 4 : tmp_size;
-
-    p->push();
-      // Copy r0 into the header first
-      p->curr.execWidth = 8;
-      p->curr.predicate = GEN_PREDICATE_NONE;
-      p->curr.noMask = 1;
-      p->MOV(header, GenRegister::ud8grf(0,0));
-
-      // Update the header with the current address
-      p->curr.execWidth = 1;
-      p->SHR(headeraddr, addr, GenRegister::immud(4));
-
-      // Put zero in the general state base address
-      p->MOV(GenRegister::offset(header, 0, 5*4), GenRegister::immud(0));
-
-    p->pop();
-    // Now write the data, oword block write can only work with simd16 and no mask
-    if (vec_size == 1) {
-      p->MOV(tmp, ra->genReg(insn.src(1)));
-      p->push();
-      {
-        p->curr.execWidth = 16;
-        p->curr.noMask = 1;
-        p->OBWRITE(header, insn.getbti(), simdWidth / 4);
-      }
-      p->pop();
-    } else if (vec_size == 2) {
-      p->MOV(GenRegister::offset(tmp, 0), ra->genReg(insn.src(1))) ;
-      p->MOV(GenRegister::offset(tmp, simdWidth / 8), ra->genReg(insn.src(2))) ;
-      p->push();
-      {
-        p->curr.execWidth = 16;
-        p->curr.noMask = 1;
-        p->OBWRITE(header, insn.getbti(), simdWidth / 2);
-      }
-      p->pop();
-    } else if (vec_size == 4 || vec_size == 8) {
-      if (simdWidth == 8) {
-        for (uint32_t i = 0; i < vec_size / 4; i++) {
-          for (uint32_t j = 0; j < 4; j++)
-            p->MOV(GenRegister::offset(tmp, j), ra->genReg(insn.src(1 + j + i*4))) ;
-          if (i > 0) {
-            p->push();
-            {
-              // Update the address in header
-              p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
-            }
-            p->pop();
-          }
-          p->push();
-          {
-            p->curr.execWidth = 16;
-            p->curr.noMask = 1;
-            p->OBWRITE(header, insn.getbti(), 8);
-          }
-          p->pop();
-        }
-      } else {
-        for (uint32_t i = 0; i < vec_size / 2; i++) {
-          for (uint32_t j = 0; j < 2; j++)
-            p->MOV(GenRegister::offset(tmp, j * 2), ra->genReg(insn.src(1 + j + i*2))) ;
-          if (i > 0) {
-            p->push();
-            {
-              // Update the address in header
-              p->curr.execWidth = 1;
-              p->ADD(headeraddr, headeraddr, GenRegister::immud(8));
-            }
-            p->pop();
-          }
-          p->OBWRITE(header, insn.getbti(), 8);
-        }
-      }
-    } else NOT_SUPPORTED;
-
+    const GenRegister header = ra->genReg(insn.src(0));
+    const GenRegister data = ra->genReg(insn.src(1));
+    const uint32_t bti = insn.getbti();
+    const uint32_t ow_size = insn.extra.elem;
+    bool isA64 = bti == 255;
+    if (isA64)
+       p->OBWRITEA64(header, bti, ow_size);
+    else
+       p->OBWRITE(header, data, bti, ow_size, insn.extra.splitSend);
   }
 
   void GenContext::emitMBReadInstruction(const SelectionInstruction &insn) {
-    const GenRegister dst = ra->genReg(insn.dst(1));
-    const GenRegister coordx = GenRegister::toUniform(ra->genReg(insn.src(0)),GEN_TYPE_D);
-    const GenRegister coordy = GenRegister::toUniform(ra->genReg(insn.src(1)),GEN_TYPE_D);
-    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
-    const GenRegister offsetx = GenRegister::offset(header, 0, 0*4);
-    const GenRegister offsety = GenRegister::offset(header, 0, 1*4);
-    const GenRegister blocksizereg = GenRegister::offset(header, 0, 2*4);
-    size_t vec_size = insn.extra.elem;
-    uint32_t blocksize = 0x1F | (vec_size-1) << 16;
-
-    if (simdWidth == 8)
-    {
-      p->push();
-        // Copy r0 into the header first
-        p->curr.execWidth = 8;
-        p->curr.predicate = GEN_PREDICATE_NONE;
-        p->curr.noMask = 1;
-        p->MOV(header, GenRegister::ud8grf(0,0));
-
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->MOV(offsetx, coordx);
-        p->MOV(offsety, coordy);
-        // Update block width and height
-        p->MOV(blocksizereg, GenRegister::immud(blocksize));
-        // Now read the data
-        p->curr.execWidth = 8;
-        p->MBREAD(dst, header, insn.getbti(), vec_size);
-      p->pop();
-
-    }
-    else if (simdWidth == 16)
-    {
-      const GenRegister tmp = GenRegister::retype(ra->genReg(insn.dst(vec_size + 1)), GEN_TYPE_UD);
-      p->push();
-        // Copy r0 into the header first
-        p->curr.execWidth = 8;
-        p->curr.predicate = GEN_PREDICATE_NONE;
-        p->curr.noMask = 1;
-        p->MOV(header, GenRegister::ud8grf(0,0));
-
-        // First half
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->MOV(offsetx, coordx);
-        p->MOV(offsety, coordy);
-        // Update block width and height
-        p->MOV(blocksizereg, GenRegister::immud(blocksize));
-        // Now read the data
-        p->curr.execWidth = 8;
-        p->MBREAD(tmp, header, insn.getbti(), vec_size);
-        for (uint32_t i = 0; i < vec_size; i++)
-          p->MOV(ra->genReg(insn.dst(i + 1)), GenRegister::offset(tmp, i));
-
-        // Second half
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->ADD(offsetx, offsetx, GenRegister::immud(32));
-
-        // Now read the data
-        p->curr.execWidth = 8;
-        p->MBREAD(tmp, header, insn.getbti(), vec_size);
-
-        // Move the reg to fit vector rule.
-        for (uint32_t i = 0; i < vec_size; i++)
-          p->MOV(GenRegister::offset(ra->genReg(insn.dst(i + 1)), 1),
-                 GenRegister::offset(tmp, i));
-      p->pop();
-    } else NOT_IMPLEMENTED;
+    const GenRegister dst = ra->genReg(insn.dst(0));
+    const GenRegister header = ra->genReg(insn.src(0));
+    const size_t response_size = insn.extra.elem;
+    p->MBREAD(dst, header, insn.getbti(), response_size);
   }
 
   void GenContext::emitMBWriteInstruction(const SelectionInstruction &insn) {
-    const GenRegister coordx = GenRegister::toUniform(ra->genReg(insn.src(0)), GEN_TYPE_D);
-    const GenRegister coordy = GenRegister::toUniform(ra->genReg(insn.src(1)), GEN_TYPE_D);
-    const GenRegister header = GenRegister::retype(ra->genReg(insn.dst(0)), GEN_TYPE_UD);
-    GenRegister offsetx, offsety, blocksizereg;
-    size_t vec_size = insn.extra.elem;
-    uint32_t blocksize = 0x1F | (vec_size-1) << 16;
-
-    offsetx = GenRegister::offset(header, 0, 0*4);
-    offsety = GenRegister::offset(header, 0, 1*4);
-    blocksizereg = GenRegister::offset(header, 0, 2*4);
-
-    if (simdWidth == 8)
-    {
-      p->push();
-        // Copy r0 into the header first
-        p->curr.execWidth = 8;
-        p->curr.predicate = GEN_PREDICATE_NONE;
-        p->curr.noMask = 1;
-        p->MOV(header, GenRegister::ud8grf(0,0));
-
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->MOV(offsetx, coordx);
-        p->MOV(offsety, coordy);
-        // Update block width and height
-        p->MOV(blocksizereg, GenRegister::immud(blocksize));
-        p->curr.execWidth = 8;
-        // Mov what we need into msgs
-        for(uint32_t i = 0; i < vec_size; i++)
-          p->MOV(GenRegister::offset(header, 1 + i), ra->genReg(insn.src(2 + i)));
-        // Now read the data
-        p->MBWRITE(header, insn.getbti(), vec_size);
-      p->pop();
-
-    }
-    else
-    {
-      p->push();
-        // Copy r0 into the header first
-        p->curr.execWidth = 8;
-        p->curr.predicate = GEN_PREDICATE_NONE;
-        p->curr.noMask = 1;
-        p->MOV(header, GenRegister::ud8grf(0,0));
-
-        // First half
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->MOV(offsetx, coordx);
-        p->MOV(offsety, coordy);
-        // Update block width and height
-        p->MOV(blocksizereg, GenRegister::immud(blocksize));
-        // Now read the data
-        p->curr.execWidth = 8;
-        // Mov what we need into msgs
-        for(uint32_t i = 0; i < vec_size; i++)
-          p->MOV(GenRegister::offset(header, 1 + i), ra->genReg(insn.src(2 + i)));
-        p->MBWRITE(header, insn.getbti(), vec_size);
-
-        // Second half
-        // Update the header with the coord
-        p->curr.execWidth = 1;
-        p->ADD(offsetx, offsetx, GenRegister::immud(32));
-
-        p->curr.execWidth = 8;
-        // Mov what we need into msgs
-        for(uint32_t i = 0; i < vec_size; i++)
-          p->MOV(GenRegister::offset(header, 1 + i), GenRegister::Qn(ra->genReg(insn.src(2 + i)), 1));
-        // Now write the data
-        p->MBWRITE(header, insn.getbti(), vec_size);
-
-      p->pop();
-    }
+    const GenRegister header = ra->genReg(insn.dst(0));
+    const GenRegister data = ra->genReg(insn.dst(1));
+    const size_t data_size = insn.extra.elem;
+    p->MBWRITE(header, data, insn.getbti(), data_size, insn.extra.splitSend);
   }
 
   BVAR(OCL_OUTPUT_REG_ALLOC, false);
@@ -3841,9 +3639,11 @@ namespace gbe
     sel->select();
     if (OCL_OPTIMIZE_SEL_IR)
       sel->optimize();
+    sel->addID();
     if (OCL_OUTPUT_SEL_IR)
-      outputSelectionIR(*this, this->sel);
+      outputSelectionIR(*this, this->sel, genKernel->getName());
     schedulePreRegAllocation(*this, *this->sel);
+    sel->addID();
     if (UNLIKELY(ra->allocate(*this->sel) == false))
       return false;
     schedulePostRegAllocation(*this, *this->sel);

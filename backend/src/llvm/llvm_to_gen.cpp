@@ -136,6 +136,9 @@ namespace gbe
     MPM.add(createBasicAliasAnalysisPass());
 #endif
     MPM.add(createIntrinsicLoweringPass());
+    MPM.add(createBarrierNodupPass(false));   // remove noduplicate fnAttr before inlining.
+    MPM.add(createFunctionInliningPass(20000));
+    MPM.add(createBarrierNodupPass(true));    // restore noduplicate fnAttr after inlining.
     MPM.add(createStripAttributesPass());     // Strip unsupported attributes and calling conventions.
     MPM.add(createSamplerFixPass());
     MPM.add(createGlobalOptimizerPass());     // Optimize out global vars
@@ -146,9 +149,6 @@ namespace gbe
     MPM.add(createInstructionCombiningPass());// Clean up after IPCP & DAE
     MPM.add(createCFGSimplificationPass());   // Clean up after IPCP & DAE
     MPM.add(createPruneEHPass());             // Remove dead EH info
-    MPM.add(createBarrierNodupPass(false));   // remove noduplicate fnAttr before inlining.
-    MPM.add(createFunctionInliningPass(20000));
-    MPM.add(createBarrierNodupPass(true));    // restore noduplicate fnAttr after inlining.
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 9
     MPM.add(createPostOrderFunctionAttrsLegacyPass());
 #elif LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 8
@@ -318,11 +318,23 @@ namespace gbe
     if (!cl_mod) return false;
 
     OUTPUT_BITCODE(BEFORE_LINK, (*cl_mod));
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 7
+    legacy::PassManager passes__;
+#else
+    PassManager passes__;
+#endif
+    //run ExpandConstantExprPass before collectDeviceEnqueueInfo
+    //to simplify the analyze of block.
+    passes__.add(createExpandConstantExprPass());    // constant prop may generate ConstantExpr
+    passes__.run(*cl_mod);
+    /* Must call before materialize when link */
+    collectDeviceEnqueueInfo(cl_mod, unit);
 
     std::unique_ptr<Module> M;
 
-    /* Before do any thing, we first filter in all CL functions in bitcode. */ 
-    M.reset(runBitCodeLinker(cl_mod, strictMath));
+    /* Before do any thing, we first filter in all CL functions in bitcode. */
+    /* Also set unit's pointer size in runBitCodeLinker */
+    M.reset(runBitCodeLinker(cl_mod, strictMath, unit));
     if (!module)
       delete cl_mod;
     if (M.get() == 0)

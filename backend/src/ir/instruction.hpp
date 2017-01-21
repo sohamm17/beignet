@@ -62,6 +62,7 @@ namespace ir {
     MEM_CONSTANT,   //!< Immutable global memory
     MEM_PRIVATE,    //!< Per thread private memory
     MEM_MIXED,      //!< mixed address space pointer.
+    MEM_GENERIC,      //!< mixed address space pointer.
     MEM_INVALID
   };
 
@@ -541,17 +542,19 @@ namespace ir {
     SYNC_LOCAL_WRITE_FENCE  = 1<<2,
     SYNC_GLOBAL_READ_FENCE  = 1<<3,
     SYNC_GLOBAL_WRITE_FENCE = 1<<4,
-    SYNC_INVALID            = 1<<5
+    SYNC_IMAGE_FENCE        = 1<<5,
+    SYNC_INVALID            = 1<<6
   };
 
   /*! 5 bits to encode all possible synchronization capablities */
-  static const uint32_t syncFieldNum = 5u;
+  static const uint32_t syncFieldNum = 6u;
 
   /*! When barrier(CLK_LOCAL_MEM_FENCE) is issued */
   static const uint32_t syncLocalBarrier = SYNC_WORKGROUP_EXEC |SYNC_LOCAL_WRITE_FENCE | SYNC_LOCAL_READ_FENCE;
 
   /*! When barrier(CLK_GLOBAL_MEM_FENCE) is issued */
   static const uint32_t syncGlobalBarrier = SYNC_WORKGROUP_EXEC | SYNC_GLOBAL_WRITE_FENCE | SYNC_GLOBAL_READ_FENCE;
+  static const uint32_t syncImageBarrier =  SYNC_WORKGROUP_EXEC | SYNC_GLOBAL_WRITE_FENCE | SYNC_GLOBAL_READ_FENCE | SYNC_IMAGE_FENCE;
 
   /*! Sync instructions are used to order loads and stores for a given memory
    *  space and/or to serialize threads at a given point in the program
@@ -642,6 +645,7 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
     uint8_t getImageIndex() const;
     uint8_t getVectorSize() const;
+    Type getType(void) const;
   };
 
   /*! Media Block Write.  */
@@ -651,6 +655,7 @@ namespace ir {
     static bool isClassOf(const Instruction &insn);
     uint8_t getImageIndex() const;
     uint8_t getVectorSize() const;
+    Type getType(void) const;
   };
 
   /*! Specialize the instruction. Also performs typechecking first based on the
@@ -771,6 +776,8 @@ namespace ir {
   Instruction RNDZ(Type type, Register dst, Register src);
   /*! bswap.type dst src */
   Instruction BSWAP(Type type, Register dst, Register src);
+  /*! bfrev.type dst src */
+  Instruction BFREV(Type type, Register dst, Register src);
   /*! pow.type dst src0 src1 */
   Instruction POW(Type type, Register dst, Register src0, Register src1);
   /*! mul.type dst src0 src1 */
@@ -886,9 +893,9 @@ namespace ir {
   /*! printf */
   Instruction PRINTF(Register dst, Tuple srcTuple, Tuple typeTuple, uint8_t srcNum, uint8_t bti, uint16_t num);
   /*! media block read */
-  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum);
+  Instruction MBREAD(uint8_t imageIndex, Tuple dst, uint8_t vec_size, Tuple coord, uint8_t srcNum, Type type);
   /*! media block write */
-  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size);
+  Instruction MBWRITE(uint8_t imageIndex, Tuple srcTuple, uint8_t srcNum, uint8_t vec_size, Type type);
 } /* namespace ir */
 } /* namespace gbe */
 

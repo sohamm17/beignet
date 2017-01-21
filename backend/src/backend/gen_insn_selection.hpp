@@ -82,6 +82,10 @@ namespace gbe
     bool isBranch(void) const;
     /*! Is it a label instruction (i.e. change the implicit mask) */
     bool isLabel(void) const;
+    /*! Is the src's gen register region is same as all dest regs' region  */
+    bool sameAsDstRegion(uint32_t srcID);
+    /*! Is it a simple navtive instruction (i.e. will be one simple ISA) */
+    bool isNative(void) const;
     /*! Get the destination register */
     GenRegister &dst(uint32_t dstID) { return regs[dstID]; }
     /*! Get the source register */
@@ -104,6 +108,7 @@ namespace gbe
         uint16_t function:8;
         /*! elemSize for byte scatters / gathers, elemNum for untyped msg, operand number for atomic */
         uint16_t elem:8;
+        uint16_t splitSend:1;
       };
       struct {
         /*! Number of sources in the tuple */
@@ -123,6 +128,7 @@ namespace gbe
         uint16_t bti:8;
         uint16_t msglen:5;
         uint16_t is3DWrite:1;
+        uint16_t typedWriteSplitSend:1;
       };
       struct {
         uint16_t rdbti:8;
@@ -154,8 +160,12 @@ namespace gbe
         uint32_t printfBTI:8;
         uint32_t continueFlag:8;
         uint16_t printfSize;
+        uint16_t printfSplitSend:1;
       };
-      uint32_t workgroupOp;
+      struct {
+        uint16_t workgroupOp;
+        uint16_t splitSend:1;
+      }wgop;
     } extra;
     /*! Gen opcode */
     uint8_t opcode;
@@ -209,6 +219,7 @@ namespace gbe
     // Allocates (with a linear allocator) and owns SelectionInstruction
     friend class Selection;
   };
+  void outputSelectionInst(SelectionInstruction &insn);
 
   /*! Instructions like sends require to make registers contiguous in GRF */
   class SelectionVector : public NonCopyable, public intrusive_list_node
@@ -253,7 +264,6 @@ namespace gbe
     void append(SelectionInstruction *insn);
     /*! Append a new selection instruction at the beginning of the block */
     void prepend(SelectionInstruction *insn);
-    bool isLargeBlock;
     ir::LabelIndex endifLabel;
     int endifOffset;
     bool hasBarrier;
@@ -314,6 +324,8 @@ namespace gbe
     void optimize(void);
     uint32_t opt_features;
 
+    /* Add insn ID for sel IR */
+    void addID(void);
     const GenContext &getCtx();
 
     /*! Use custom allocators */

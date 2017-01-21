@@ -66,8 +66,15 @@ namespace gbe
     virtual void emitFloatToI64Instruction(const SelectionInstruction &insn);
     virtual void emitI64MADSATInstruction(const SelectionInstruction &insn);
 
+    virtual void emitUntypedWriteA64Instruction(const SelectionInstruction &insn);
+    virtual void emitUntypedReadA64Instruction(const SelectionInstruction &insn);
+    virtual void emitByteGatherA64Instruction(const SelectionInstruction &insn);
+    virtual void emitByteScatterA64Instruction(const SelectionInstruction &insn);
     virtual void emitWrite64Instruction(const SelectionInstruction &insn);
     virtual void emitRead64Instruction(const SelectionInstruction &insn);
+    virtual void emitWrite64A64Instruction(const SelectionInstruction &insn);
+    virtual void emitRead64A64Instruction(const SelectionInstruction &insn);
+    virtual void emitAtomicA64Instruction(const SelectionInstruction &insn);
     virtual void emitI64MULInstruction(const SelectionInstruction &insn);
     virtual void emitI64DIVREMInstruction(const SelectionInstruction &insn);
 
@@ -118,6 +125,7 @@ namespace gbe
     virtual void newSelection(void);
     virtual void calculateFullU64MUL(GenRegister src0, GenRegister src1, GenRegister dst_h,
                                            GenRegister dst_l, GenRegister s0l_s1h, GenRegister s0h_s1l);
+    virtual void emitStackPointer(void);
   };
 }
 #endif /* __GBE_GEN8_CONTEXT_HPP__ */

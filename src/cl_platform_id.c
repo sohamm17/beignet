@@ -31,7 +31,6 @@
     .JOIN(FIELD,_sz) = sizeof(STRING),
 
 static struct _cl_platform_id intel_platform_data = {
-  INIT_ICD(dispatch)
   DECL_INFO_STRING(profile, "FULL_PROFILE")
   DECL_INFO_STRING(version, LIBCL_VERSION_STRING)
   DECL_INFO_STRING(name, "Intel Gen OCL Driver")
@@ -51,6 +50,7 @@ cl_get_platform_default(void)
     return intel_platform;
 
   intel_platform = &intel_platform_data;
+  CL_OBJECT_INIT_BASE(intel_platform, CL_OBJECT_PLATFORM_MAGIC);
   cl_intel_platform_extension_init(intel_platform);
   return intel_platform;
 }
@@ -69,54 +69,3 @@ cl_get_platform_ids(cl_uint          num_entries,
 
   return CL_SUCCESS;
 }
-
-#define DECL_FIELD(CASE,FIELD)                                  \
-  case JOIN(CL_,CASE):                                          \
-    if (param_value_size < cl_get_platform_default()->JOIN(FIELD,_sz))     \
-      return CL_INVALID_VALUE;                                  \
-    if (param_value_size_ret != NULL)                           \
-      *param_value_size_ret = cl_get_platform_default()->JOIN(FIELD,_sz);  \
-    memcpy(param_value,                                         \
-           cl_get_platform_default()->FIELD,                               \
-           cl_get_platform_default()->JOIN(FIELD,_sz));                    \
-      return CL_SUCCESS;
-
-#define GET_FIELD_SZ(CASE,FIELD)                                \
-  case JOIN(CL_,CASE):                                          \
-    if (param_value_size_ret != NULL)                           \
-      *param_value_size_ret = cl_get_platform_default()->JOIN(FIELD,_sz);  \
-    return CL_SUCCESS;
-
-LOCAL cl_int
-cl_get_platform_info(cl_platform_id    platform,
-                     cl_platform_info  param_name,
-                     size_t            param_value_size,
-                     void *            param_value,
-                     size_t *          param_value_size_ret)
-{
-  if (param_value == NULL) {
-    switch (param_name) {
-      GET_FIELD_SZ (PLATFORM_PROFILE,    profile);
-      GET_FIELD_SZ (PLATFORM_VERSION,    version);
-      GET_FIELD_SZ (PLATFORM_NAME,       name);
-      GET_FIELD_SZ (PLATFORM_VENDOR,     vendor);
-      GET_FIELD_SZ (PLATFORM_EXTENSIONS, extensions);
-      GET_FIELD_SZ (PLATFORM_ICD_SUFFIX_KHR, icd_suffix_khr);
-      default: return CL_INVALID_VALUE;
-    }
-  }
-
-  /* Fetch the platform inform */
-  switch (param_name) {
-    DECL_FIELD (PLATFORM_PROFILE,    profile);
-    DECL_FIELD (PLATFORM_VERSION,    version);
-    DECL_FIELD (PLATFORM_NAME,       name);
-    DECL_FIELD (PLATFORM_VENDOR,     vendor);
-    DECL_FIELD (PLATFORM_EXTENSIONS, extensions);
-    DECL_FIELD (PLATFORM_ICD_SUFFIX_KHR, icd_suffix_khr);
-    default: return CL_INVALID_VALUE;
-  }
-}
-
-#undef DECL_FIELD
-

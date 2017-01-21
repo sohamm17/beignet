@@ -18,11 +18,12 @@ namespace gbe
     uint32_t elements = 0;
     uint32_t elementSize = typeSize(reg.type);
     uint32_t width = GenRegister::width_size(reg);
-    assert(execWidth >= width);
+    // reg may be other insn's source, this insn's width don't force large then execWidth.
+    //assert(execWidth >= width);
     uint32_t height = execWidth / width;
     uint32_t vstride = GenRegister::vstride_size(reg);
     uint32_t hstride = GenRegister::hstride_size(reg);
-    uint32_t base = reg.subnr;
+    uint32_t base = reg.nr * GEN_REG_SIZE + reg.subnr;
     for (uint32_t i = 0; i < height; ++i) {
       uint32_t offsetInByte = base;
       for (uint32_t j = 0; j < width; ++j) {
@@ -132,7 +133,7 @@ namespace gbe
     for (ReplaceInfoMap::iterator pos = replaceInfoMap.begin(); pos != replaceInfoMap.end(); ++pos) {
       ReplaceInfo* info = pos->second;
       if (info->intermedia.reg() == var.reg()) {   //intermedia is overwritten
-        if (info->intermedia.quarter == var.quarter && info->intermedia.subnr == var.subnr) {
+        if (info->intermedia.quarter == var.quarter && info->intermedia.subnr == var.subnr && info->intermedia.nr == var.nr) {
           // We need to check the if intermedia is fully overwritten, they may be in some prediction state.
           if (CanBeReplaced(info, insn, var))
             doReplacement(info);
@@ -161,7 +162,7 @@ namespace gbe
     assert(insn.opcode == SEL_OP_MOV);
     const GenRegister& src = insn.src(0);
     const GenRegister& dst = insn.dst(0);
-    if (src.type != dst.type || src.file != dst.file)
+    if (src.type != dst.type || src.file != dst.file || src.hstride != dst.hstride)
       return;
 
     if (liveout.find(dst.reg()) != liveout.end())
@@ -207,7 +208,8 @@ namespace gbe
     if (info->insn.state.inversePredicate != insn.state.inversePredicate)
       return false;
 
-    if (info->intermedia.type == var.type && info->intermedia.quarter == var.quarter && info->intermedia.subnr == var.subnr) {
+    if (info->intermedia.type == var.type && info->intermedia.quarter == var.quarter &&
+        info->intermedia.subnr == var.subnr && info->intermedia.nr == var.nr) {
       uint32_t elements = CalculateElements(var, insn.state.execWidth);  //considering width, hstrid, vstrid and execWidth
       if (info->elements == elements)
         return true;
@@ -284,5 +286,15 @@ namespace gbe
 
     //do global optimization
 
+  }
+
+  void Selection::addID()
+  {
+    uint32_t insnID = 0;
+    for (auto &block : *blockList)
+      for (auto &insn : block.insnList) {
+        insn.ID  = insnID;
+        insnID += 2;
+      }
   }
 } /* namespace gbe */

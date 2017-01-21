@@ -21,6 +21,7 @@
 #define __CL_KERNEL_H__
 
 #include "cl_internals.h"
+#include "cl_base_object.h"
 #include "cl_driver.h"
 #include "cl_gbe_loader.h"
 #include "CL/cl.h"
@@ -40,15 +41,15 @@ typedef struct cl_argument {
   cl_sampler sampler;   /* For sampler. */
   cl_accelerator_intel accel;
   unsigned char bti;
-  uint32_t local_sz:31; /* For __local size specification */
+  void *ptr;            /* SVM ptr value. */
+  uint32_t local_sz:30; /* For __local size specification */
   uint32_t is_set:1;    /* All args must be set before NDRange */
+  uint32_t is_svm:1;    /* Indicate this argument is SVMPointer */
 } cl_argument;
 
 /* One OCL function */
 struct _cl_kernel {
-  DEFINE_ICD(dispatch)
-  uint64_t magic;             /* To identify it as a kernel */
-  volatile int ref_n;         /* We reference count this object */
+  _cl_base_object base;
   cl_buffer bo;               /* The code itself */
   cl_program program;         /* Owns this structure (and pointers) */
   gbe_kernel opaque;          /* (Opaque) compiler structure for the OCL kernel */
@@ -71,7 +72,18 @@ struct _cl_kernel {
   uint32_t vme:1;             /* True only if it is a built-in kernel for VME */
 
   void* cmrt_kernel;          /* CmKernel* */
+  uint32_t exec_info_n;       /* The kernel's exec info count */
+  void** exec_info;             /* The kernel's exec info */
+  cl_bool useDeviceEnqueue;     /* kernel use device enqueue */
+  void* device_enqueue_ptr;     /* device_enqueue buffer*/
+  uint32_t device_enqueue_info_n; /* count of parent kernel's arguments buffers, as child enqueues' exec info */
+  void** device_enqueue_infos;   /* parent kernel's arguments buffers, as child enqueues' exec info   */
 };
+
+#define CL_OBJECT_KERNEL_MAGIC 0x1234567890abedefLL
+#define CL_OBJECT_IS_KERNEL(obj) ((obj &&                           \
+         ((cl_base_object)obj)->magic == CL_OBJECT_KERNEL_MAGIC &&  \
+         CL_OBJECT_GET_REF(obj) >= 1))
 
 /* Allocate an empty kernel */
 extern cl_kernel cl_kernel_new(cl_program);
@@ -104,6 +116,12 @@ extern int cl_kernel_set_arg(cl_kernel,
                              uint32_t    arg_index,
                              size_t      arg_size,
                              const void *arg_value);
+extern int cl_kernel_set_arg_svm_pointer(cl_kernel,
+                                            uint32_t arg_index,
+                                            const void *arg_value);
+extern cl_int cl_kernel_set_exec_info(cl_kernel k,
+                                      size_t n,
+                                      const void *value);
 
 /* Get the argument information */
 extern int cl_get_kernel_arg_info(cl_kernel k, cl_uint arg_index,

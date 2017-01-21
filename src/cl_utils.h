@@ -19,6 +19,7 @@
 
 #ifndef __CL_UTILS_H__
 #define __CL_UTILS_H__
+#include "CL/cl.h"
 
 /* INLINE is forceinline */
 #define INLINE __attribute__((always_inline)) inline
@@ -124,7 +125,7 @@ do {                                                        \
     err = CL_INVALID_CONTEXT;                               \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(CTX->magic != CL_MAGIC_CONTEXT_HEADER)) {    \
+  if (UNLIKELY(!CL_OBJECT_IS_CONTEXT(CTX))) {              \
     err = CL_INVALID_CONTEXT;                               \
     goto error;                                             \
   }                                                         \
@@ -136,7 +137,7 @@ do {                                                        \
     err = CL_INVALID_COMMAND_QUEUE;                         \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(QUEUE->magic != CL_MAGIC_QUEUE_HEADER)) {    \
+  if (UNLIKELY(!CL_OBJECT_IS_COMMAND_QUEUE(QUEUE))) {      \
     err = CL_INVALID_COMMAND_QUEUE;                         \
     goto error;                                             \
   }                                                         \
@@ -148,7 +149,7 @@ do {                                                        \
     err = CL_INVALID_MEM_OBJECT;                            \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(MEM->magic != CL_MAGIC_MEM_HEADER)) {        \
+  if (UNLIKELY(!CL_OBJECT_IS_MEM(MEM))) {                  \
     err = CL_INVALID_MEM_OBJECT;                            \
     goto error;                                             \
   }                                                         \
@@ -215,7 +216,7 @@ do {                                                        \
       err = CL_INVALID_EVENT;                                 \
       goto error;                                             \
     }                                                         \
-    if (UNLIKELY(EVENT->magic != CL_MAGIC_EVENT_HEADER)) {    \
+    if (UNLIKELY(!CL_OBJECT_IS_EVENT(EVENT))) {              \
       err = CL_INVALID_EVENT;                                 \
       goto error;                                             \
     }                                                         \
@@ -227,7 +228,7 @@ do {                                                        \
     err = CL_INVALID_SAMPLER;                               \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(SAMPLER->magic != CL_MAGIC_SAMPLER_HEADER)) {\
+  if (UNLIKELY(!CL_OBJECT_IS_SAMPLER(SAMPLER))) {          \
     err = CL_INVALID_SAMPLER;                               \
     goto error;                                             \
   }                                                         \
@@ -239,7 +240,7 @@ do {                                                                            
     err = CL_INVALID_ACCELERATOR_INTEL;                                         \
     goto error;                                                                 \
   }                                                                             \
-  if (UNLIKELY(ACCELERATOR_INTEL->magic != CL_MAGIC_ACCELERATOR_INTEL_HEADER)) {\
+  if (UNLIKELY(!CL_OBJECT_IS_ACCELERATOR_INTEL(ACCELERATOR_INTEL))) {          \
     err = CL_INVALID_ACCELERATOR_INTEL;                                         \
     goto error;                                                                 \
   }                                                                             \
@@ -251,7 +252,7 @@ do {                                                        \
     err = CL_INVALID_KERNEL;                                \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(KERNEL->magic != CL_MAGIC_KERNEL_HEADER)) {  \
+  if (UNLIKELY(!CL_OBJECT_IS_KERNEL(KERNEL))) {            \
     err = CL_INVALID_KERNEL;                                \
     goto error;                                             \
   }                                                         \
@@ -263,7 +264,7 @@ do {                                                        \
     err = CL_INVALID_PROGRAM;                               \
     goto error;                                             \
   }                                                         \
-  if (UNLIKELY(PROGRAM->magic != CL_MAGIC_PROGRAM_HEADER)) {\
+  if (UNLIKELY(!CL_OBJECT_IS_PROGRAM(PROGRAM))) {          \
     err = CL_INVALID_PROGRAM;                               \
     goto error;                                             \
   }                                                         \
@@ -351,9 +352,80 @@ static INLINE int atomic_add(atomic_t *v, const int c) {
       : "m"(*v), "r"(i));
   return i;
 }
+static INLINE int atomic_read(atomic_t *v) {
+  return *v;
+}
 
 static INLINE int atomic_inc(atomic_t *v) { return atomic_add(v, 1); }
 static INLINE int atomic_dec(atomic_t *v) { return atomic_add(v, -1); }
 
-#endif /* __CL_UTILS_H__ */
+/* Define one list node. */
+typedef struct list_node {
+  struct list_node *n;
+  struct list_node *p;
+} list_node;
+typedef struct list_head {
+  list_node head_node;
+} list_head;
 
+static inline void list_node_init(list_node *node)
+{
+  node->n = node;
+  node->p = node;
+}
+static inline int list_node_out_of_list(const struct list_node *node)
+{
+  return node->n == node;
+}
+static inline void list_init(list_head *head)
+{
+  head->head_node.n = &head->head_node;
+  head->head_node.p = &head->head_node;
+}
+extern void list_node_insert_before(list_node *node, list_node *the_new);
+extern void list_node_insert_after(list_node *node, list_node *the_new);
+static inline void list_node_del(struct list_node *node)
+{
+  node->n->p = node->p;
+  node->p->n = node->n;
+  /* And all point to self for safe. */
+  node->p = node;
+  node->n = node;
+}
+static inline void list_add(list_head *head, list_node *the_new)
+{
+  list_node_insert_after(&head->head_node, the_new);
+}
+static inline void list_add_tail(list_head *head, list_node *the_new)
+{
+  list_node_insert_before(&head->head_node, the_new);
+}
+static inline int list_empty(const struct list_head *head)
+{
+  return head->head_node.n == &head->head_node;
+}
+/* Move the content from one head to another. */
+extern void list_move(struct list_head *the_old, struct list_head *the_new);
+/* Merge the content of the two lists to one head. */
+extern void list_merge(struct list_head *head, struct list_head *to_merge);
+
+#undef offsetof
+#ifdef __compiler_offsetof
+#define offsetof(TYPE, MEMBER) __compiler_offsetof(TYPE, MEMBER)
+#else
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
+#endif
+#define list_entry(ptr, type, member) ({                      \
+      const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+      (type *)( (char *)__mptr - offsetof(type,member) ); })
+
+#define list_for_each(pos, head) \
+  for (pos = (head)->head_node.n; pos != &((head)->head_node); pos = pos->n)
+
+#define list_for_each_safe(pos, ne, head)                                   \
+  for (pos = (head)->head_node.n, ne = pos->n; pos != &((head)->head_node); \
+       pos = ne, ne = pos->n)
+
+extern cl_int cl_get_info_helper(const void *src, size_t src_size, void *dst,
+                                 size_t dst_size, size_t *ret_size);
+#endif /* __CL_UTILS_H__ */

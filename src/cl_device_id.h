@@ -22,10 +22,10 @@
 
 #define EXTENSTION_LENGTH 512
 
-#include "cl_khr_icd.h"
+#include "cl_base_object.h"
 /* Store complete information about the device */
 struct _cl_device_id {
-  DEFINE_ICD(dispatch)
+  _cl_base_object base;
   cl_device_type device_type;
   cl_uint  device_id;
   cl_uint  vendor_id;
@@ -55,9 +55,14 @@ struct _cl_device_id {
   cl_uint  max_clock_frequency;
   cl_uint  address_bits;
   cl_ulong max_mem_alloc_size;
+  cl_device_svm_capabilities  svm_capabilities;
+  cl_uint preferred_platform_atomic_alignment;
+  cl_uint preferred_global_atomic_alignment;
+  cl_uint preferred_local_atomic_alignment;
   cl_bool  image_support;
   cl_uint  max_read_image_args;
   cl_uint  max_write_image_args;
+  cl_uint  max_read_write_image_args;
   size_t   image2d_max_width;
   size_t   image_max_array_size;
   size_t   image2d_max_height;
@@ -69,6 +74,9 @@ struct _cl_device_id {
   size_t   max_parameter_size;
   cl_uint  mem_base_addr_align;
   cl_uint  min_data_type_align_size;
+  cl_uint  max_pipe_args;
+  cl_uint  pipe_max_active_reservations;
+  cl_uint  pipe_max_packet_siz;
   cl_device_fp_config single_fp_config;
   cl_device_fp_config half_fp_config;
   cl_device_fp_config double_fp_config;
@@ -78,6 +86,8 @@ struct _cl_device_id {
   cl_ulong global_mem_size;
   cl_ulong max_constant_buffer_size;
   cl_uint  max_constant_args;
+  size_t  max_global_variable_size;
+  size_t  global_variable_preferred_total_size;
   cl_device_local_mem_type local_mem_type;
   cl_ulong local_mem_size;
   cl_ulong scratch_mem_size;
@@ -90,6 +100,12 @@ struct _cl_device_id {
   cl_bool  linker_available;
   cl_device_exec_capabilities execution_capabilities;
   cl_command_queue_properties queue_properties;
+  cl_command_queue_properties queue_on_host_properties;
+  cl_command_queue_properties queue_on_device_properties;
+  cl_uint queue_on_device_preferred_size;
+  cl_uint queue_on_device_max_size;
+  cl_uint max_on_device_queues;
+  cl_uint max_on_device_events;
   cl_platform_id platform;
   size_t printf_buffer_size;
   cl_bool interop_user_sync;
@@ -117,14 +133,18 @@ struct _cl_device_id {
   cl_device_partition_property partition_property[3];
   cl_device_affinity_domain    affinity_domain;
   cl_device_partition_property partition_type[3];
-  cl_uint      device_reference_count;
   uint32_t atomic_test_result;
-  uint32_t image_pitch_alignment;
-  uint32_t image_base_address_alignment;
+  cl_uint image_pitch_alignment;
+  cl_uint image_base_address_alignment;
 
   //inited as NULL, created only when cmrt kernel is used
   void* cmrt_device;  //realtype: CmDevice*
 };
+
+#define CL_OBJECT_DEVICE_MAGIC 0x2acaddcca8853c52LL
+#define CL_OBJECT_IS_DEVICE(obj) ((obj &&                           \
+         ((cl_base_object)obj)->magic == CL_OBJECT_DEVICE_MAGIC &&  \
+         CL_OBJECT_GET_REF(obj) >= 1))
 
 /* Get a device from the given platform */
 extern cl_int cl_get_device_ids(cl_platform_id    platform,
@@ -161,6 +181,10 @@ extern cl_int cl_get_kernel_subgroup_info(cl_kernel kernel,
 /* Returns the Gen device ID */
 extern cl_int cl_device_get_version(cl_device_id device, cl_int *ver);
 extern size_t cl_get_kernel_max_wg_sz(cl_kernel);
+
+extern cl_int cl_devices_list_check(cl_uint num_devices, const cl_device_id *devices);
+extern cl_int cl_devices_list_include_check(cl_uint num_devices, const cl_device_id *devices,
+                                        cl_uint num_to_check, const cl_device_id *devices_to_check);
 
 #endif /* __CL_DEVICE_ID_H__ */
 

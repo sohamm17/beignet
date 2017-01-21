@@ -28,7 +28,9 @@
 #include "ir/register.hpp"
 #include "ir/profiling.hpp"
 #include "ir/printf.hpp"
+#include "ir/reloc.hpp"
 #include "sys/map.hpp"
+#include <string.h>
 
 #include "llvm/IR/Instructions.h"
 
@@ -39,15 +41,13 @@ namespace ir {
   class Function;
   class ProfilingInfo;
 
-  /*! Complete unit of compilation. It contains a set of functions and a set of
-   *  constant the functions may refer to.
-   */
   class Unit : public NonCopyable
   {
   public:
     typedef map<std::string, Function*> FunctionSet;
     /*! Moved from printf pass */
     map<llvm::CallInst*, PrintfSet::PrintfFmt*> printfs;
+    vector<std::string> blockFuncs;
     /*! Create an empty unit */
     Unit(PointerSize pointerSize = POINTER_32_BITS);
     /*! Release everything (*including* the function pointers) */
@@ -59,7 +59,7 @@ namespace ir {
     /*! Return NULL if the function already exists */
     Function *newFunction(const std::string &name);
     /*! Create a new constant in the constant set */
-    void newConstant(const char*, const std::string&, uint32_t size, uint32_t alignment);
+    void newConstant(const std::string&, uint32_t size, uint32_t alignment);
     /*! Apply the given functor on all the functions */
     template <typename T>
     INLINE void apply(const T &functor) const {
@@ -68,6 +68,7 @@ namespace ir {
     }
     /*! Return the size of the pointers manipulated */
     INLINE PointerSize getPointerSize(void) const { return pointerSize; }
+    INLINE void setPointerSize(PointerSize size) { pointerSize = size; }
     /*! Return the family of registers that contain pointer */
     INLINE RegisterFamily getPointerFamily(void) const {
       if (this->getPointerSize() == POINTER_32_BITS)
@@ -77,6 +78,8 @@ namespace ir {
     }
     /*! Return the constant set */
     ConstantSet& getConstantSet(void) { return constantSet; }
+    const RelocTable& getRelocTable(void) const  { return relocTable; }
+    RelocTable& getRelocTable(void)   { return relocTable; }
     /*! Return the constant set */
     const ConstantSet& getConstantSet(void) const { return constantSet; }
     /*! Get profiling info in this function */
@@ -87,13 +90,17 @@ namespace ir {
     bool getInProfilingMode(void) const { return inProfilingMode; }
     void setValid(bool value) { valid = value; }
     bool getValid() { return valid; }
+    void setOclVersion(uint32_t version) { oclVersion = version; }
+    uint32_t getOclVersion() const { return oclVersion; }
   private:
     friend class ContextInterface; //!< Can free modify the unit
     FunctionSet functions; //!< All the defined functions
     ConstantSet constantSet; //!< All the constants defined in the unit
+    RelocTable relocTable;
     PointerSize pointerSize; //!< Size shared by all pointers
     ProfilingInfo *profilingInfo; //!< profilingInfo store the information for profiling.
     GBE_CLASS(Unit);
+    uint32_t oclVersion;
     bool valid;
     bool inProfilingMode;
   };

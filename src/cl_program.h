@@ -22,6 +22,7 @@
 
 #include "cl_internals.h"
 #include "cl_gbe_loader.h"
+#include "cl_base_object.h"
 #include "CL/cl.h"
 
 #include <stdint.h>
@@ -49,13 +50,13 @@ typedef enum _BINARY_HEADER_INDEX {
 
 /* This maps an OCL file containing some kernels */
 struct _cl_program {
-  DEFINE_ICD(dispatch)
-  uint64_t magic;         /* To identify it as a program */
-  volatile int ref_n;     /* We reference count this object */
+  _cl_base_object base;
   gbe_program opaque;     /* (Opaque) program as ouput by the compiler */
   cl_kernel *ker;         /* All kernels included by the OCL file */
   cl_program prev, next;  /* We chain the programs together */
   cl_context ctx;         /* Its parent context */
+  cl_buffer  global_data;
+  char * global_data_ptr;
   char *bin;              /* The program copied verbatim */
   size_t bin_sz;          /* Its size in memory */
   char *source;           /* Program sources */
@@ -74,6 +75,11 @@ struct _cl_program {
 
   void* cmrt_program;      /* real type: CmProgram* */
 };
+
+#define CL_OBJECT_PROGRAM_MAGIC 0x34562ab12789cdefLL
+#define CL_OBJECT_IS_PROGRAM(obj) ((obj &&                           \
+         ((cl_base_object)obj)->magic == CL_OBJECT_PROGRAM_MAGIC &&  \
+         CL_OBJECT_GET_REF(obj) >= 1))
 
 /* Create a empty program */
 extern cl_program cl_program_new(cl_context);
@@ -146,5 +152,7 @@ cl_program_get_kernel_names(cl_program p,
                             size_t size,
                             char *names,
                             size_t *size_ret);
+extern size_t
+cl_program_get_global_variable_size(cl_program p);
 #endif /* __CL_PROGRAM_H__ */
 
