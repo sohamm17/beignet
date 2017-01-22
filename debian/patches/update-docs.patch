@@ -139,9 +139,9 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -  such type of extensions, we may have to hack with mesa source code to support this
 -  extension. This feature used to work with a previous mesa git version. But now, it's
 -  simply broken.
-+  This extension is not supported in this version of Beignet.  It
-+  [was recently re-added](https://cgit.freedesktop.org/beignet/commit/?id=a892148ee12cbaa021b680c4d770e53fab511366)
-+  to upstream Beignet, but might not be fully working yet.
++  
++  This extension is disabled by default, as it is only partially implemented.
++  Enabling it requires recompiling with cmake -DENABLE\_GL\_SHARING=ON.
 +
 +* Crash when the same program (e.g. Blender) uses both OpenCL and graphics.
 +  
