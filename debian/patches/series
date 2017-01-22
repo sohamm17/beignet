@@ -10,3 +10,4 @@ cl_accelerator_intel.patch
 llvm39-support.patch
 add-appstream-metadata.patch
 spelling.patch
+opencl2-runtime-detection.patch

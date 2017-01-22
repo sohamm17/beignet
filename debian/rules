@@ -18,11 +18,13 @@ SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platf
 LLVM_VERSION_MESA	:= $(shell dpkg-query -f '$${Depends} \n' -W libgl1-mesa-dri:$(DEB_HOST_ARCH) | sed -r 's/.*libllvm([0-9.]+).*/\1/p;d')
 LLVM_VERSION_DEFAULT	 = 3.9
 LLVM_VERSION		 = $(or $(LLVM_VERSION_MESA),$(LLVM_VERSION_DEFAULT))
+#this looks the wrong way round because --compare-versions uses success=0 and we need on=1
+CAN_ENABLE_OPENCL2	:= $(shell dpkg --compare-versions $(LLVM_VERSION) lt 3.9 || dpkg --compare-versions `dpkg-query -f '$${Version}' -W libdrm-dev:$(DEB_HOST_ARCH)` lt 2.4.66 ; echo $$?)
 
 override_dh_auto_configure:
 	$(RM) $(patsubst %,include/CL/%,$(SUPERFLUOUS))
 	ls -la include/CL
-	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin
+	dh_auto_configure --buildsystem cmake -- -DLLVM_INSTALL_DIR=/usr/lib/llvm-$(LLVM_VERSION)/bin -DENABLE_OPENCL_20=$(CAN_ENABLE_OPENCL2)
 
 #Include the documentation, without timestamps (which break multiarch because debian/patches/update-docs.patch etc are applied at build time - #840678)
 override_dh_auto_build:
