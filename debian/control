@@ -19,6 +19,7 @@ Build-Depends:
  llvm-3.9-dev [amd64 i386],
  ocl-icd-dev,
  ocl-icd-opencl-dev,
+ opencl-headers (>= 2.0~),
  pkg-config,
  python3,
  libdrm-dev,
