@@ -40,7 +40,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +- [[V4l2 Buffer Sharing|howto/v4l2-buffer-sharing-howto]]
 +- [[Video Motion Estimation|howto/video-motion-estimation-howto]]
 +- [[Stand Alone Unit Test|howto/stand-alone-utest-howto]]
-+- [[Android build|android-build-howto]]
++- [[Android build|howto/android-build-howto]]
  
  The wiki URL is as below:
  [http://www.freedesktop.org/wiki/Software/Beignet/](http://www.freedesktop.org/wiki/Software/Beignet/)
