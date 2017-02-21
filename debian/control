@@ -26,7 +26,10 @@ Build-Depends:
  libxext-dev,
  libxfixes-dev,
  libx11-dev,
- ikiwiki
+ ikiwiki,
+ libtinfo-dev,
+ libedit-dev,
+ zlib1g-dev
 Standards-Version: 3.9.8
 Homepage: https://www.freedesktop.org/wiki/Software/Beignet/
 Vcs-Git: https://anonscm.debian.org/git/pkg-opencl/beignet.git

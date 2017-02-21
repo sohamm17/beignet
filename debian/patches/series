@@ -1,7 +1,6 @@
 Debian-compliant-compiler-flags-handling.patch
 support-kfreebsd.patch
 reduce-notfound-output.patch
-shared-llvm.patch
 update-docs.patch
 ship-test-tool.patch
 find-python35.patch
@@ -11,3 +10,4 @@ llvm39-support.patch
 add-appstream-metadata.patch
 spelling.patch
 opencl2-runtime-detection.patch
+static-llvm.patch
