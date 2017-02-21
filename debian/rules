@@ -19,7 +19,7 @@ LLVM_VERSION_MESA	:= $(shell dpkg-query -f '$${Depends} \n' -W libgl1-mesa-dri:$
 LLVM_VERSION_DEFAULT	 = 3.9
 LLVM_VERSION		 = $(or $(LLVM_VERSION_MESA),$(LLVM_VERSION_DEFAULT))
 #this looks the wrong way round because --compare-versions uses success=0 and we need on=1
-CAN_ENABLE_OPENCL2	:= $(shell dpkg --compare-versions $(LLVM_VERSION) lt 3.9 || dpkg --compare-versions `dpkg-query -f '$${Version}' -W libdrm-dev:$(DEB_HOST_ARCH)` lt 2.4.66 ; echo $$?)
+CAN_ENABLE_OPENCL2	:= $(if $(findstring amd64,$(DEB_HOST_ARCH)),$(shell dpkg --compare-versions $(LLVM_VERSION) lt 3.9 || dpkg --compare-versions `dpkg-query -f '$${Version}' -W libdrm-dev:$(DEB_HOST_ARCH)` lt 2.4.66 ; echo $$?),0)
 
 override_dh_auto_configure:
 	$(RM) $(patsubst %,include/CL/%,$(SUPERFLUOUS))
