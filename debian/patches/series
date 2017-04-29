@@ -11,3 +11,4 @@ add-appstream-metadata.patch
 spelling.patch
 opencl2-runtime-detection.patch
 static-llvm.patch
+zerooffset.patch
