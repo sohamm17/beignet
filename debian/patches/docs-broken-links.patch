@@ -13,7 +13,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Prerequisite
  ------------
-@@ -138,6 +138,7 @@ need to refer the "Known Issues" section
+@@ -139,6 +139,7 @@ need to refer the "Known Issues" section
  
  Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
  beignet provides two alternative to run:
@@ -21,7 +21,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  * Run as root without X.
  * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
  
-@@ -297,14 +298,14 @@ Please specify your hardware when report
+@@ -296,15 +297,15 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------
@@ -30,14 +30,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -- [[Kernel Optimization Guide|Beignet/optimization-guide]]
 -- [[Libva Buffer Sharing|Beignet/howto/libva-buffer-sharing-howto]]
 -- [[V4l2 Buffer Sharing|Beignet/howto/v4l2-buffer-sharing-howto]]
--- [[Video Motion Estimation|Beignet/howto/video-motion-estimation-howto]]
--- [[Stand Alone Unit Test|Beignet/howto/stand-alone-utest-howto]]
--- [[Android build|Beignet/android-build-howto]]
 +- [[Cross compile (yocto)|howto/cross-compiler-howto]]
 +- [[Work with old system without c++11|howto/oldgcc-howto]]
 +- [[Kernel Optimization Guide|optimization-guide]]
 +- [[Libva Buffer Sharing|howto/libva-buffer-sharing-howto]]
 +- [[V4l2 Buffer Sharing|howto/v4l2-buffer-sharing-howto]]
+ - [[OpenGL Buffer Sharing|Beignet/howto/gl-buffer-sharing-howto]]
+-- [[Video Motion Estimation|Beignet/howto/video-motion-estimation-howto]]
+-- [[Stand Alone Unit Test|Beignet/howto/stand-alone-utest-howto]]
+-- [[Android build|Beignet/android-build-howto]]
 +- [[Video Motion Estimation|howto/video-motion-estimation-howto]]
 +- [[Stand Alone Unit Test|howto/stand-alone-utest-howto]]
 +- [[Android build|howto/android-build-howto]]

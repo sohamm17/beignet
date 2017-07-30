@@ -6,9 +6,6 @@ ship-test-tool.patch
 find-python35.patch
 docs-broken-links.patch
 cl_accelerator_intel.patch
-llvm39-support.patch
 add-appstream-metadata.patch
-spelling.patch
-opencl2-runtime-detection.patch
 static-llvm.patch
 zerooffset.patch

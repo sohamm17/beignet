@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -749,10 +749,10 @@ kbl_gt4_break:
+@@ -753,10 +753,10 @@ kbl_gt4_break:
      case PCI_CHIP_SANDYBRIDGE_BRIDGE_S:
      case PCI_CHIP_SANDYBRIDGE_S_GT:
        // Intel(R) HD Graphics SandyBridge not supported yet

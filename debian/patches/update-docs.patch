@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -859,7 +859,7 @@ cl_self_test(cl_device_id device, cl_sel
+@@ -863,7 +863,7 @@ cl_self_test(cl_device_id device, cl_sel
                      } else {
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
@@ -45,7 +45,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  The project depends on the following external libraries:
  
  - libdrm libraries (libdrm and libdrm\_intel)
-@@ -83,7 +85,7 @@ you need to configure it as below:
+@@ -84,7 +86,7 @@ you need to configure it as below:
  
  CMake will check the dependencies and will complain if it does not find them.
  
@@ -54,7 +54,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  The cmake will build the backend firstly. Please refer to:
  [[OpenCL Gen Backend|Beignet/Backend]] to get more dependencies.
-@@ -122,25 +124,17 @@ platform. Beignet also produces various
+@@ -123,25 +125,17 @@ platform. Beignet also produces various
  consistency. This small test framework uses a simple c++ registration system to
  register all the unit tests.
  
@@ -62,19 +62,19 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -firstly as below:
 -
 -`> . setenv.sh`
--
--Then in `utests/`:
 +In Debian beignet, the testing tool is in the _beignet-dev_ package, and is run with:
  
--`> ./utest_run`
+-Then in `utests/`:
 +`> /usr/lib/\`dpkg-architecture -qDEB_HOST_MULTIARCH\`/beignet/utest_run`
  
--will run all the unit tests one after the others
+-`> ./utest_run`
 +(this name and path may change in future releases - please do not rely on it).  It will test the first OpenCL GPU device it finds (which does _not_ have to be a Beignet device).  If you want to test a different device, uninstall all other ICDs.  To see more options, pass `-h`.
  
--`> ./utest_run some_unit_test`
+-will run all the unit tests one after the others
 +If you compiled Beignet yourself, you will find this tool in `utests`, and will need to set some environment variables to use it (see `setenv.sh`).
  
+-`> ./utest_run some_unit_test`
+-
 -will only run `some_unit_test` test.
  
  On all supported target platform, the pass rate should be 100%. If it is not, you may
@@ -85,7 +85,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
  beignet provides two alternative to run:
-@@ -150,6 +144,8 @@ beignet provides two alternative to run:
+@@ -151,6 +145,8 @@ beignet provides two alternative to run:
  Supported Targets
  -----------------
  
@@ -94,7 +94,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
   * 3rd Generation Intel Core Processors "Ivybridge".
   * 3rd Generation Intel Atom Processors "BayTrail".
   * 4th Generation Intel Core Processors "Haswell", need kernel patch if your linux kernel older than 4.2, see the "Known Issues" section.
-@@ -158,6 +154,12 @@
+@@ -159,6 +155,12 @@ Supported Targets
   * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
   * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
  
@@ -106,8 +106,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +
  OpenCL 2.0
  ----------
- From release v1.3.0, beignet support OpenCL 2.0. By default, OpenCL 2.0 support is disabled, you can enable it when cmake with option
-@@ -189,7 +191,7 @@ Known Issues
+ From release v1.3.0, beignet supports OpenCL 2.0 on Skylake and later hardware.
+@@ -188,7 +190,7 @@ Known Issues
    forever until a reboot.
  
  * "Beignet: self-test failed" and almost all unit tests fail.
@@ -116,29 +116,27 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
    enable the register whitelist by default but miss some registers needed
    for Beignet.
-@@ -203,10 +205,11 @@ Known Issues
+@@ -202,10 +204,11 @@ Known Issues
    Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
    on Linux 4.1.
    
 -  This is fixed in Linux 4.2; older versions can be fixed with
 -  [this patch](https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support).
 +  This is fixed in Linux >= 4.2, which is the default in sid/stretch, and available from -backports in jessie:
++  
++  `sudo apt-get install -t jessie-backports linux-image-amd64`
    
 -  If you do not need \_\_local, you can override the self-test with
-+  `sudo apt-get install -t jessie-backports linux-image-amd64`
-+  
 +  (or -i686-pae).  If you do not need \_\_local, you can override the self-test with
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -222,10 +225,26 @@ Known Issues
+@@ -221,8 +224,26 @@ Known Issues
    This loses some precision but gains performance.
  
  * cl\_khr\_gl\_sharing.
--  This extension highly depends on mesa support. It seems that mesa would not provide
--  such type of extensions, we may have to hack with mesa source code to support this
--  extension. This feature used to work with a previous mesa git version. But now, it's
--  simply broken.
+-  This extension is partially implemented(the most commonly used part), and we will implement
+-  other parts based on requirement.
 +  
 +  This extension is disabled by default, as it is only partially implemented.
 +  Enabling it requires recompiling with cmake -DENABLE\_GL\_SHARING=ON.
@@ -162,7 +160,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Project repository
  ------------------
-@@ -272,9 +291,9 @@ The official mail list is as below:
+@@ -269,9 +290,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  

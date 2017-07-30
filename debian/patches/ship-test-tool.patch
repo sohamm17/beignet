@@ -19,7 +19,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
  
  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
                      ${CMAKE_CURRENT_SOURCE_DIR}/include)
-@@ -306,7 +305,7 @@ ENDIF(BUILD_EXAMPLES)
+@@ -328,7 +327,7 @@ ENDIF(BUILD_EXAMPLES)
  ADD_SUBDIRECTORY(include)
  ADD_SUBDIRECTORY(backend)
  ADD_SUBDIRECTORY(src)
@@ -50,7 +50,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
        GET_DEVICE_STR_INFO(profile, PROFILE);
 --- a/utests/CMakeLists.txt
 +++ b/utests/CMakeLists.txt
-@@ -342,9 +342,7 @@ else(GEN_PCI_ID)
+@@ -338,9 +338,7 @@ else(GEN_PCI_ID)
    DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
  endif(GEN_PCI_ID)
  
@@ -60,7 +60,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
  
  add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/generated
      COMMAND mkdir ${CMAKE_CURRENT_SOURCE_DIR}/generated -p
-@@ -393,6 +391,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
+@@ -389,6 +387,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
  endif (NOT_BUILD_STAND_ALONE_UTEST)
  
  ADD_DEPENDENCIES (utests utest_generator)

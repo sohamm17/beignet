@@ -9,8 +9,8 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -222,6 +222,7 @@ ELSE(OCLIcd_FOUND)
-   MESSAGE(STATUS "Looking for OCL ICD header file - not found")
  ENDIF(OCLIcd_FOUND)
+ ENDIF(OCLICD_COMPAT)
  
 +set(Python_ADDITIONAL_VERSIONS 3.5)
  Find_Package(PythonInterp)

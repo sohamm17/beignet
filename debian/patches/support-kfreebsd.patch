@@ -22,7 +22,7 @@ Author: Koop Mast, Rebecca Palmer
  
  #ifndef CL_VERSION_1_2
  #define CL_DEVICE_BUILT_IN_KERNELS 0x103F
-@@ -767,11 +772,24 @@ kbl_gt4_break:
+@@ -771,11 +776,24 @@ kbl_gt4_break:
    #define toMB(size) (size)&(UINT64_MAX<<20)
    /* Get the global_mem_size and max_mem_alloc size from
     * driver, system ram and hardware*/
