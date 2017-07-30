@@ -52,6 +52,8 @@
 extern EGLDisplay  eglDisplay;
 extern EGLContext  eglContext;
 extern EGLSurface  eglSurface;
+extern Display *xDisplay;
+extern Window xWindow;
 #endif
 
 union uint32_cast {
@@ -310,8 +312,8 @@ extern clGetKernelSubGroupInfoKHR_cb* utestclGetKernelSubGroupInfoKHR;
 /* Check if cl_intel_motion_estimation enabled. */
 extern int cl_check_motion_estimation(void);
 
-/* Check is cl version 2.0. */
-extern int cl_check_ocl20(void);
+/* Check is cl version 2.0 or Beignet extension. */
+extern int cl_check_ocl20(bool or_beignet = true);
 
 /* Check is FP16 enabled. */
 extern int cl_check_half(void);

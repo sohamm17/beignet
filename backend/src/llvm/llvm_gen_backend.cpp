@@ -308,7 +308,7 @@ namespace gbe
         if(StrTy)
           return getTypeByteSize(unit,StrTy);
       }
-      GBE_ASSERTM(false, "Unspported type name");
+      GBE_ASSERTM(false, "Unsupported type name");
       return 0;
   }
 #undef TYPESIZEVEC
@@ -3272,11 +3272,41 @@ namespace gbe
       case Instruction::Sub:
       case Instruction::FSub: ctx.SUB(type, dst, src0, src1); break;
       case Instruction::Mul:
+      {
+        //LLVM always put constant to src1, but also add the src0 constant check.
+        ConstantInt *c = dyn_cast<ConstantInt>(I.getOperand(0));
+        int index = 0;
+        if (c == NULL) {
+          c = dyn_cast<ConstantInt>(I.getOperand(0));
+          index = 1;
+        }
+        if (c != NULL && isPowerOf<2>(c->getSExtValue())) {
+          c = ConstantInt::get(c->getType(), logi2(c->getZExtValue()));
+          if(index == 0)
+            ctx.SHL(type, dst, src1, this->getRegister(c));
+          else
+            ctx.SHL(type, dst, src0, this->getRegister(c));
+        } else {
+          ctx.MUL(type, dst, src0, src1);
+        }
+        break;
+      }
       case Instruction::FMul: ctx.MUL(type, dst, src0, src1); break;
       case Instruction::URem: ctx.REM(getUnsignedType(ctx, I.getType()), dst, src0, src1); break;
       case Instruction::SRem:
       case Instruction::FRem: ctx.REM(type, dst, src0, src1); break;
-      case Instruction::UDiv: ctx.DIV(getUnsignedType(ctx, I.getType()), dst, src0, src1); break;
+      case Instruction::UDiv:
+      {
+        //Only check divisor for DIV
+        ConstantInt *c = dyn_cast<ConstantInt>(I.getOperand(1));
+        if (c != NULL && isPowerOf<2>(c->getZExtValue())) {
+          c = ConstantInt::get(c->getType(), logi2(c->getZExtValue()));
+          ctx.SHR(getUnsignedType(ctx, I.getType()), dst, src0, this->getRegister(c));
+        } else {
+          ctx.DIV(getUnsignedType(ctx, I.getType()), dst, src0, src1);
+        }
+        break;
+      }
       case Instruction::SDiv:
       case Instruction::FDiv: ctx.DIV(type, dst, src0, src1); break;
       case Instruction::And:  ctx.AND(type, dst, src0, src1); break;
