@@ -131,7 +131,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -221,8 +224,26 @@ Known Issues
+@@ -221,8 +224,19 @@ Known Issues
    This loses some precision but gains performance.
  
  * cl\_khr\_gl\_sharing.
@@ -140,13 +140,6 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  
 +  This extension is disabled by default, as it is only partially implemented.
 +  Enabling it requires recompiling with cmake -DENABLE\_GL\_SHARING=ON.
-+
-+* Crash when the same program (e.g. Blender) uses both OpenCL and graphics.
-+  
-+  This [can happen](https://bugs.debian.org/848368) if Beignet and Mesa use different
-+  LLVM versions.
-+  To avoid this, the Debian packages use matching versions: if you installed this
-+  package from -backports, try also installing libgl1-mesa-dri from -backports.
 +
 +* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
 +  
