@@ -7,7 +7,7 @@ Uploaders:
  Rebecca N. Palmer <rebecca_palmer@zoho.com>,
  Andreas Beckmann <anbe@debian.org>,
 Build-Depends:
- debhelper (>= 9),
+ debhelper (>= 10),
  cmake (>= 2.8.5),
  clang-3.8 [!amd64 !i386],
  libclang-3.8-dev [!amd64 !i386],

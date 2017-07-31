@@ -8,7 +8,7 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_CPPFLAGS_MAINT_APPEND = -DGBE_DEBUG=1
 
 %:
-	dh $@ --buildsystem cmake --parallel
+	dh $@ --buildsystem cmake
 
 # We build with the headers from opencl-headers.
 SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platform.h cl.hpp cl_d3d11.h cl_egl.h cl_gl.h opencl.h
