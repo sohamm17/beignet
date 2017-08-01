@@ -58,6 +58,10 @@ Copyright: 2013 Simon Richter <sjr@debian.org>
            © 2014-2017 Rebecca N. Palmer <rebecca_palmer@zoho.com>
 License: LGPL-2.1+
 
+Files: debian/patches/add-appstream-metadata.patch
+Copyright: 2017 Rebecca N. Palmer <rebecca_palmer@zoho.com>
+License: MIT
+
 License: LGPL-2.1+
  This package is free software; you can redistribute it and/or
  modify it under the terms of the GNU Lesser General Public
