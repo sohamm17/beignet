@@ -35,3 +35,7 @@ endif
 
 override_dh_gencontrol:
 	dh_gencontrol -- -VBuilt-Using:clang="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), \n' -W libclang-$(LLVM_VERSION)-dev)"
+
+#Don't let #863300 happen again
+override_dh_missing:
+	dh_missing --fail-missing
