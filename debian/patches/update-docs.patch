@@ -131,15 +131,10 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -221,8 +224,19 @@ Known Issues
-   This loses some precision but gains performance.
- 
+@@ -223,6 +226,16 @@ Known Issues
  * cl\_khr\_gl\_sharing.
--  This extension is partially implemented(the most commonly used part), and we will implement
--  other parts based on requirement.
-+  
-+  This extension is disabled by default, as it is only partially implemented.
-+  Enabling it requires recompiling with cmake -DENABLE\_GL\_SHARING=ON.
+   This extension is partially implemented(the most commonly used part), and we will implement
+   other parts based on requirement.
 +
 +* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
 +  
@@ -153,7 +148,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Project repository
  ------------------
-@@ -269,9 +290,9 @@ The official mail list is as below:
+@@ -269,9 +289,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  

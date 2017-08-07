@@ -25,3 +25,5 @@ By default, no single OpenCL kernel is allowed to run for more than
 6 seconds, to prevent accidental hangs: if "dmesg | grep hangcheck"
 finds anything, this limit has been hit.  You can turn it off with
 "echo -n 0 > /sys/module/i915/parameters/enable_hangcheck" (as root).
+
+cl_khr_gl_sharing is only partially implemented.
