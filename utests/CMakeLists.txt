@@ -283,6 +283,7 @@ set (utests_sources
   compiler_sub_group_shuffle_down.cpp
   compiler_sub_group_shuffle_up.cpp
   compiler_sub_group_shuffle_xor.cpp
+  compiler_reqd_sub_group_size.cpp
   builtin_global_linear_id.cpp
   builtin_local_linear_id.cpp
   multi_queue_events.cpp
@@ -297,7 +298,9 @@ set (utests_sources
   compiler_generic_pointer.cpp
   runtime_pipe_query.cpp
   compiler_pipe_builtin.cpp
-  compiler_device_enqueue.cpp)
+  compiler_device_enqueue.cpp
+  compiler_sqrt_div.cpp
+  compiler_remove_negative_add.cpp)
 
 if (LLVM_VERSION_NODOT VERSION_GREATER 34)
   SET(utests_sources
