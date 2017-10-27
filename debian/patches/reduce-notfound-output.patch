@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -753,10 +753,10 @@ kbl_gt4_break:
+@@ -797,10 +797,10 @@ glk12eu_break:
      case PCI_CHIP_SANDYBRIDGE_BRIDGE_S:
      case PCI_CHIP_SANDYBRIDGE_S_GT:
        // Intel(R) HD Graphics SandyBridge not supported yet
@@ -23,7 +23,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    if (ret == NULL)
 --- a/src/intel/intel_driver.c
 +++ b/src/intel/intel_driver.c
-@@ -254,7 +254,6 @@ if(!intel_driver_is_active(intel)) {
+@@ -263,7 +263,6 @@ if(!intel_driver_is_active(intel)) {
  }
  
  if(!intel_driver_is_active(intel)) {
@@ -31,7 +31,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    return CL_DEVICE_NOT_FOUND;
  }
  
-@@ -315,7 +314,6 @@ drm_client_t client;
+@@ -324,7 +323,6 @@ drm_client_t client;
  // usually dev_name = "/dev/dri/card%d"
  dev_fd = open(dev_name, O_RDWR);
  if (dev_fd == -1) {

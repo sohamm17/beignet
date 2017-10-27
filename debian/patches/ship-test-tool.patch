@@ -50,7 +50,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
        GET_DEVICE_STR_INFO(profile, PROFILE);
 --- a/utests/CMakeLists.txt
 +++ b/utests/CMakeLists.txt
-@@ -338,9 +338,7 @@ else(GEN_PCI_ID)
+@@ -341,9 +341,7 @@ else(GEN_PCI_ID)
    DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
  endif(GEN_PCI_ID)
  
@@ -60,7 +60,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
  
  add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/generated
      COMMAND mkdir ${CMAKE_CURRENT_SOURCE_DIR}/generated -p
-@@ -389,6 +387,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
+@@ -392,6 +390,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
  endif (NOT_BUILD_STAND_ALONE_UTEST)
  
  ADD_DEPENDENCIES (utests utest_generator)

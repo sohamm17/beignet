@@ -8,4 +8,3 @@ docs-broken-links.patch
 cl_accelerator_intel.patch
 add-appstream-metadata.patch
 static-llvm.patch
-zerooffset.patch

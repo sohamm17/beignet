@@ -21,7 +21,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  * Run as root without X.
  * Enable the drm render nodes by passing drm.rnodes=1 to the kernel boot args, then you can run beignet with non-root and without X.
  
-@@ -296,15 +297,15 @@ Please specify your hardware when report
+@@ -288,15 +289,15 @@ Please specify your hardware when report
  
  Documents for OpenCL application developers
  -------------------------------------------
@@ -38,7 +38,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  - [[OpenGL Buffer Sharing|Beignet/howto/gl-buffer-sharing-howto]]
 -- [[Video Motion Estimation|Beignet/howto/video-motion-estimation-howto]]
 -- [[Stand Alone Unit Test|Beignet/howto/stand-alone-utest-howto]]
--- [[Android build|Beignet/android-build-howto]]
+-- [[Android build|Beignet/howto/android-build-howto]]
 +- [[Video Motion Estimation|howto/video-motion-estimation-howto]]
 +- [[Stand Alone Unit Test|howto/stand-alone-utest-howto]]
 +- [[Android build|howto/android-build-howto]]

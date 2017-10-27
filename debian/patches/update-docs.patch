@@ -8,7 +8,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c
-@@ -863,7 +863,7 @@ cl_self_test(cl_device_id device, cl_sel
+@@ -907,7 +907,7 @@ cl_self_test(cl_device_id device, cl_sel
                      } else {
                        ret = SELF_TEST_SLM_FAIL;
                        printf("Beignet: self-test failed: (3, 7, 5) + (5, 7, 3) returned (%i, %i, %i)\n"
@@ -62,19 +62,19 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -firstly as below:
 -
 -`> . setenv.sh`
+-
+-Then in `utests/`:
 +In Debian beignet, the testing tool is in the _beignet-dev_ package, and is run with:
  
--Then in `utests/`:
+-`> ./utest_run`
 +`> /usr/lib/\`dpkg-architecture -qDEB_HOST_MULTIARCH\`/beignet/utest_run`
  
--`> ./utest_run`
+-will run all the unit tests one after the others
 +(this name and path may change in future releases - please do not rely on it).  It will test the first OpenCL GPU device it finds (which does _not_ have to be a Beignet device).  If you want to test a different device, uninstall all other ICDs.  To see more options, pass `-h`.
  
--will run all the unit tests one after the others
+-`> ./utest_run some_unit_test`
 +If you compiled Beignet yourself, you will find this tool in `utests`, and will need to set some environment variables to use it (see `setenv.sh`).
  
--`> ./utest_run some_unit_test`
--
 -will only run `some_unit_test` test.
  
  On all supported target platform, the pass rate should be 100%. If it is not, you may
@@ -131,11 +131,10 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    
    `export OCL_IGNORE_SELF_TEST=1`
    
-@@ -223,6 +226,16 @@ Known Issues
- * cl\_khr\_gl\_sharing.
+@@ -224,6 +227,16 @@ Known Issues
    This extension is partially implemented(the most commonly used part), and we will implement
    other parts based on requirement.
-+
+ 
 +* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
 +  
 +  This feature is unreliable on older versions of Linux, including jessie's 3.16.
@@ -145,10 +144,11 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 +  
 +  Debian uses the Khronos cl_ext.h, which does not yet include this extension.  It is available
 +  by including first cl_ext.h then cl_intel.h.
- 
++
  Project repository
  ------------------
-@@ -269,9 +289,9 @@ The official mail list is as below:
+ Right now, we host our project on fdo at:
+@@ -269,9 +282,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
