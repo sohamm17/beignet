@@ -1,4 +1,4 @@
-beignet (1.3.2-1) UNRELEASED; urgency=medium
+beignet (1.3.2-1) unstable; urgency=medium
 
   * New upstream release.
   * Drop patch applied upstream, refresh others.
@@ -6,8 +6,10 @@ beignet (1.3.2-1) UNRELEASED; urgency=medium
   * Switch to LLVM 5.0 on release architectures,
     add now-required --link-static to --system-libs.  (Closes: #873403)
   * Fix grammar in documentation.
+  * Bump Standards-Version to 4.1.1 (no changes -
+    we can't yet be reproducible due to #877359).
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 27 Oct 2017 07:31:21 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Fri, 27 Oct 2017 22:15:59 +0100
 
 beignet (1.3.1-1) unstable; urgency=medium
 
