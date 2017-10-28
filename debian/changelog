@@ -10,8 +10,9 @@ beignet (1.3.2-1) unstable; urgency=medium
     we can't yet be reproducible due to #877359).
   * More user-friendly 'type not supported' messages.
   * Fix whitespace lintian warnings.
+  * Set Rules-Requires-Root: no.
 
- -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 28 Oct 2017 08:16:06 +0100
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sat, 28 Oct 2017 21:09:49 +0100
 
 beignet (1.3.1-1) unstable; urgency=medium
 
