@@ -9,3 +9,4 @@ cl_accelerator_intel.patch
 add-appstream-metadata.patch
 static-llvm.patch
 grammar.patch
+clearer-type-errors.patch
