@@ -2,12 +2,10 @@ Source: beignet
 Section: libs
 Priority: optional
 Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
-Uploaders:
- Simon Richter <sjr@debian.org>,
+Uploaders: Simon Richter <sjr@debian.org>,
  Rebecca N. Palmer <rebecca_palmer@zoho.com>,
  Andreas Beckmann <anbe@debian.org>,
-Build-Depends:
- debhelper (>= 10),
+Build-Depends: debhelper (>= 10),
  cmake (>= 2.8.5),
  clang-3.8 [!amd64 !i386],
  libclang-3.8-dev [!amd64 !i386],
@@ -78,8 +76,7 @@ Description: OpenCL for Intel GPUs (development files and documentation)
 Package: beignet
 Section: oldlibs
 Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends:
- beignet-opencl-icd,
+Depends: beignet-opencl-icd,
  ${misc:Depends}
 Description: OpenCL library for Intel GPUs - transitional dummy package
  This is a transitional dummy package (the real package has been renamed
