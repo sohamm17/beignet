@@ -10,3 +10,4 @@ add-appstream-metadata.patch
 static-llvm.patch
 grammar.patch
 clearer-type-errors.patch
+885423.patch

@@ -1,3 +1,9 @@
+beignet (1.3.2-2) UNRELEASED; urgency=medium
+
+  * Remove sometimes-broken optimization.  (Closes: #885423)
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Tue, 13 Mar 2018 07:17:57 +0000
+
 beignet (1.3.2-1) unstable; urgency=medium
 
   * New upstream release.  (Closes: #882484)
