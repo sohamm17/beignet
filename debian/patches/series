@@ -11,3 +11,4 @@ static-llvm.patch
 grammar.patch
 clearer-type-errors.patch
 885423.patch
+disable-wayland-warning.patch
