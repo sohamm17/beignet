@@ -7,6 +7,8 @@ beignet (1.3.2-3) UNRELEASED; urgency=medium
   * Bump Standards-Version to 4.1.5 (no changes needed).
   * Update cl_accelerator_intel.patch.
   * Bump debhelper compat to 11.
+  * Add autopkgtests (skipped in standard setup due to hardware
+    requirements - see README.source).
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 12 Jul 2018 07:29:08 +0100
 

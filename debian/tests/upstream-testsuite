@@ -1,0 +1,33 @@
+#!/usr/bin/python3
+
+import subprocess
+import glob
+import re
+import sys
+import os
+import tempfile
+
+utest_path=glob.glob('/usr/lib/*/beignet/utest_run')[0]
+with tempfile.TemporaryDirectory() as tmpdir1:
+    os.chdir(tmpdir1)#some tests write to the current directory, so make sure we're somewhere with write permission
+    utest_obj=subprocess.run([utest_path],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+utest_out=utest_obj.stdout
+print("---test output---\n",str(utest_out,encoding='latin-1'),"\n---end test output---\n")
+utest_re=re.search(b"^summary.{0,200}run: ([0-9]+).{0,200}pass: ([0-9]+).{0,200}fail: ([0-9]+)",utest_out,flags=re.MULTILINE|re.DOTALL)
+if utest_re is None:
+    print("No test counts found - assuming hardware not found")
+    sys.exit(77)
+run_count=int(utest_re.group(1))
+pass_count=int(utest_re.group(2))
+fail_count=int(utest_re.group(3))
+print("run",run_count,"pass",pass_count,"fail",fail_count,"exit code",utest_obj.returncode)
+#utest_run always tests the first platform/device; if other ICDs are installed this may not be the beignet device
+if not re.search(b"^device_version.* [Bb]eignet ",utest_out,flags=re.MULTILINE):
+    print("Wrong platform/device tested - uninstall any non-beignet ICD and try again")
+    sys.exit(77)
+if fail_count>0 and run_count>0:
+    sys.exit(1)#test(s) run and failed
+elif fail_count==0 and pass_count>100 and utest_obj.returncode==0:
+    sys.exit(0)#tests run and passed
+else:
+    sys.exit(77)#treat anything else (including 0 run/1 failed) as hardware not found

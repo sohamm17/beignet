@@ -1,0 +1,13 @@
+# If no Intel GPU is available, the expected result is SKIP,
+# but test1 does still check that the package properly reports this condition:
+# given its history of not doing so (#745363, #779213)
+# it does make sense to at least test that on the server
+
+Tests: test1
+Depends: beignet-opencl-icd, python3-pyopencl, python3-numpy
+Restrictions: skippable, allow-stderr
+
+Tests: upstream-testsuite
+Depends: @, python3
+Restrictions: skippable
+

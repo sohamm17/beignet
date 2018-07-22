@@ -1,0 +1,28 @@
+*This package does NOT run its tests in a standard build/autopkgtest!*
+
+The tests require access to an Intel integrated GPU (in graphics that
+really does mean 'Intel', not 'x86').  As the package needs to build
+on the official build/test servers without one, lack of it is treated
+as SKIP not FAIL.
+
+Chroots/containers/VMs block access to the GPU by default.  In chroots
+(plain or pbuilder/cowbuilder) it can be made available again by
+bind-mounting /dev/dri.  The tests must then be run as a user with
+access to that, which the pbuilder (build) user does not have but
+users created with 'adduser' in a cowbuilder chroot do.
+
+e.g. my B15autopkgtests pbuilder hook:
+(if you use this on other packages, be aware that it isn't quite
+equivalent to autopkgtest -- (s)chroot, as the build-depends are
+still installed)
+
+#!/bin/sh
+#requires BINDMOUNTS="/dev/dri" in pbuilderrc
+
+apt-get -y install autopkgtest
+adduser test2 --disabled-password --gecos aaa
+autopkgtest /build/*.changes --user test2 -- null
+echo "autopkgtest exit status $? (0 or 2=good, 8=has no tests)"
+
+Alternatively, manually run the scripts in debian/tests without
+any virtualization.
