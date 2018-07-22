@@ -1,21 +1,22 @@
 Description: Move cl_intel_accelerator to cl_intel.h
 
-This extension is not yet in Khronos cl_ext.h (Debian opencl-headers),
-and beignet FTBFS without it.
-
-The enclosing #if should allow this to also be used with newer
-cl_ext.h that does have it, but this has not been tested.
+Beignet's own headers define cl_intel_accelerator etc directly in
+cl_ext.h, but khronos-opencl-headers 2.2~ places these in a separate
+file cl_ext_intel.h, and older versions do not include it at all.
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Forwarded: not-needed
+Forwarded: https://lists.freedesktop.org/archives/beignet/2018-July/009217.html
 
 --- a/include/CL/cl_intel.h
 +++ b/include/CL/cl_intel.h
-@@ -26,6 +26,111 @@
+@@ -26,6 +26,115 @@
  extern "C" {
  #endif
  
 +#if defined(__CL_EXT_H) && !defined(cl_intel_accelerator)
++#ifdef CL_VERSION_2_2
++#include "CL/cl_ext_intel.h"
++#else
 +/*********************************
 +* cl_intel_accelerator extension *
 +*********************************/
@@ -118,6 +119,7 @@ Forwarded: not-needed
 +typedef CL_API_ENTRY cl_int
 +    (CL_API_CALL *clReleaseAcceleratorINTEL_fn)(
 +    cl_accelerator_intel        /* accelerator */ ) CL_EXT_SUFFIX__VERSION_1_2;
++#endif
 +#endif
 +
  #define CL_MEM_PINNABLE (1 << 10)
