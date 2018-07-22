@@ -5,7 +5,7 @@ Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
 Uploaders: Simon Richter <sjr@debian.org>,
  Rebecca N. Palmer <rebecca_palmer@zoho.com>,
  Andreas Beckmann <anbe@debian.org>,
-Build-Depends: debhelper (>= 10),
+Build-Depends: debhelper (>= 11),
  cmake (>= 2.8.5),
  clang-3.8 [!amd64 !i386 !x32],
  libclang-3.8-dev [!amd64 !i386 !x32],
