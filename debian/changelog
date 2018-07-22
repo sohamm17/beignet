@@ -2,6 +2,7 @@ beignet (1.3.2-3) UNRELEASED; urgency=medium
 
   * Fix memory leak on long event chains.  (LP: #1354086)
   * Fix FTBFS with LLVM 6.  Use LLVM 6 on amd64/i386 and 4 on x32.
+  * Allow clCreateCommandQueue to create out-of-order queues.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 12 Jul 2018 07:29:08 +0100
 
