@@ -12,3 +12,4 @@ grammar.patch
 clearer-type-errors.patch
 885423.patch
 disable-wayland-warning.patch
+eventchain-memory-leak.patch

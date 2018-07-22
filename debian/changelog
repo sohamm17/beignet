@@ -1,3 +1,9 @@
+beignet (1.3.2-3) UNRELEASED; urgency=medium
+
+  * Fix memory leak on long event chains.  (LP: #1354086)
+
+ -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 12 Jul 2018 07:29:08 +0100
+
 beignet (1.3.2-2) unstable; urgency=medium
 
   [ Rebecca N. Palmer ]
