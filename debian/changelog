@@ -10,6 +10,7 @@ beignet (1.3.2-3) UNRELEASED; urgency=medium
   * Add autopkgtests (skipped in standard setup due to hardware
     requirements - see README.source).
   * Reduce error spew on (partly) unsupported hardware.
+  * Enable Coffee Lake hardware support.
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Thu, 12 Jul 2018 07:29:08 +0100
 
