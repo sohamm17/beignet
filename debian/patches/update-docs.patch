@@ -85,7 +85,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  
  Normally, beignet needs to run under X server environment as normal user. If there isn't X server,
  beignet provides two alternative to run:
-@@ -151,6 +145,8 @@ beignet provides two alternative to run:
+@@ -151,14 +145,22 @@ beignet provides two alternative to run:
  Supported Targets
  -----------------
  
@@ -94,8 +94,10 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
   * 3rd Generation Intel Core Processors "Ivybridge".
   * 3rd Generation Intel Atom Processors "BayTrail".
   * 4th Generation Intel Core Processors "Haswell", need kernel patch if your linux kernel older than 4.2, see the "Known Issues" section.
-@@ -159,6 +155,12 @@ Supported Targets
-  * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
+  * 5th Generation Intel Core Processors "Broadwell".
+  * 5th Generation Intel Atom Processors "Braswell".
+- * 6th Generation Intel Core Processors "Skylake" and "Kabylake".
++ * 6th Generation Intel Core Processors "Skylake", "Kabylake" and "Coffeelake".
   * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
  
 +As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within a supported family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
@@ -135,15 +137,15 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    This extension is partially implemented(the most commonly used part), and we will implement
    other parts based on requirement.
  
-+* clCreateBuffer with CL_MEM_ALLOC_HOST_PTR doesn't work.
++* When a command is waiting for an event, commands enqueued after it may execute before it, even in an "in order" queue.
 +  
-+  This feature is unreliable on older versions of Linux, including jessie's 3.16.
-+  Upgrading to Linux 3.18+ (e.g. from jessie-backports) should fix this problem.
++  All Beignet command queues allow this out-of-order execution, even if CL\_QUEUE\_OUT\_OF\_ORDER\_EXEC\_MODE\_ENABLE is off.
++  However, they are close enough that typical (but not all) in-order-assuming code is likely to work: code that never explicitly waits for events runs in-order, and blocking copies also wait for previous commands to finish.  If you need a true in-order queue, see [this patch](https://lists.freedesktop.org/archives/beignet/2018-July/009213.html), but be aware it is only lightly tested.
 +
-+* Programs using the cl_intel_accelerator extension fail to compile.
++* Programs using Intel-specific extensions fail to compile.
 +  
-+  Debian uses the Khronos cl_ext.h, which does not yet include this extension.  It is available
-+  by including first cl_ext.h then cl_intel.h.
++  Debian opencl-c-headers is the standard (Khronos) headers, which splits some of these into separate files
++  (e.g. cl\_ext\_intel.h): search /usr/include/CL.  cl\_intel.h is in the beignet-dev package.
 +
  Project repository
  ------------------
