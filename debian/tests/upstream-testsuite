@@ -15,19 +15,20 @@ utest_out=utest_obj.stdout
 print("---test output---\n",str(utest_out,encoding='latin-1'),"\n---end test output---\n")
 utest_re=re.search(b"^summary.{0,200}run: ([0-9]+).{0,200}pass: ([0-9]+).{0,200}fail: ([0-9]+)",utest_out,flags=re.MULTILINE|re.DOTALL)
 if utest_re is None:
-    print("No test counts found - assuming hardware not found")
-    sys.exit(77)
+    print("Output not parsable - exit code",utest_obj.returncode)
+    sys.exit(1)
 run_count=int(utest_re.group(1))
 pass_count=int(utest_re.group(2))
 fail_count=int(utest_re.group(3))
 print("run",run_count,"pass",pass_count,"fail",fail_count,"exit code",utest_obj.returncode)
+if re.search(b"^No devices found",utest_out,flags=re.MULTILINE) and re.search(b"^platform_version.* [Bb]eignet ",utest_out,flags=re.MULTILINE)and run_count==0 and utest_obj.returncode==0:
+    print("Hardware not present or not accessible - this is normal on debci, see README.source if running locally")
+    sys.exit(77)
 #utest_run always tests the first platform/device; if other ICDs are installed this may not be the beignet device
-if not re.search(b"^device_version.* [Bb]eignet ",utest_out,flags=re.MULTILINE):
+if (not re.search(b"^device_version.* [Bb]eignet ",utest_out,flags=re.MULTILINE)) and utest_obj.returncode==0:
     print("Wrong platform/device tested - uninstall any non-beignet ICD and try again")
     sys.exit(77)
-if fail_count>0 and run_count>0:
-    sys.exit(1)#test(s) run and failed
-elif fail_count==0 and pass_count>100 and utest_obj.returncode==0:
+if fail_count==0 and pass_count>100 and utest_obj.returncode==0:
     sys.exit(0)#tests run and passed
 else:
-    sys.exit(77)#treat anything else (including 0 run/1 failed) as hardware not found
+    sys.exit(1)

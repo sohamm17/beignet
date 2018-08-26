@@ -6,6 +6,8 @@ include builtin_kernel_block_motion_estimate_intel when testing beignet.
 Allow testing CPU devices (the "only GPU device is supported right now"
 comment appears to refer to beignet-the-ICD, not this test tool).
 
+Give meaningful errors when there is nothing to test.
+
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/008057.html https://lists.freedesktop.org/archives/beignet/2016-October/008059.html
 
@@ -30,7 +32,7 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
  IF (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
 --- a/utests/utest_helper.cpp
 +++ b/utests/utest_helper.cpp
-@@ -221,7 +221,7 @@ cl_do_kiss_path(const char *file, cl_dev
+@@ -221,7 +221,7 @@ cl_do_kiss_path(const char *file, cl_device_id device)
    sub_path = "";
  
    if (kiss_path == NULL)
@@ -39,9 +41,47 @@ Forwarded: partly https://lists.freedesktop.org/archives/beignet/2016-October/00
    sz += strlen(kiss_path) + strlen(sub_path) + 2; /* +1 for end of string, +1 for '/' */
    if ((ker_path = (char*) malloc(sz)) == NULL)
      clpanic("Allocation failed", -1);
-@@ -457,7 +457,7 @@ cl_ocl_init(void)
+@@ -443,9 +443,19 @@ cl_ocl_init(void)
+   cl_context_properties *props = NULL;
+ 
+   /* Get the platform number */
+-  OCL_CALL (clGetPlatformIDs, 0, NULL, &platform_n);
+-  printf("platform number %u\n", platform_n);
+-  assert(platform_n >= 1);
++  status = clGetPlatformIDs(0, NULL, &platform_n);
++  if (platform_n < 1) {
++    fprintf(stderr, "No platforms found (check that the ICD to be tested is installed)\n");
++    status = CL_DEVICE_NOT_FOUND;
++    goto error;
++  }
++  if (status != CL_SUCCESS) {
++    fprintf(stderr, "error calling clGetPlatformIDs\n");
++    goto error;
++  }
++  if (platform_n > 1) {
++    fprintf(stderr, "%u platforms found - testing the first one (if this is not the one you want to test, uninstall any other ICDs)\n", platform_n);
++  }
+ 
+   /* Get a valid platform */
+   OCL_CALL (clGetPlatformIDs, 1, &platform, &platform_n);
+@@ -456,8 +466,22 @@ cl_ocl_init(void)
+   GET_PLATFORM_STR_INFO(extensions, EXTENSIONS);
  
    /* Get the device (only GPU device is supported right now) */
++  cl_uint device_n;
++  status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, NULL, &device_n);
++  if (device_n < 1) {
++    fprintf(stderr, "No devices found in first platform (uninstall any ICDs that are not compatible with your hardware, check that you have permission to access the hardware)\n");
++    status = CL_DEVICE_NOT_FOUND;
++    goto error;
++  }
++  if (status != CL_SUCCESS) {
++    fprintf(stderr, "error calling clGetDeviceIDs\n");
++    goto error;
++  }
++  if (device_n > 1) {
++    fprintf(stderr, "%u devices found - testing the first one\n", device_n);
++  }
    try {
 -    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
 +    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_ALL, 1, &device, NULL);
