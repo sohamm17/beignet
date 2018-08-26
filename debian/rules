@@ -13,7 +13,7 @@ export DEB_CPPFLAGS_MAINT_APPEND = -DGBE_DEBUG=1
 # We build with the headers from opencl-headers.
 SUPERFLUOUS=cl.h cl_d3d10.h cl_dx9_media_sharing.h cl_ext.h cl_gl_ext.h cl_platform.h cl.hpp cl_d3d11.h cl_egl.h cl_gl.h opencl.h
 
-LLVM_VERSION		:= $(if $(shell [ -d /usr/lib/llvm-6.0/include/clang ] && echo 1),6.0,$(if $(shell [ -d /usr/lib/llvm-4.0/include/clang ] && echo 1),4.0,3.8))
+LLVM_VERSION		:= 6.0
 
 override_dh_auto_configure:
 	$(RM) $(patsubst %,include/CL/%,$(SUPERFLUOUS))

@@ -1,6 +1,8 @@
 beignet (1.3.2-4) UNRELEASED; urgency=medium
 
   * Fix FTBFS with LLVM 7.
+  * Use LLVM 6 everywhere, and document that an explicit version is
+    used to require changes to be tested.  (Closes: #906179)
 
  -- Rebecca N. Palmer <rebecca_palmer@zoho.com>  Sun, 26 Aug 2018 13:23:08 +0100
 
