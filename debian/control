@@ -12,9 +12,9 @@ Build-Depends: debhelper (>= 11),
 #but as this package cannot run its tests in a standard build,
 #specifying an explicit version prevents it from changing
 #(due to llvm-defaults changes) without testing
- clang-6.0,
- libclang-6.0-dev,
- llvm-6.0-dev,
+ clang-7,
+ libclang-7-dev,
+ llvm-7-dev,
  ocl-icd-dev,
  ocl-icd-opencl-dev,
  opencl-headers (>= 2.0~),
