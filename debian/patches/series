@@ -19,3 +19,4 @@ accept-old-create-queue.patch
 reduce-notfound-output2.patch
 coffeelake.patch
 in-order-queue.patch
+reproducibility.patch
