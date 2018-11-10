@@ -1,7 +1,4 @@
-Description: Add preliminary LLVM 7 support
-
-This is preliminary because LLVM 7 has not been released yet:
-it was tested with the snapshot from Debian experimental (svn336894).
+Description: Add LLVM 7 support
 
 1.Change linking order, as clangCodeGen now links to clangFrontend
 2.Pass references not pointers to WriteBitcodeToFile and CloneModule
@@ -11,6 +8,7 @@ some create*Pass have moved to
 (theirs is now LLVM_DEBUG, but we never actually use it)
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Bug-Debian: https://bugs.debian.org/912787
 Forwarded: https://lists.freedesktop.org/archives/beignet/2018-July/009212.html
 
 --- a/CMake/FindLLVM.cmake
@@ -94,3 +92,15 @@ Forwarded: https://lists.freedesktop.org/archives/beignet/2018-July/009212.html
  #include "llvm/MC/MCAsmInfo.h"
  #include "llvm/MC/MCContext.h"
  #include "llvm/MC/MCInstrInfo.h"
+--- a/backend/src/llvm/ExpandLargeIntegers.cpp
++++ b/backend/src/llvm/ExpandLargeIntegers.cpp
+@@ -99,8 +99,8 @@ using namespace llvm;
+ 
+ #ifdef DEBUG
+   #undef DEBUG
+-  #define DEBUG(...)
+ #endif
++#define DEBUG(...)
+ // Break instructions up into no larger than 64-bit chunks.
+ static const unsigned kChunkBits = 64;
+ static const unsigned kChunkBytes = kChunkBits / CHAR_BIT;
