@@ -118,30 +118,10 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
    enable the register whitelist by default but miss some registers needed
    for Beignet.
-@@ -202,10 +204,11 @@ Known Issues
-   Linux <= 4.0, and requires the i915.enable_ppgtt=2 [boot parameter](https://wiki.ubuntu.com/Kernel/KernelBootParameters)
-   on Linux 4.1.
-   
--  This is fixed in Linux 4.2; older versions can be fixed with
--  [this patch](https://01.org/zh/beignet/downloads/linux-kernel-patch-hsw-support).
-+  This is fixed in Linux >= 4.2, which is the default in sid/stretch, and available from -backports in jessie:
-+  
-+  `sudo apt-get install -t jessie-backports linux-image-amd64`
-   
--  If you do not need \_\_local, you can override the self-test with
-+  (or -i686-pae).  If you do not need \_\_local, you can override the self-test with
-   
-   `export OCL_IGNORE_SELF_TEST=1`
-   
-@@ -224,6 +227,16 @@ Known Issues
+@@ -224,6 +226,11 @@ Known Issues
    This extension is partially implemented(the most commonly used part), and we will implement
    other parts based on requirement.
  
-+* When a command is waiting for an event, commands enqueued after it may execute before it, even in an "in order" queue.
-+  
-+  All Beignet command queues allow this out-of-order execution, even if CL\_QUEUE\_OUT\_OF\_ORDER\_EXEC\_MODE\_ENABLE is off.
-+  However, they are close enough that typical (but not all) in-order-assuming code is likely to work: code that never explicitly waits for events runs in-order, and blocking copies also wait for previous commands to finish.  If you need a true in-order queue, see [this patch](https://lists.freedesktop.org/archives/beignet/2018-July/009213.html), but be aware it is only lightly tested.
-+
 +* Programs using Intel-specific extensions fail to compile.
 +  
 +  Debian opencl-c-headers is the standard (Khronos) headers, which splits some of these into separate files
@@ -150,7 +130,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  Project repository
  ------------------
  Right now, we host our project on fdo at:
-@@ -269,9 +282,9 @@ The official mail list is as below:
+@@ -269,9 +276,9 @@ The official mail list is as below:
  [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
  The official bugzilla is at:
  [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
