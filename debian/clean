@@ -12,5 +12,7 @@ src/kernels/cl_internal_built_in_kernel.cl
 src/git_sha1.h
 utests/*.bmp
 utests/*.pyc
-utests/generated/*
-docs_build
+utests/generated/
+utests/__pycache__/
+docs_build/
+docs/.ikiwiki/
