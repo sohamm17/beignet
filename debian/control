@@ -49,13 +49,9 @@ Description: OpenCL library for Intel GPUs
  general-purpose parallel programming of heterogeneous systems that include
  CPUs, GPUs and other processors.
  .
- This package contains the shared library for the Intel implementation,
- which supports the integrated GPUs of Ivy Bridge (ix-3xxx)/Bay Trail and
- later Intel processors.
- .
- Future processors (even in the same family) are likely to require future
- versions of this package; in Debian stable, these will be provided in
- -backports.
+ This package contains the shared library for an Intel implementation,
+ which supports the integrated GPUs of Ivy Bridge to Coffee Lake
+ (ix-3xxx to some ix-8xxx) Intel Core and Atom processors.
 
 Package: beignet-dev
 Section: libdevel
@@ -72,9 +68,9 @@ Description: OpenCL for Intel GPUs (development files and documentation)
  general-purpose parallel programming of heterogeneous systems that include
  CPUs, GPUs and other processors.
  .
- This package contains the documentation specific to the Intel
+ This package contains the documentation specific to this
  implementation, the development files for Intel OpenCL extensions,
- and an OpenCL testing tool.
+ and a (general) OpenCL testing tool.
 
 Package: beignet
 Section: oldlibs

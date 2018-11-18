@@ -89,7 +89,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  Supported Targets
  -----------------
  
-+Beignet aims to support Gen7 and later Intel HD (not PowerVR) integrated GPUs, i.e:
++Beignet aims to support Gen7 to Gen9 Intel HD (not PowerVR) integrated GPUs, i.e:
 +
   * 3rd Generation Intel Core Processors "Ivybridge".
   * 3rd Generation Intel Atom Processors "BayTrail".
@@ -100,7 +100,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 + * 6th Generation Intel Core Processors "Skylake", "Kabylake" and "Coffeelake".
   * 5th Generation Intel Atom Processors "Broxten" or "Apollolake".
  
-+As these GPUs are not necessarily backwards compatible, Beignet will not attempt to use processors it does not recognise.  Hence, processors introduced after this release of Beignet (even within a supported family) may require a newer version of beignet-opencl-icd (and possibly the kernel, linux-image-amd64 or linux-image-i686-pae): for Debian stable, this [may be available](https://packages.debian.org/search?keywords=beignet-opencl-icd&searchon=names&exact=1&suite=all&section=all) in [-backports](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports).
++As Beignet is being replaced by [Intel Compute Runtime (Neo)](https://01.org/compute-runtime) (likely to use the Debian package name intel-opencl-icd), future GPU models will probably _not_ be supported in Beignet.
 +
 +Not all processor models have an integrated GPU (Beignet does _not_ support running OpenCL on the CPU itself - see [pocl-opencl-icd](https://packages.debian.org/search?keywords=pocl-opencl-icd&searchon=names&exact=1&suite=all&section=all) for that).  Systems that also have a discrete GPU may disable the integrated GPU: check _xrandr --listproviders_ or see [here](https://nouveau.freedesktop.org/wiki/Optimus/).
 +

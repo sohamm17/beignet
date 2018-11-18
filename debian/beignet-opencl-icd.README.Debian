@@ -2,10 +2,9 @@ The full documentation is in the beignet-dev package.
 
 Summary of known issues:
 
-New hardware often requires new versions of beignet-opencl-icd, and
-sometimes also new versions of linux-image-amd64 / linux-image-i686-pae;
-for Debian stable, these can be found in -backports
-(https://backports.debian.org/Instructions/).
+Beignet upstream is now mostly inactive, as it is being replaced (for
+Broadwell and later hardware) by Intel Compute Runtime (intel-opencl-icd).
+In particular, future hardware will probably not be supported in Beignet.
 
 Discrete GPUs often disable the integrated GPU, preventing this package
 from working.  It may or may not be possible to re-enable it
