@@ -2,7 +2,8 @@ Description: Update documentation
 
 Reflect #767148 fix, high precision now being default, and releases.
 Clarify what hardware is supported.
-Add Debian specific information.
+Add Debian specific information; recommend the Debian BTS rather than
+mostly-inactive upstream contact points.
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 
@@ -62,19 +63,19 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
 -firstly as below:
 -
 -`> . setenv.sh`
--
--Then in `utests/`:
 +In Debian beignet, the testing tool is in the _beignet-dev_ package, and is run with:
  
--`> ./utest_run`
+-Then in `utests/`:
 +`> /usr/lib/\`dpkg-architecture -qDEB_HOST_MULTIARCH\`/beignet/utest_run`
  
--will run all the unit tests one after the others
+-`> ./utest_run`
 +(this name and path may change in future releases - please do not rely on it).  It will test the first OpenCL GPU device it finds (which does _not_ have to be a Beignet device).  If you want to test a different device, uninstall all other ICDs.  To see more options, pass `-h`.
  
--`> ./utest_run some_unit_test`
+-will run all the unit tests one after the others
 +If you compiled Beignet yourself, you will find this tool in `utests`, and will need to set some environment variables to use it (see `setenv.sh`).
  
+-`> ./utest_run some_unit_test`
+-
 -will only run `some_unit_test` test.
  
  On all supported target platform, the pass rate should be 100%. If it is not, you may
@@ -118,7 +119,7 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
    to [c9224fa](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c9224faa59c3071ecfa2d4b24592f4eb61e57069))
    enable the register whitelist by default but miss some registers needed
    for Beignet.
-@@ -224,6 +226,11 @@ Known Issues
+@@ -224,10 +226,15 @@ Known Issues
    This extension is partially implemented(the most commonly used part), and we will implement
    other parts based on requirement.
  
@@ -130,16 +131,29 @@ Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
  Project repository
  ------------------
  Right now, we host our project on fdo at:
-@@ -269,9 +276,9 @@ The official mail list is as below:
- [http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
- The official bugzilla is at:
- [https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
+-[http://cgit.freedesktop.org/beignet/](http://cgit.freedesktop.org/beignet/).  
++[https://gitlab.freedesktop.org/beignet/beignet](https://gitlab.freedesktop.org/beignet/beignet).
+ And the Intel 01.org:
+ [https://01.org/beignet](https://01.org/beignet)
+ 
+@@ -263,15 +265,11 @@
+ 
+ How to contribute
+ -----------------
+-You are always welcome to contribute to this project, just need to subscribe
+-to the beignet mail list and send patches to it for review.
+-The official mail list is as below:
+-[http://lists.freedesktop.org/mailman/listinfo/beignet](http://lists.freedesktop.org/mailman/listinfo/beignet)  
+-The official bugzilla is at:
+-[https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet](https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet)  
 -You are welcome to submit beignet bug. Please be noted, please specify the exact platform
 -information, such as BYT/IVB/HSW/BDW, and GT1/GT2/GT3. You can easily get this information
 -by running the beignet's unit test.
-+You may also [report bugs to Debian](https://www.debian.org/Bugs/Reporting) package beignet-opencl-icd.
++Please [report bugs to Debian](https://www.debian.org/Bugs/Reporting) package beignet-opencl-icd.
 +
 +Please specify your hardware when reporting a bug: _reportbug beignet-opencl-icd_ will automatically include this information.
++
++The upstream [email list](http://lists.freedesktop.org/mailman/listinfo/beignet) and [bug tracker](https://gitlab.freedesktop.org/beignet/beignet/issues) are still available, but as upstream is mostly inactive, it may be some time before they respond.
  
  Documents for OpenCL application developers
  -------------------------------------------
