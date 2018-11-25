@@ -8,7 +8,7 @@ https://lists.freedesktop.org/archives/beignet/2017-February/008597.html
 that this metadata (including parts automatically extracted from
 src/cl_device_data.h) can be MIT licensed.
 
-Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>, Yang Rong
 Forwarded: accepted https://cgit.freedesktop.org/beignet/commit/?id=033464f4b8045a49dbcc1a84cde5c05986ca11c2
 
 --- a/CMakeLists.txt
