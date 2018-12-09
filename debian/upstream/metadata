@@ -1,6 +1,5 @@
 Name: Beignet
-Bug-Database: https://bugs.freedesktop.org/buglist.cgi?product=Beignet&resolution=---
-Bug-Submit: https://bugs.freedesktop.org/enter_bug.cgi?product=Beignet
+Bug-Database: https://gitlab.freedesktop.org/beignet/beignet/issues
 Contact: https://lists.freedesktop.org/mailman/listinfo/beignet
-Repository: https://anongit.freedesktop.org/git/beignet.git
-Repository-Browse: https://cgit.freedesktop.org/beignet
+Repository: https://gitlab.freedesktop.org/beignet/beignet.git
+Repository-Browse: https://gitlab.freedesktop.org/beignet/beignet
