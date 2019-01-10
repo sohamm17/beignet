@@ -6,6 +6,7 @@ Add Debian specific information; recommend the Debian BTS rather than
 mostly-inactive upstream contact points.
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
+Forwarded: partially, most recently https://lists.freedesktop.org/archives/beignet/2019-January/009225.html
 
 --- a/src/cl_device_id.c
 +++ b/src/cl_device_id.c

@@ -5,12 +5,13 @@ Reverts upstream 81755054c4c19d821e58456a1a7d601806e60e92
 Known triggers are Darktable and the GEGL test suite
 
 Note that this does *not* fix the other Darktable issue
-(https://bugs.freedesktop.org/show_bug.cgi?id=101485): beignet still
+(https://gitlab.freedesktop.org/beignet/beignet/issues/60): beignet still
 needs to be blacklisted in Darktable (which it is by default).
 
 Author: Rebecca N. Palmer <rebecca_palmer@zoho.com>
-Bug: https://bugs.freedesktop.org/show_bug.cgi?id=102137
+Bug: https://gitlab.freedesktop.org/beignet/beignet/issues/7
 Bug-Debian: https://bugs.debian.org/885423
+Forwarded: https://lists.freedesktop.org/archives/beignet/2019-January/009227.html
 
 diff --git b/backend/src/backend/gen_insn_selection_optimize.cpp a/backend/src/backend/gen_insn_selection_optimize.cpp
 index 07547ec4..d2e0fb9b 100644
