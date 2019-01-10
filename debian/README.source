@@ -9,7 +9,7 @@ Chroots/containers/VMs block access to the GPU by default.  In chroots
 (plain or pbuilder/cowbuilder) it can be made available again by
 bind-mounting /dev/dri.  The tests must then be run as a user with
 access to that, which the pbuilder (build) user does not have but
-users created with 'adduser' in a cowbuilder chroot do.
+users created with 'adduser' in a cowbuilder chroot can.
 
 e.g. my B15autopkgtests pbuilder hook:
 (if you use this on other packages, be aware that it isn't quite
@@ -21,6 +21,7 @@ still installed)
 
 apt-get -y install autopkgtest
 adduser test2 --disabled-password --gecos aaa
+adduser test2 video
 autopkgtest /build/*.changes --user test2 -- null
 echo "autopkgtest exit status $? (0 or 2=good, 8=has no tests)"
 
