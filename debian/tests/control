@@ -8,6 +8,6 @@ Depends: beignet-opencl-icd, python3-pyopencl, python3-numpy
 Restrictions: skippable, allow-stderr
 
 Tests: upstream-testsuite
-Depends: @, python3
+Depends: beignet-opencl-icd, beignet-dev, python3
 Restrictions: skippable
 
