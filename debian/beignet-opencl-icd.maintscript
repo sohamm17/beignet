@@ -1,4 +1,0 @@
-rm_conffile /etc/OpenCL/vendors/intel-beignet.icd 1.0.1-3~
-# also remove the conffile owned by beignet upon initial install of beignet-opencl-icd
-# (the transitional beignet package is possibly being removed instead of being upgraded)
-rm_conffile /etc/OpenCL/vendors/intel-beignet.icd 0.0~ beignet
