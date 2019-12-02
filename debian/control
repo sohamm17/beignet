@@ -71,12 +71,3 @@ Description: OpenCL for Intel GPUs (development files and documentation)
  This package contains the documentation specific to this
  implementation, the development files for Intel OpenCL extensions,
  and a (general) OpenCL testing tool.
-
-Package: beignet
-Section: oldlibs
-Architecture: i386 amd64 kfreebsd-i386 kfreebsd-amd64
-Depends: beignet-opencl-icd,
- ${misc:Depends}
-Description: OpenCL library for Intel GPUs - transitional dummy package
- This is a transitional dummy package (the real package has been renamed
- to beignet-opencl-icd).  It can safely be removed.
