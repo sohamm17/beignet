@@ -21,3 +21,5 @@ coffeelake.patch
 in-order-queue.patch
 reproducibility.patch
 accept-ignore--g.patch
+llvm8-support.patch
+llvm9-support.patch

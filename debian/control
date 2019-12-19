@@ -12,9 +12,9 @@ Build-Depends: debhelper-compat (= 12),
 #but as this package cannot run its tests in a standard build,
 #specifying an explicit version prevents it from changing
 #(due to llvm-defaults changes) without testing
- clang-7,
- libclang-7-dev,
- llvm-7-dev,
+ clang-9,
+ libclang-9-dev,
+ llvm-9-dev,
  ocl-icd-dev,
  ocl-icd-opencl-dev,
  opencl-headers (>= 2.0~),
