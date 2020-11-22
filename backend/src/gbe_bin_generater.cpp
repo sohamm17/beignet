@@ -186,6 +186,12 @@ void program_build_instance::serialize_program(void) throw(int)
         src_hw_info[0]='S';
         src_hw_info[1]='K';
         src_hw_info[2]='L';
+    }else if(IS_KABYLAKE(gen_pci_id) || IS_COFFEELAKE(gen_pci_id)){
+        src_hw_info[0]='K';
+        src_hw_info[1]='B';
+        src_hw_info[2]='L';
+        // Header is kept same as KabyLake because that's what people have done in 
+        // the interpreter. - Soham
     }else if(IS_BROXTON(gen_pci_id)){
         src_hw_info[0]='B';
         src_hw_info[1]='X';

@@ -87,18 +87,34 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+if (LLVM_VERSION_NODOT VERSION_GREATER 38)
+execute_process(
+  COMMAND ${LLVM_CONFIG_EXECUTABLE} --libs --link-static
+  OUTPUT_VARIABLE LLVM_MODULE_LIBS
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+else (LLVM_VERSION_NODOT VERSION_GREATER 38)
 execute_process(
   COMMAND ${LLVM_CONFIG_EXECUTABLE} --libs
   OUTPUT_VARIABLE LLVM_MODULE_LIBS
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+endif (LLVM_VERSION_NODOT VERSION_GREATER 38)
 
 if (LLVM_VERSION_NODOT VERSION_GREATER 34)
+if (LLVM_VERSION_NODOT VERSION_GREATER 38)
+execute_process(
+  COMMAND ${LLVM_CONFIG_EXECUTABLE} --system-libs --link-static
+  OUTPUT_VARIABLE LLVM_SYSTEM_LIBS_ORIG
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+else (LLVM_VERSION_NODOT VERSION_GREATER 38)
 execute_process(
   COMMAND ${LLVM_CONFIG_EXECUTABLE} --system-libs
   OUTPUT_VARIABLE LLVM_SYSTEM_LIBS_ORIG
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+endif (LLVM_VERSION_NODOT VERSION_GREATER 38)
 if (LLVM_SYSTEM_LIBS_ORIG)
 string(REGEX REPLACE " *\n" "" LLVM_SYSTEM_LIBS ${LLVM_SYSTEM_LIBS_ORIG})
 endif (LLVM_SYSTEM_LIBS_ORIG)
@@ -113,16 +129,19 @@ macro(add_one_lib name)
 endmacro()
 
 #Assume clang lib path same as llvm lib path
+add_one_lib("clangCodeGen")
 add_one_lib("clangFrontend")
 add_one_lib("clangSerialization")
 add_one_lib("clangDriver")
-add_one_lib("clangCodeGen")
 add_one_lib("clangSema")
 add_one_lib("clangStaticAnalyzerFrontend")
 add_one_lib("clangStaticAnalyzerCheckers")
 add_one_lib("clangStaticAnalyzerCore")
 add_one_lib("clangAnalysis")
 add_one_lib("clangEdit")
+if (LLVM_VERSION_NODOT VERSION_GREATER 80)
+add_one_lib("clangASTMatchers")
+endif (LLVM_VERSION_NODOT VERSION_GREATER 80)
 add_one_lib("clangAST")
 add_one_lib("clangParse")
 add_one_lib("clangSema")

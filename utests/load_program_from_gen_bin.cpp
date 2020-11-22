@@ -32,7 +32,10 @@ static void test_load_program_from_gen_bin(void)
     OCL_ASSERT(program && status == CL_SUCCESS);
 
     /* OCL requires to build the program even if it is created from a binary */
-    OCL_ASSERT(clBuildProgram(program, 1, &device, NULL, NULL, NULL) == CL_SUCCESS);
+    status = clBuildProgram(program, 1, &device, NULL, NULL, NULL);
+    printf ("status is :%d\n", status);
+    perror ("Failed build program\t");
+    OCL_ASSERT(status == CL_SUCCESS);
 
     size_t      binarySize;
     unsigned char *binary = NULL;

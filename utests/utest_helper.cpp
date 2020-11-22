@@ -221,7 +221,7 @@ cl_do_kiss_path(const char *file, cl_device_id device)
   sub_path = "";
 
   if (kiss_path == NULL)
-    clpanic("set OCL_KERNEL_PATH. This is where the kiss kernels are", -1);
+    kiss_path="/usr/share/beignet/test_kernels";
   sz += strlen(kiss_path) + strlen(sub_path) + 2; /* +1 for end of string, +1 for '/' */
   if ((ker_path = (char*) malloc(sz)) == NULL)
     clpanic("Allocation failed", -1);
@@ -431,6 +431,18 @@ error:
     } \
     printf("device_" #LOWER_NAME " \"%s\"\n", LOWER_NAME ##Str.c_str());
 
+// Soham - below macro is to get some numbers to print and above was done for
+// string.
+#define GET_DEVICE_STR_INFO_UINT(LOWER_NAME, NAME) \
+    cl_ulong LOWER_NAME ##Str; \
+    OCL_CALL (clGetDeviceInfo, device, CL_DEVICE_##NAME, 0, 0, &param_value_size); \
+    { \
+      OCL_CALL (clGetDeviceInfo, device, CL_DEVICE_##NAME, \
+                param_value_size, & (LOWER_NAME ##Str), \
+                &param_value_size); \
+    } \
+    printf("device_" #LOWER_NAME " \"%lu\"\n", LOWER_NAME ##Str);
+
 int
 cl_ocl_init(void)
 {
@@ -443,9 +455,19 @@ cl_ocl_init(void)
   cl_context_properties *props = NULL;
 
   /* Get the platform number */
-  OCL_CALL (clGetPlatformIDs, 0, NULL, &platform_n);
-  printf("platform number %u\n", platform_n);
-  assert(platform_n >= 1);
+  status = clGetPlatformIDs(0, NULL, &platform_n);
+  if (platform_n < 1) {
+    fprintf(stderr, "No platforms found (check that the ICD to be tested is installed)\n");
+    status = CL_DEVICE_NOT_FOUND;
+    goto error;
+  }
+  if (status != CL_SUCCESS) {
+    fprintf(stderr, "error calling clGetPlatformIDs\n");
+    goto error;
+  }
+  if (platform_n > 1) {
+    fprintf(stderr, "%u platforms found - testing the first one (if this is not the one you want to test, uninstall any other ICDs)\n", platform_n);
+  }
 
   /* Get a valid platform */
   OCL_CALL (clGetPlatformIDs, 1, &platform, &platform_n);
@@ -456,8 +478,22 @@ cl_ocl_init(void)
   GET_PLATFORM_STR_INFO(extensions, EXTENSIONS);
 
   /* Get the device (only GPU device is supported right now) */
+  cl_uint device_n;
+  status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, NULL, &device_n);
+  if (device_n < 1) {
+    fprintf(stderr, "No devices found in first platform (uninstall any ICDs that are not compatible with your hardware, check that you have permission to access the hardware)\n");
+    status = CL_DEVICE_NOT_FOUND;
+    goto error;
+  }
+  if (status != CL_SUCCESS) {
+    fprintf(stderr, "error calling clGetDeviceIDs\n");
+    goto error;
+  }
+  if (device_n > 1) {
+    fprintf(stderr, "%u devices found - testing the first one\n", device_n);
+  }
   try {
-    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+    OCL_CALL (clGetDeviceIDs, platform, CL_DEVICE_TYPE_ALL, 1, &device, NULL);
     {
       size_t param_value_size;
       GET_DEVICE_STR_INFO(profile, PROFILE);
@@ -466,6 +502,14 @@ cl_ocl_init(void)
       GET_DEVICE_STR_INFO(version, VERSION);
       GET_DEVICE_STR_INFO(extensions, EXTENSIONS);
       GET_DEVICE_STR_INFO(opencl_c_version, OPENCL_C_VERSION);
+      GET_DEVICE_STR_INFO_UINT(max_mem_alloc_size, MAX_MEM_ALLOC_SIZE);
+      GET_DEVICE_STR_INFO_UINT(address_bits, ADDRESS_BITS);
+      GET_DEVICE_STR_INFO_UINT(vendor_id, VENDOR_ID);
+      GET_DEVICE_STR_INFO_UINT(max_compute_units, MAX_COMPUTE_UNITS);
+      GET_DEVICE_STR_INFO_UINT(local_mem_type, LOCAL_MEM_TYPE);
+      GET_DEVICE_STR_INFO_UINT(local_mem_size, LOCAL_MEM_SIZE);
+      GET_DEVICE_STR_INFO_UINT(global_mem_size, GLOBAL_MEM_SIZE);
+      GET_DEVICE_STR_INFO_UINT(available, AVAILABLE);
 #ifdef HAS_GL_EGL_X11
       if (std::strstr(extensionsStr.c_str(), "cl_khr_gl_sharing")) {
         hasGLExt = true;

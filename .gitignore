@@ -3,3 +3,10 @@ CMakeCache.txt
 CMakeFiles/
 Makefile
 cmake_install.cmake
+build
+build2
+*~
+*.swp
+*.swo
+*.bin
+__pycache__

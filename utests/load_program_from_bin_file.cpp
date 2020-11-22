@@ -11,8 +11,8 @@ static void cpu(int global_id, float *src, float *dst) {
 
 static void test_load_program_from_bin_file(void)
 {
-    const size_t n = 16;
-    float cpu_dst[16], cpu_src[16];
+    const size_t n = 8;
+    float cpu_dst[8], cpu_src[8];
     cl_int status;
     cl_int binary_status;
     char *ker_path = NULL;
@@ -39,12 +39,14 @@ static void test_load_program_from_bin_file(void)
     kernel = clCreateKernel(program, "compiler_ceil", &status);
     OCL_ASSERT(status == CL_SUCCESS);
 
+    printf ("Buffer Size: %u\n", n * sizeof(float));
+    printf ("Max Memory Allocation Size is %d\n", CL_DEVICE_MAX_MEM_ALLOC_SIZE);
     OCL_CREATE_BUFFER(buf[0], 0, n * sizeof(float), NULL);
     OCL_CREATE_BUFFER(buf[1], 0, n * sizeof(float), NULL);
     OCL_SET_ARG(0, sizeof(cl_mem), &buf[0]);
     OCL_SET_ARG(1, sizeof(cl_mem), &buf[1]);
-    globals[0] = 16;
-    locals[0] = 16;
+    globals[0] = 8;
+    locals[0] = 8;
 
     // Run random tests
     for (uint32_t pass = 0; pass < 8; ++pass) {

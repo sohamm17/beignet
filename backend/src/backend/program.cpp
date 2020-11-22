@@ -794,7 +794,11 @@ namespace gbe {
       llvm::raw_fd_ostream ostream (dumpSPIRBinaryName.c_str(),
                                     err, llvm::sys::fs::F_None);
       if (!err)
+#if LLVM_VERSION_MAJOR<7
         llvm::WriteBitcodeToFile(*out_module, ostream);
+#else
+        llvm::WriteBitcodeToFile(**out_module, ostream);
+#endif
     }
 #endif
     return true;
@@ -979,6 +983,12 @@ EXTEND_QUOTE:
         if(str.find("-dump-spir-binary=") != std::string::npos) {
           dumpSPIRBinaryName = str.substr(str.find("=") + 1);
           continue; // Don't push this str back; ignore it.
+        }
+
+        if(str == "-g") {
+            // The OpenCL 2.0 standard requires accepting -g,
+            // but does not require that it actually does anything
+            continue;
         }
 
         clOpt.push_back(str);

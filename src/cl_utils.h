@@ -415,9 +415,9 @@ extern void list_merge(struct list_head *head, struct list_head *to_merge);
 #else
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
 #endif
-#define list_entry(ptr, type, member) ({                      \
-      const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-      (type *)( (char *)__mptr - offsetof(type,member) ); })
+#define list_entry(ptr, type, member) (({                      \
+      const __typeof__ ( ((type *)0)->member ) *__mptr = (ptr);    \
+      (type *)( (char *)__mptr - offsetof(type,member) ); }))
 
 #define list_for_each(pos, head) \
   for (pos = (head)->head_node.n; pos != &((head)->head_node); pos = pos->n)

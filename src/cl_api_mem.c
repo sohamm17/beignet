@@ -308,7 +308,7 @@ clEnqueueMapBuffer(cl_command_queue command_queue,
     if (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))
       data->write_map = 1;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -321,6 +321,9 @@ clEnqueueMapBuffer(cl_command_queue command_queue,
       }
 
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_map) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
 
     ptr = data->ptr;
@@ -393,7 +396,7 @@ clEnqueueUnmapMemObject(cl_command_queue command_queue,
     data->mem_obj = memobj;
     data->ptr = mapped_ptr;
 
-    if (e_status == CL_COMPLETE) { // No need to wait
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) { // No need to wait
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
         break;
@@ -495,7 +498,7 @@ clEnqueueReadBuffer(cl_command_queue command_queue,
     data->offset = offset;
     data->size = size;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -507,6 +510,9 @@ clEnqueueReadBuffer(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_read) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -598,7 +604,7 @@ clEnqueueWriteBuffer(cl_command_queue command_queue,
     data->offset = offset;
     data->size = size;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -610,6 +616,9 @@ clEnqueueWriteBuffer(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_write) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -747,7 +756,7 @@ clEnqueueReadBufferRect(cl_command_queue command_queue,
     data->host_row_pitch = host_row_pitch;
     data->host_slice_pitch = host_slice_pitch;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -759,6 +768,9 @@ clEnqueueReadBufferRect(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_read) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -898,7 +910,7 @@ clEnqueueWriteBufferRect(cl_command_queue command_queue,
     data->host_row_pitch = host_row_pitch;
     data->host_slice_pitch = host_slice_pitch;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -910,6 +922,9 @@ clEnqueueWriteBufferRect(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_write) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -1017,7 +1032,7 @@ clEnqueueCopyBuffer(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -1207,7 +1222,7 @@ clEnqueueCopyBufferRect(cl_command_queue command_queue,
     if (e_status < CL_COMPLETE) { // Error happend, cancel.
       err = CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
       break;
-    } else if (e_status == CL_COMPLETE) {
+    } else if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       err = cl_event_exec(e, CL_SUBMITTED, CL_FALSE);
       if (err != CL_SUCCESS) {
         break;
@@ -1308,7 +1323,7 @@ clEnqueueFillBuffer(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -1395,7 +1410,7 @@ clEnqueueMigrateMemObjects(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -1574,7 +1589,7 @@ clEnqueueMapImage(cl_command_queue command_queue,
     if (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))
       data->write_map = 1;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -1587,6 +1602,9 @@ clEnqueueMapImage(cl_command_queue command_queue,
       }
 
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_map) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
 
     ptr = data->ptr;
@@ -1764,7 +1782,7 @@ clEnqueueReadImage(cl_command_queue command_queue,
     data->row_pitch = row_pitch;
     data->slice_pitch = slice_pitch;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -1776,6 +1794,9 @@ clEnqueueReadImage(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_read) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -1916,7 +1937,7 @@ clEnqueueWriteImage(cl_command_queue command_queue,
     data->row_pitch = row_pitch;
     data->slice_pitch = slice_pitch;
 
-    if (e_status == CL_COMPLETE) {
+    if (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) {
       // Sync mode, no need to queue event.
       err = cl_event_exec(e, CL_COMPLETE, CL_FALSE);
       if (err != CL_SUCCESS) {
@@ -1928,6 +1949,9 @@ clEnqueueWriteImage(cl_command_queue command_queue,
         break;
       }
       cl_command_queue_enqueue_event(command_queue, e);
+      if (blocking_write) {
+        cl_event_wait_for_events_list(1, &e);
+      }
     }
   } while (0);
 
@@ -2062,7 +2086,7 @@ clEnqueueCopyImage(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -2173,7 +2197,7 @@ clEnqueueCopyImageToBuffer(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -2285,7 +2309,7 @@ clEnqueueCopyBufferToImage(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }
@@ -2395,7 +2419,7 @@ clEnqueueFillImage(cl_command_queue command_queue,
       break;
     }
 
-    err = cl_event_exec(e, e_status == CL_COMPLETE ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
+    err = cl_event_exec(e, (cl_command_queue_allow_bypass_submit(command_queue) && (e_status == CL_COMPLETE)) ? CL_SUBMITTED : CL_QUEUED, CL_FALSE);
     if (err != CL_SUCCESS) {
       break;
     }

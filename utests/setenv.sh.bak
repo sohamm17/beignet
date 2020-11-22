@@ -1,0 +1,12 @@
+#!/bin/sh
+#
+export OCL_BITCODE_LIB_PATH=/usr/lib/beignet/beignet.bc
+export OCL_HEADER_FILE_DIR=/usr/lib/beignet/include/
+export OCL_BITCODE_LIB_20_PATH=
+export OCL_PCH_PATH=/usr/lib/beignet/beignet.local.pch
+export OCL_PCH_20_PATH=
+export OCL_KERNEL_PATH=/openpilot/beignet-debian/beignet/utests/../kernels
+export OCL_GBE_PATH=/usr/lib/beignet/libgbe.so
+export OCL_INTERP_PATH=/usr/lib/beignet/libgbeinterp.so
+#disable self-test so we can get something more precise than "doesn't work"
+export OCL_IGNORE_SELF_TEST=1

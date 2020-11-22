@@ -41,15 +41,6 @@
 #define __X86__
 #endif
 
-/* We require SSE ... */
-#ifndef __SSE__
-#define __SSE__
-#endif
-
-/* ... and SSE2 */
-#ifndef __SSE2__
-#define __SSE2__
-#endif
 
 #if defined(_INCLUDED_IMM)
 // #define __AVX__

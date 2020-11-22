@@ -229,6 +229,8 @@ ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet.bc
 
 ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet.local.pch
     COMMAND mkdir -p ${OCL_OBJECT_DIR}
+    # the tests are this way round to return success whether or not SOURCE_DATE_EPOCH is set
+    COMMAND test -z $ENV{SOURCE_DATE_EPOCH} || touch -d '@$ENV{SOURCE_DATE_EPOCH}' ${OCL_OBJECT_DIR}/include/*.h
     COMMAND ${CLANG_EXECUTABLE} -cc1 ${CLANG_OCL_FLAGS} -I ${OCL_OBJECT_DIR}/include/ -emit-pch -x cl ${OCL_OBJECT_DIR}/include/ocl.h -o ${OCL_OBJECT_DIR}/beignet.local.pch
     DEPENDS ${OCL_HEADER_FILES}
     COMMENT "Generate the pch file: ${OCL_OBJECT_DIR}/beignet.local.pch"
@@ -236,6 +238,7 @@ ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet.local.pch
 
 ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet.pch
     COMMAND mkdir -p ${OCL_OBJECT_DIR}
+    COMMAND test -z $ENV{SOURCE_DATE_EPOCH} || touch -d '@$ENV{SOURCE_DATE_EPOCH}' ${OCL_OBJECT_DIR}/include/*.h
     COMMAND ${CLANG_EXECUTABLE} -cc1 ${CLANG_OCL_FLAGS} -I ${OCL_OBJECT_DIR}/include/ --relocatable-pch -emit-pch -isysroot ${LIBOCL_BINARY_DIR} -x cl ${OCL_OBJECT_DIR}/include/ocl.h -o ${OCL_OBJECT_DIR}/beignet.pch
     DEPENDS ${OCL_HEADER_FILES}
     COMMENT "Generate the pch file: ${OCL_OBJECT_DIR}/beignet.pch"
@@ -273,6 +276,7 @@ if (ENABLE_OPENCL_20)
 
   ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet_20.local.pch
     COMMAND mkdir -p ${OCL_OBJECT_DIR}
+    COMMAND test -z $ENV{SOURCE_DATE_EPOCH} || touch -d '@$ENV{SOURCE_DATE_EPOCH}' ${OCL_OBJECT_DIR}/include/*.h
     COMMAND ${CLANG_EXECUTABLE} -cc1 ${CLANG_OCL_FLAGS_20} -I ${OCL_OBJECT_DIR}/include/ -emit-pch -x cl ${OCL_OBJECT_DIR}/include/ocl.h -o ${OCL_OBJECT_DIR}/beignet_20.local.pch
     DEPENDS ${OCL_HEADER_FILES}
     COMMENT "Generate the pch file: ${OCL_OBJECT_DIR}/beignet_20.local.pch"
@@ -280,6 +284,7 @@ if (ENABLE_OPENCL_20)
 
   ADD_CUSTOM_COMMAND(OUTPUT ${OCL_OBJECT_DIR}/beignet_20.pch
     COMMAND mkdir -p ${OCL_OBJECT_DIR}
+    COMMAND test -z $ENV{SOURCE_DATE_EPOCH} || touch -d '@$ENV{SOURCE_DATE_EPOCH}' ${OCL_OBJECT_DIR}/include/*.h
     COMMAND ${CLANG_EXECUTABLE} -cc1 ${CLANG_OCL_FLAGS_20} -I ${OCL_OBJECT_DIR}/include/ --relocatable-pch -emit-pch -isysroot ${LIBOCL_BINARY_DIR} -x cl ${OCL_OBJECT_DIR}/include/ocl.h -o ${OCL_OBJECT_DIR}/beignet_20.pch
     DEPENDS ${OCL_HEADER_FILES}
     COMMENT "Generate the pch file: ${OCL_OBJECT_DIR}/beignet_20.pch"
@@ -290,7 +295,13 @@ endif (ENABLE_OPENCL_20)
 if (ENABLE_OPENCL_20)
 add_custom_target(beignet_bitcode ALL DEPENDS ${OCL_OBJECT_DIR}/beignet.bc ${OCL_OBJECT_DIR}/beignet_20.bc ${OCL_OBJECT_DIR}/beignet.pch ${OCL_OBJECT_DIR}/beignet_20.pch ${OCL_OBJECT_DIR}/beignet.local.pch ${OCL_OBJECT_DIR}/beignet_20.local.pch)
 else(ENABLE_OPENCL_20)
-add_custom_target(beignet_bitcode ALL DEPENDS ${OCL_OBJECT_DIR}/beignet.bc ${OCL_OBJECT_DIR}/beignet.pch ${OCL_OBJECT_DIR}/beignet.local.pch)
+        if (LIBOCL_BINARY_DIR)
+		add_custom_target(beignet_bitcode ALL DEPENDS ${OCL_OBJECT_DIR}/beignet.bc ${OCL_OBJECT_DIR}/beignet.pch ${OCL_OBJECT_DIR}/beignet.local.pch)
+        else (LIBOCL_BINARY_DIR)
+		add_custom_target(beignet_bitcode ALL DEPENDS ${OCL_OBJECT_DIR_SOHAM}/beignet.bc ${OCL_OBJECT_DIR_SOHAM}/beignet.pch ${OCL_OBJECT_DIR_SOHAM}/beignet.local.pch)
+		message (STATUS "Got OCL_OBJECT_DIR_SOHAM because LIBOCL_BINARY_DIR does not exist.")
+	endif (LIBOCL_BINARY_DIR)
+        
 endif (ENABLE_OPENCL_20)
 SET (OCL_OBJECT_DIR ${OCL_OBJECT_DIR} PARENT_SCOPE)
 SET (OCL_HEADER_FILES ${OCL_HEADER_FILES} PARENT_SCOPE)

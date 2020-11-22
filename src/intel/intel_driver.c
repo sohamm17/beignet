@@ -235,8 +235,6 @@ if(intel->x11_display) {
     intel_driver_init_shared(intel, intel->dri_ctx);
     Xfree(driver_name);
   }
-  else
-    fprintf(stderr, "X server found. dri2 connection failed! \n");
 }
 #endif
 
@@ -263,7 +261,6 @@ if(!intel_driver_is_active(intel)) {
 }
 
 if(!intel_driver_is_active(intel)) {
-  fprintf(stderr, "Device open failed, aborting...\n");
   return CL_DEVICE_NOT_FOUND;
 }
 
@@ -314,6 +311,26 @@ return ret;
 }
 #endif
 
+static int
+intel_driver_check_device(int dev_fd)
+{
+  // Ensure that this is actually an i915 DRM device.
+  drmVersion *version;
+  int ret;
+  version = drmGetVersion(dev_fd);
+  if (!version) {
+    fprintf(stderr, "drmGetVersion(%d) failed: %s\n", dev_fd, strerror(errno));
+    close(dev_fd);
+    return 0;
+  }
+  ret = !strcmp(version->name, "i915");
+  drmFreeVersion(version);
+  // Don't print an error here if this device is using a different driver,
+  // because we might be iterating over multiple devices looking for a
+  // compatible one.
+  return ret;
+}
+
 LOCAL int
 intel_driver_init_master(intel_driver_t *driver, const char* dev_name)
 {
@@ -324,7 +341,11 @@ drm_client_t client;
 // usually dev_name = "/dev/dri/card%d"
 dev_fd = open(dev_name, O_RDWR);
 if (dev_fd == -1) {
-  fprintf(stderr, "open(\"%s\", O_RDWR) failed: %s\n", dev_name, strerror(errno));
+  return 0;
+}
+
+if (!intel_driver_check_device(dev_fd)) {
+  close(dev_fd);
   return 0;
 }
 
@@ -357,6 +378,11 @@ int dev_fd, ret;
 dev_fd = open(dev_name, O_RDWR);
 if (dev_fd == -1)
   return 0;
+
+if (!intel_driver_check_device(dev_fd)) {
+  close(dev_fd);
+  return 0;
+}
 
 ret = intel_driver_init(driver, dev_fd);
 driver->need_close = 1;

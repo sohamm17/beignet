@@ -26,8 +26,8 @@ if (NOT NOT_BUILD_STAND_ALONE_UTEST)
   # Threads
   Find_Package(Threads)
 
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof")
-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS}")
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_CXX_FLAGS} -std=c++0x -Wno-invalid-offsetof -ffloat-store")
+  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_CXX_FLAGS} -ffloat-store") #compiler_{degrees,radians,function_argument2} use equality comparison of floats
   set (CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -DGBE_DEBUG=1")
   set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DGBE_DEBUG=1")
   set (CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG -DGBE_DEBUG=0")
@@ -39,6 +39,8 @@ if (NOT NOT_BUILD_STAND_ALONE_UTEST)
 endif (NOT NOT_BUILD_STAND_ALONE_UTEST)
 ###################################################################################
 
+cmake_policy(SET CMP0003 NEW)
+
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}
                     ${CMAKE_CURRENT_SOURCE_DIR}/../include
                     ${OPENGL_INCLUDE_DIRS}
@@ -48,11 +50,11 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}
 ##### Math Function Part:
 EXECUTE_PROCESS(COMMAND mkdir generated -p WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 EXECUTE_PROCESS(COMMAND ${PYTHON_EXECUTABLE} utest_math_gen.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE GEN_MATH_STRING)
-string(REGEX REPLACE " " ";" ADDMATHFUNC ${GEN_MATH_STRING})
+string(REGEX REPLACE " " ";" ADDMATHFUNC "${GEN_MATH_STRING}")
 
-string(REGEX REPLACE "generated/([^\ ]*)\\.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../kernels/\\1.cl" KERNEL_MATH_LIST ${GEN_MATH_STRING})
-string(REGEX REPLACE " " ";" KERNEL_MATH_LIST ${KERNEL_MATH_LIST})
-string(REGEX REPLACE "generated/([^\ ]*)\\.cpp" "\\1.cl" KERNEL_GITIGNORE_LIST ${GEN_MATH_STRING})
+string(REGEX REPLACE "generated/([^\ ]*)\\.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../kernels/\\1.cl" KERNEL_MATH_LIST "${GEN_MATH_STRING}")
+string(REGEX REPLACE " " ";" KERNEL_MATH_LIST "${KERNEL_MATH_LIST}")
+string(REGEX REPLACE "generated/([^\ ]*)\\.cpp" "\\1.cl" KERNEL_GITIGNORE_LIST "${GEN_MATH_STRING}")
 set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "generated;${KERNEL_MATH_LIST}")
 
 configure_file (
@@ -326,7 +328,8 @@ if (CMRT_FOUND)
       runtime_cmrt.cpp)
 endif (CMRT_FOUND)
 
-SET (kernel_bin ${CMAKE_CURRENT_SOURCE_DIR}/../kernels/compiler_ceil)
+
+SET (kernel_bin ${KERNEL_DIR_SOHAM}/compiler_ceil)
 
 list (GET GBE_BIN_GENERATER -1 GBE_BIN_FILE)
 if(GEN_PCI_ID)
@@ -341,9 +344,7 @@ else(GEN_PCI_ID)
   DEPENDS ${GBE_BIN_FILE} ${kernel_bin}.cl)
 endif(GEN_PCI_ID)
 
-if (NOT_BUILD_STAND_ALONE_UTEST)
   ADD_CUSTOM_TARGET(kernel_bin.bin DEPENDS ${kernel_bin}.bin)
-endif (NOT_BUILD_STAND_ALONE_UTEST)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/generated
     COMMAND mkdir ${CMAKE_CURRENT_SOURCE_DIR}/generated -p
@@ -392,6 +393,9 @@ if (NOT_BUILD_STAND_ALONE_UTEST)
 endif (NOT_BUILD_STAND_ALONE_UTEST)
 
 ADD_DEPENDENCIES (utests utest_generator)
+set_target_properties(utest_run PROPERTIES INSTALL_RPATH ${BEIGNET_INSTALL_DIR})
+install (TARGETS utests LIBRARY DESTINATION ${BEIGNET_INSTALL_DIR})
+install (TARGETS utest_run RUNTIME DESTINATION ${BEIGNET_INSTALL_DIR})
 
 ADD_EXECUTABLE(flat_address_space runtime_flat_address_space.cpp)
 TARGET_LINK_LIBRARIES(flat_address_space utests)

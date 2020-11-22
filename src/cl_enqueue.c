@@ -494,7 +494,7 @@ error:
 cl_int cl_enqueue_svm_free(enqueue_data *data, cl_int status) {
   int i;
   void **pointers = data->pointers;
-  uint num_svm_ptrs = data->size;
+  unsigned int num_svm_ptrs = data->size;
   cl_int err = CL_SUCCESS;
 
   if (status != CL_COMPLETE)

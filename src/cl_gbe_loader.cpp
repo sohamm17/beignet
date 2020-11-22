@@ -105,8 +105,10 @@ struct GbeLoaderInitializer
     }
 
     interp_program_new_from_binary = *(gbe_program_new_from_binary_cb**)dlsym(dlhInterp, "gbe_program_new_from_binary");
-    if (interp_program_new_from_binary == NULL)
+    if (interp_program_new_from_binary == NULL) {
+      printf("No gbe_program_new_from_binary found.\n");
       return false;
+    }
 
     interp_program_get_global_constant_size = *(gbe_program_get_global_constant_size_cb**)dlsym(dlhInterp, "gbe_program_get_global_constant_size");
     if (interp_program_get_global_constant_size == NULL)

@@ -23,7 +23,6 @@ elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
   set(COMPILER "ICC")
 endif()
-set (NOT_BUILD_STAND_ALONE_UTEST 1)
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
                     ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -31,7 +30,6 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
 
 INCLUDE (FindPkgConfig)
 
-SET(CMAKE_VERBOSE_MAKEFILE "false")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/")
 INCLUDE (GNUInstallDirs OPTIONAL)
 # support old CMake without GNUInstallDirs
@@ -73,9 +71,9 @@ ADD_DEFINITIONS(-DGEN7_SAMPLER_CLAMP_BORDER_WORKAROUND)
 
 # compiler flag setting
 if (COMPILER STREQUAL "GCC")
-  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall -mfpmath=sse -Wcast-align -Wl,-E")
+  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -fPIC -Wall -Wcast-align -Wl,-E")
 elseif (COMPILER STREQUAL "CLANG")
-  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -msse2 -msse3 -mssse3 -msse4.1 -fPIC -Wall")
+  set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS} -funroll-loops -fstrict-aliasing -fPIC -Wall")
 elseif (COMPILER STREQUAL "ICC")
   set (CMAKE_C_CXX_FLAGS "${CMAKE_C_CXX_FLAGS}  -wd2928 -Wall -fPIC -fstrict-aliasing -fp-model fast -msse4.1 -Wl,-E")
 endif ()
@@ -224,6 +222,7 @@ ELSE(OCLIcd_FOUND)
 ENDIF(OCLIcd_FOUND)
 ENDIF(OCLICD_COMPAT)
 
+set(Python_ADDITIONAL_VERSIONS 3.5)
 Find_Package(PythonInterp)
 
 OPTION(EXPERIMENTAL_DOUBLE "Enable experimental double support" OFF)
@@ -329,7 +328,7 @@ ENDIF(BUILD_EXAMPLES)
 ADD_SUBDIRECTORY(include)
 ADD_SUBDIRECTORY(backend)
 ADD_SUBDIRECTORY(src)
-ADD_SUBDIRECTORY(utests EXCLUDE_FROM_ALL)
+ADD_SUBDIRECTORY(utests)
 
 # compile benchmark only if standalone compiler is not provided
 IF (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
@@ -339,6 +338,10 @@ ENDIF (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
 IF(BUILD_EXAMPLES)
 ADD_SUBDIRECTORY(examples)
 ENDIF(BUILD_EXAMPLES)
+
+add_custom_target(metainfo ALL
+                  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/update_metainfo_xml.py "${LIBCL_DRIVER_VERSION_MAJOR}.${LIBCL_DRIVER_VERSION_MINOR}.${LIBCL_DRIVER_VERSION_PATCH}" ${CMAKE_CURRENT_BINARY_DIR})
+install (FILES ${CMAKE_CURRENT_BINARY_DIR}/com.intel.beignet.metainfo.xml DESTINATION /usr/share/metainfo)
 
 SET(CPACK_SET_DESTDIR ON)
 SET(CPACK_PACKAGE_VERSION_MAJOR "${LIBCL_DRIVER_VERSION_MAJOR}")

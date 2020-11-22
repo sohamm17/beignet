@@ -169,6 +169,13 @@ endif (NOT (USE_STANDALONE_GBE_COMPILER STREQUAL "true"))
 
 add_library(gbeinterp SHARED gbe_bin_interpreter.cpp)
 
+# we are doing this because in target host there is only one LLVM.so - Soham
+if (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
+	target_link_libraries(gbeinterp ${LLVM_MODULE_LIBS} ${LLVM_SYSTEM_LIBS} LLVM pthread)
+else (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
+	target_link_libraries(gbeinterp ${LLVM_MODULE_LIBS} ${LLVM_SYSTEM_LIBS})
+endif (USE_STANDALONE_GBE_COMPILER STREQUAL "true")
+
 if (LLVM_VERSION_NODOT VERSION_EQUAL 34)
   find_library(TERMINFO NAMES tinfo ncurses)
   if (${TERMINFO} STREQUAL TERMINFO-NOTFOUND)

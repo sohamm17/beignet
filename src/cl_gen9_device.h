@@ -24,8 +24,8 @@
 .local_mem_type = CL_LOCAL,
 .local_mem_size = 64 << 10,
 .scratch_mem_size = 2 << 20,
-.max_mem_alloc_size = 4 * 1024 * 1024 * 1024ul,
-.global_mem_size = 4 * 1024 * 1024 * 1024ul,
+.max_mem_alloc_size = (cl_ulong) ((uint64_t) 4 * ((uint64_t) 1024) * ((uint64_t) 1024) * ((uint64_t) 1024)),
+.global_mem_size = (cl_ulong) ((uint64_t) 4 * ((uint64_t) 1024) * ((uint64_t) 1024) * ((uint64_t) 1024)),
 
 #define GEN9_DEVICE 1
 #include "cl_gt_device.h"
